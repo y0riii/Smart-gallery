@@ -41,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -78,6 +79,7 @@ fun GalleryApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val service = remember { GalleryService(context) }
+    val gridState = rememberLazyGridState()
 
     // --- State Variables ---
     var prompt by remember { mutableStateOf("") }
@@ -112,36 +114,6 @@ fun GalleryApp() {
 
     // --- UI Layout ---
     Column(modifier = Modifier.fillMaxSize()) {
-        // Search Bar
-//        Row(
-//            modifier = Modifier
-//                .fillMaxWidth()
-//                .padding(16.dp),
-//            verticalAlignment = Alignment.CenterVertically
-//        ) {
-//            OutlinedTextField(
-//                value = prompt,
-//                onValueChange = { prompt = it },
-//                label = { Text("Search prompt") },
-//                modifier = Modifier.weight(1f),
-//                singleLine = true
-//            )
-//            Spacer(modifier = Modifier.width(8.dp))
-//            Button(
-//                onClick = {
-//                    scope.launch {
-//                        isLoading = true
-//                        images = service.search(prompt)
-//                        isLoading = false
-//                    }
-//                },
-//                enabled = !isLoading
-//            ) {
-//                Text("Go")
-//            }
-//        }
-
-
         // --------------------
         // SEARCH BAR
         // --------------------
@@ -172,6 +144,7 @@ fun GalleryApp() {
                         } else {
                             service.searchDocuments(prompt)  // DOCUMENT TEXT SEARCH USING OCR
                         }
+                        gridState.animateScrollToItem(0)
 
                         statusText = if (useClip)
                             "Showing CLIP image search results"
@@ -227,6 +200,7 @@ fun GalleryApp() {
 
         // Image Grid
         LazyVerticalGrid(
+            state = gridState,
             columns = GridCells.Adaptive(minSize = 128.dp),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(4.dp)

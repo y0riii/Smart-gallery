@@ -5,17 +5,23 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Matrix
+import androidx.core.graphics.scale
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.max
+import kotlin.math.min
 
-class ClipImageEncoder(context: Context) {
+class ClipImageEncoder(private val context: Context) {
 
-    private val IMAGE_SIZE = 224
-    private val NORM_MEAN_RGB = floatArrayOf(0.48145466f, 0.4578275f, 0.40821073f)
-    private val NORM_STD_RGB = floatArrayOf(0.26862954f, 0.26130258f, 0.27577711f)
+//    private val IMAGE_SIZE = 224
+//    private val NORM_MEAN_RGB = doubleArrayOf(0.48145466, 0.4578275, 0.40821073)
+//    private val NORM_STD_RGB = doubleArrayOf(0.26862954, 0.26130258, 0.27577711)
+
+    private val IMAGE_SIZE = 256
+    private val NORM_MEAN_RGB = doubleArrayOf(0.0, 0.0, 0.0)
+    private val NORM_STD_RGB = doubleArrayOf(1.0, 1.0, 1.0)
 
     private val env = OrtEnvironment.getEnvironment()
     private val session: OrtSession
@@ -33,59 +39,63 @@ class ClipImageEncoder(context: Context) {
     }
 
     private fun preprocessImage(bitmap: Bitmap): OnnxTensor {
-        // 1. Resize smallest edge to 224
-        val w = bitmap.width
-        val h = bitmap.height
-        val scale = if (w < h) IMAGE_SIZE.toFloat() / w else IMAGE_SIZE.toFloat() / h
-        val matrix = Matrix().apply { postScale(scale, scale) }
-        val resizedBitmap = Bitmap.createBitmap(bitmap, 0, 0, w, h, matrix, true)
 
-        // 2. Center crop 224x224
-        val x = (resizedBitmap.width - IMAGE_SIZE) / 2
-        val y = (resizedBitmap.height - IMAGE_SIZE) / 2
-        val croppedBitmap = Bitmap.createBitmap(resizedBitmap, x, y, IMAGE_SIZE, IMAGE_SIZE)
+        val safeBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
+
+        // 1. Resize smallest edge to SIZE
+        val w = safeBitmap.width
+        val h = safeBitmap.height
+        val scale = IMAGE_SIZE.toFloat() / min(w, h)
+        val newW = max(IMAGE_SIZE, (w * scale).toInt())
+        val newH = max(IMAGE_SIZE, (h * scale).toInt())
+        val resized = safeBitmap.scale(newW, newH)
+
+        // 2. Center crop
+        val x = (resized.width - IMAGE_SIZE) / 2
+        val y = (resized.height - IMAGE_SIZE) / 2
+        val cropped = Bitmap.createBitmap(resized, x, y, IMAGE_SIZE, IMAGE_SIZE)
 
         // 3. Convert to FloatBuffer and normalize (NCHW format)
-        val numPixels = 3 * IMAGE_SIZE * IMAGE_SIZE
+        val hw = IMAGE_SIZE * IMAGE_SIZE
 
-// Allocate a DIRECT ByteBuffer (4 bytes per float)
-        val byteBuffer = ByteBuffer.allocateDirect(numPixels * 4)
+        // Allocate a DIRECT ByteBuffer (4 bytes per float)
+        val byteBuffer = ByteBuffer.allocateDirect(hw * 3 * 4)
         byteBuffer.order(ByteOrder.nativeOrder())
 
-// Create a FloatBuffer view on top of the direct buffer
+        // Create a FloatBuffer view on top of the direct buffer
         val floatBuffer = byteBuffer.asFloatBuffer()
 
-// (The rest of the function stays the same)
+        // (The rest of the function stays the same)
 
-        val pixels = IntArray(IMAGE_SIZE * IMAGE_SIZE)
-        croppedBitmap.getPixels(pixels, 0, IMAGE_SIZE, 0, 0, IMAGE_SIZE, IMAGE_SIZE)
+        val pixels = IntArray(hw)
+        cropped.getPixels(pixels, 0, IMAGE_SIZE, 0, 0, IMAGE_SIZE, IMAGE_SIZE)
 
-        for (c in 0..2) { // R, G, B
-            for (i in pixels.indices) {
-                val pixel = pixels[i]
-                val channelValue = when (c) {
-                    0 -> (pixel shr 16) and 0xFF // R
-                    1 -> (pixel shr 8) and 0xFF  // G
-                    else -> pixel and 0xFF         // B
-                }
+        for (i in pixels.indices) {
+            val p = pixels[i]
 
-                // Normalize and put into buffer
-                floatBuffer.put(
-                    ((channelValue / 255.0f) - NORM_MEAN_RGB[c]) / NORM_STD_RGB[c]
-                )
-            }
+            val r = (((p shr 16) and 0xFF) / 255f - NORM_MEAN_RGB[0]) / NORM_STD_RGB[0]
+            val g = (((p shr 8) and 0xFF) / 255f - NORM_MEAN_RGB[1]) / NORM_STD_RGB[1]
+            val b = ((p and 0xFF) / 255f - NORM_MEAN_RGB[2]) / NORM_STD_RGB[2]
+
+            floatBuffer.put(i, r.toFloat())           // R channel block
+            floatBuffer.put(i + hw, g.toFloat())      // G channel block
+            floatBuffer.put(i + 2 * hw, b.toFloat())  // B channel block
         }
 
         floatBuffer.rewind()
-        return OnnxTensor.createTensor(env, floatBuffer, longArrayOf(1, 3, 224, 224))
+        return OnnxTensor.createTensor(
+            env,
+            floatBuffer,
+            longArrayOf(1, 3, IMAGE_SIZE.toLong(), IMAGE_SIZE.toLong())
+        )
     }
 
     fun getImageFeatures(bitmap: Bitmap): FloatArray {
         val input = preprocessImage(bitmap)
 
-        val result = session.run(mapOf("image" to input))
-        val output = (result[0].value as Array<FloatArray>)[0]
-
-        return VectorUtils.normalize(output)
+        session.run(mapOf("image" to input)).use { result ->
+            val output = (result[0].value as Array<FloatArray>)[0]
+            return VectorUtils.normalize(output)
+        }
     }
 }

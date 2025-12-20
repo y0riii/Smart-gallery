@@ -4,6 +4,7 @@ import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
+import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
 
@@ -30,9 +31,9 @@ class ClipTextEncoder(context: Context) {
 
         val inputTensor = OnnxTensor.createTensor(env, tokens, longArrayOf(1, 77))
 
-        val output = session.run(mapOf("text" to inputTensor))
-        val features = (output[0].value as Array<FloatArray>)[0]
-
-        return VectorUtils.normalize(features)
+        session.run(mapOf("text" to inputTensor)).use { result ->
+            val output = (result[0].value as Array<FloatArray>)[0]
+            return VectorUtils.normalize(output)
+        }
     }
 }

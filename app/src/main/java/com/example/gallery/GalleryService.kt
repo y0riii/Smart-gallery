@@ -15,8 +15,6 @@ import com.example.gallery.ml.VectorUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-data class SearchResult(val uri: Uri, val similarity: Float)
-
 class GalleryService(private val context: Context) {
 
     private val db = AppDatabase.getDatabase(context)
@@ -67,6 +65,7 @@ class GalleryService(private val context: Context) {
         var deviceImages = ImageUtils.scanMediaStore(context)
 
         deviceImages = deviceImages.shuffled().take(500)
+        var counter = 0
 
         withContext(Dispatchers.IO) {
 
@@ -79,13 +78,17 @@ class GalleryService(private val context: Context) {
                         val features = imageEncoder?.getImageFeatures(bitmap)
                         if (features != null) {
                             val text = ocrProcessor.recognizeText(id)
+                            if (text != null) {
+                                Log.d("ocr", "Saved Text")
+                            }
                             dao.insertAll(listOf(MediaEntity(id, timestamp, false, features, text)))
-                            Log.d("GalleryService", "Saved image $id")
+                            Log.d("GalleryService", "Saved image number: $counter, with id: $id")
                         }
                     }
                 } catch (e: Exception) {
                     Log.e("GalleryService", "Error processing $id", e)
                 }
+                counter++
             }
         }
     }
