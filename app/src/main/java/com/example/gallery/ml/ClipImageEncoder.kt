@@ -8,12 +8,13 @@ import android.graphics.Bitmap
 import androidx.core.graphics.scale
 import java.io.File
 import java.io.FileOutputStream
+import java.lang.AutoCloseable
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.max
 import kotlin.math.min
 
-class ClipImageEncoder(private val context: Context) {
+class ClipImageEncoder(private val context: Context) : AutoCloseable {
 
 //    private val IMAGE_SIZE = 224
 //    private val NORM_MEAN_RGB = doubleArrayOf(0.48145466, 0.4578275, 0.40821073)
@@ -99,7 +100,7 @@ class ClipImageEncoder(private val context: Context) {
         }
     }
 
-    fun close() {
+    override fun close() {
         session.close()
         env.close()
     }

@@ -21,8 +21,6 @@ class GalleryService(private val context: Context) {
 
     private val dao = db.mediaDao()
 
-    private val ocrProcessor = OcrProcessor(db, context)
-
     private val textEncoder: ClipTextEncoder by lazy {
         ClipTextEncoder(context)
     }
@@ -35,13 +33,13 @@ class GalleryService(private val context: Context) {
 
     private var ftsSupported: Boolean = false
 
-    suspend fun loadAllIndexedImages(): List<Uri> {
+    suspend fun indexImagesBackground() {
         return withContext(Dispatchers.IO) {
             try {
                 db.openHelper.readableDatabase
                     .query("SELECT rowid FROM media_items_fts LIMIT 1")
-                    .use { cursor -> ftsSupported = true }
-            } catch (e: Exception) {
+                    .use { _ -> ftsSupported = true }
+            } catch (_: Exception) {
                 ftsSupported = false
             }
 
@@ -51,46 +49,62 @@ class GalleryService(private val context: Context) {
             if (count == 0) {
                 indexImages()
             }
-
-            dao.getAllMedia().map {
-                ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, it.mediaId)
-            }
         }
     }
 
     private suspend fun indexImages() {
-        var deviceImages = ImageUtils.scanMediaStore(context)
 
-        deviceImages = deviceImages.shuffled().take(500)
+        val deviceImages = ImageUtils.scanMediaStore(context)
+
         var counter = 0
+        val totalCount = deviceImages.size
 
-        withContext(Dispatchers.IO) {
+        val encoder = ClipImageEncoder(context)
+        val ocrProcessor = OcrProcessor()
 
-            val imageEncoder = ClipImageEncoder(context)
 
-            deviceImages.forEach { (id, timestamp) ->
-                try {
-                    val uri =
-                        ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
-                    val bitmap = ImageUtils.getBitmapFromUri(context, uri)
-                    if (bitmap != null) {
-                        val features = imageEncoder.getImageFeatures(bitmap)
-                        val text = ocrProcessor.recognizeText(id)
-                        if (text != null) {
-                            Log.d("ocr", "Saved Text")
-                        }
-                        dao.insertAll(listOf(MediaEntity(id, timestamp, false, features, text)))
-                        Log.d("GalleryService", "Saved image number: $counter, with id: $id")
-                    }
-                } catch (e: Exception) {
-                    Log.e("GalleryService", "Error processing $id", e)
+        deviceImages.forEach { (id, timestamp) ->
+
+            try {
+                val uri = ContentUris.withAppendedId(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    id
+                )
+
+                val bitmap = ImageUtils.getBitmapFromUri(context, uri)
+                if (bitmap != null) {
+
+                    val features = encoder.getImageFeatures(bitmap)
+                    val text = ocrProcessor.recognizeText(bitmap)
+
+                    dao.insertAll(
+                        listOf(MediaEntity(id, timestamp, false, features, text))
+                    )
+
+                    Log.d(
+                        "GalleryService",
+                        "Saved image number: $counter (${(counter * 100) / totalCount}%), with id: $id"
+                    )
                 }
-                counter++
-            }
 
-            imageEncoder.close()
+            } catch (e: Exception) {
+                Log.e("GalleryService", "Error processing $id", e)
+            }
+            counter++
         }
+        encoder.close()
+        ocrProcessor.close()
     }
+
+    suspend fun getAllDeviceImages(): List<Uri> =
+        withContext(Dispatchers.IO) {
+            ImageUtils.scanMediaStore(context).map { (id, _) ->
+                ContentUris.withAppendedId(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    id
+                )
+            }
+        }
 
     suspend fun search(prompt: String): List<Uri> {
 

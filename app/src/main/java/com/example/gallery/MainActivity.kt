@@ -1,54 +1,34 @@
 package com.example.gallery
 
 import android.Manifest
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.activity.viewModels
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
-import kotlinx.coroutines.launch
+import com.example.gallery.components.GalleryScreen
+import com.example.gallery.components.GalleryViewModel
 
 class MainActivity : ComponentActivity() {
+
+    private val viewModel: GalleryViewModel by viewModels {
+        GalleryViewModelFactory(applicationContext)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                GalleryApp()
+                GalleryApp(viewModel)
             }
         }
     }
@@ -75,147 +55,31 @@ private fun getPermissionsToRequest(): Array<String> {
 }
 
 @Composable
-fun GalleryApp() {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val service = remember { GalleryService(context) }
-    val gridState = rememberLazyGridState()
+fun GalleryApp(viewModel: GalleryViewModel) {
 
-    // --- State Variables ---
-    var prompt by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
-    var statusText by remember { mutableStateOf("Request permissions to load images.") }
+    var hasPermission by remember { mutableStateOf(false) }
 
-    // This holds the final sorted list of images to display
-    var images by remember { mutableStateOf<List<Uri>>(emptyList()) }
-
-    var useClip by remember { mutableStateOf(true) }
-
-    // --- Permission Handling (NEW) ---
     val permissionsToRequest = remember { getPermissionsToRequest() }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { granted ->
-        if (granted.values.any { it }) {
-            scope.launch {
-                isLoading = true
-                service.preloadTextModel()
-                images = service.loadAllIndexedImages()
-                isLoading = false
-            }
-        } else {
-            statusText = "Permission denied."
-        }
+    ) { result ->
+        hasPermission = result.values.any { it }
     }
 
     LaunchedEffect(Unit) {
         permissionLauncher.launch(permissionsToRequest)
     }
 
-    // --- UI Layout ---
-    Column(modifier = Modifier.fillMaxSize()) {
-        // --------------------
-        // SEARCH BAR
-        // --------------------
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                value = prompt,
-                onValueChange = { prompt = it },
-                label = { Text("Search") },
-                modifier = Modifier.weight(1f),
-                singleLine = true
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-
-            Button(
-                enabled = !isLoading,
-                onClick = {
-                    scope.launch {
-                        isLoading = true
-                        statusText = "Searching..."
-
-                        images = if (useClip) {
-                            service.search(prompt)            // IMAGE SEARCH USING CLIP
-                        } else {
-                            service.searchDocuments(prompt)  // DOCUMENT TEXT SEARCH USING OCR
-                        }
-                        gridState.animateScrollToItem(0)
-
-                        statusText = if (useClip)
-                            "Showing CLIP image search results"
-                        else
-                            "Showing OCR document search results"
-
-                        isLoading = false
-                    }
-                }
-            ) {
-                Text("Go")
-            }
-        }
-
-        // --------------------
-        // SEARCH MODE TOGGLE (CLIP / OCR)
-        // --------------------
-        Column(modifier = Modifier.padding(start = 16.dp)) {
-            Text("Search Type:", style = MaterialTheme.typography.bodyMedium)
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                RadioButton(
-                    selected = useClip,
-                    onClick = { useClip = true }
-                )
-                Text("Image Search (CLIP)")
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                RadioButton(
-                    selected = !useClip,
-                    onClick = { useClip = false }
-                )
-                Text("Document Search (OCR)")
-            }
-        }
-
-        // Status/Loading
-        if (isLoading || statusText.isNotEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator()
-                } else {
-                    Text(statusText, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-
-        // Image Grid
-        LazyVerticalGrid(
-            state = gridState,
-            columns = GridCells.Adaptive(minSize = 128.dp),
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(4.dp)
-        ) {
-            items(images, key = { it.toString() }) { result ->
-                AsyncImage(
-                    model = result,
-                    contentDescription = "Image result",
-                    modifier = Modifier
-                        .padding(4.dp)
-                        .aspectRatio(1f),
-                    contentScale = ContentScale.Fit
-                )
-            }
+    LaunchedEffect(hasPermission) {
+        if (hasPermission) {
+            viewModel.statusText = "Showing all images."
+            viewModel.onPermissionGranted()
+        } else {
+            viewModel.statusText = "Permission denied."
         }
     }
+
+    GalleryScreen(viewModel)
+
 }
