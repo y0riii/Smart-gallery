@@ -23,18 +23,17 @@ class GalleryService(private val context: Context) {
 
     private val ocrProcessor = OcrProcessor(db, context)
 
-    private var imageEncoder: ClipImageEncoder? = null
-    private var textEncoder: ClipTextEncoder? = null
+    private val textEncoder: ClipTextEncoder by lazy {
+        ClipTextEncoder(context)
+    }
 
-    private var ftsSupported: Boolean = false
-
-    private suspend fun loadModels() {
-        ImageUtils.scanMediaStore(context)
+    suspend fun preloadTextModel() {
         withContext(Dispatchers.IO) {
-            if (imageEncoder == null) imageEncoder = ClipImageEncoder(context)
-            if (textEncoder == null) textEncoder = ClipTextEncoder(context)
+            textEncoder
         }
     }
+
+    private var ftsSupported: Boolean = false
 
     suspend fun loadAllIndexedImages(): List<Uri> {
         return withContext(Dispatchers.IO) {
@@ -60,8 +59,6 @@ class GalleryService(private val context: Context) {
     }
 
     private suspend fun indexImages() {
-        loadModels()
-
         var deviceImages = ImageUtils.scanMediaStore(context)
 
         deviceImages = deviceImages.shuffled().take(500)
@@ -69,36 +66,37 @@ class GalleryService(private val context: Context) {
 
         withContext(Dispatchers.IO) {
 
+            val imageEncoder = ClipImageEncoder(context)
+
             deviceImages.forEach { (id, timestamp) ->
                 try {
                     val uri =
                         ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
                     val bitmap = ImageUtils.getBitmapFromUri(context, uri)
                     if (bitmap != null) {
-                        val features = imageEncoder?.getImageFeatures(bitmap)
-                        if (features != null) {
-                            val text = ocrProcessor.recognizeText(id)
-                            if (text != null) {
-                                Log.d("ocr", "Saved Text")
-                            }
-                            dao.insertAll(listOf(MediaEntity(id, timestamp, false, features, text)))
-                            Log.d("GalleryService", "Saved image number: $counter, with id: $id")
+                        val features = imageEncoder.getImageFeatures(bitmap)
+                        val text = ocrProcessor.recognizeText(id)
+                        if (text != null) {
+                            Log.d("ocr", "Saved Text")
                         }
+                        dao.insertAll(listOf(MediaEntity(id, timestamp, false, features, text)))
+                        Log.d("GalleryService", "Saved image number: $counter, with id: $id")
                     }
                 } catch (e: Exception) {
                     Log.e("GalleryService", "Error processing $id", e)
                 }
                 counter++
             }
+
+            imageEncoder.close()
         }
     }
 
     suspend fun search(prompt: String): List<Uri> {
-        if (textEncoder == null) loadModels()
 
         return withContext(Dispatchers.IO) {
 
-            val textFeatures = textEncoder!!.getTextFeatures(prompt)
+            val textFeatures = textEncoder.getTextFeatures(prompt)
             val images = dao.getAllMedia()
 
             val sortedImages = images.map { entity ->

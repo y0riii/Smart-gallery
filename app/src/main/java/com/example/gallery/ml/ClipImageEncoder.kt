@@ -23,6 +23,17 @@ class ClipImageEncoder(private val context: Context) {
     private val NORM_MEAN_RGB = doubleArrayOf(0.0, 0.0, 0.0)
     private val NORM_STD_RGB = doubleArrayOf(1.0, 1.0, 1.0)
 
+    private val hw = IMAGE_SIZE * IMAGE_SIZE
+
+    // Allocate a DIRECT ByteBuffer (4 bytes per float)
+    private val byteBuffer: ByteBuffer =
+        ByteBuffer.allocateDirect(hw * 3 * 4).order(ByteOrder.nativeOrder())
+
+    // Create a FloatBuffer view on top of the direct buffer
+    private val floatBuffer = byteBuffer.asFloatBuffer()
+
+    private val pixels = IntArray(hw)
+
     private val env = OrtEnvironment.getEnvironment()
     private val session: OrtSession
 
@@ -55,20 +66,9 @@ class ClipImageEncoder(private val context: Context) {
         val y = (resized.height - IMAGE_SIZE) / 2
         val cropped = Bitmap.createBitmap(resized, x, y, IMAGE_SIZE, IMAGE_SIZE)
 
-        // 3. Convert to FloatBuffer and normalize (NCHW format)
-        val hw = IMAGE_SIZE * IMAGE_SIZE
-
-        // Allocate a DIRECT ByteBuffer (4 bytes per float)
-        val byteBuffer = ByteBuffer.allocateDirect(hw * 3 * 4)
-        byteBuffer.order(ByteOrder.nativeOrder())
-
-        // Create a FloatBuffer view on top of the direct buffer
-        val floatBuffer = byteBuffer.asFloatBuffer()
-
-        // (The rest of the function stays the same)
-
-        val pixels = IntArray(hw)
         cropped.getPixels(pixels, 0, IMAGE_SIZE, 0, 0, IMAGE_SIZE, IMAGE_SIZE)
+
+        floatBuffer.rewind()
 
         for (i in pixels.indices) {
             val p = pixels[i]
@@ -91,11 +91,16 @@ class ClipImageEncoder(private val context: Context) {
     }
 
     fun getImageFeatures(bitmap: Bitmap): FloatArray {
-        val input = preprocessImage(bitmap)
-
-        session.run(mapOf("image" to input)).use { result ->
-            val output = (result[0].value as Array<FloatArray>)[0]
-            return VectorUtils.normalize(output)
+        preprocessImage(bitmap).use { input ->
+            session.run(mapOf("image" to input)).use { result ->
+                val output = (result[0].value as Array<FloatArray>)[0]
+                return VectorUtils.normalize(output)
+            }
         }
+    }
+
+    fun close() {
+        session.close()
+        env.close()
     }
 }
