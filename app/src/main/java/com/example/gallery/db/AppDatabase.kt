@@ -9,13 +9,14 @@ import androidx.room.TypeConverters
 @Database(
     // CRITICAL: Include both the main data entity and the FTS index entity.
     // Room will manage the creation and synchronization of the FTS table based on FtsMediaEntity.
-    entities = [MediaEntity::class, FtsMediaEntity::class],
+    entities = [MediaEntity::class, FtsMediaEntity::class, FaceEntity::class, ImageFaceCrossRef::class],
     version = 7,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun mediaDao(): MediaDao
+    abstract fun faceDao(): FaceDao
 
     companion object {
         @Volatile
