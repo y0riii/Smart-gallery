@@ -15,7 +15,6 @@ import androidx.room.TypeConverters
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
-
     abstract fun mediaDao(): MediaDao
 
     companion object {
