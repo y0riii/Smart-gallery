@@ -1,6 +1,10 @@
-package com.example.kotlin_test
+package com.example.gallery.db
 
-import androidx.room.*
+import androidx.room.Dao
+import androidx.room.Delete
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
 
 @Dao
 interface MediaDao {
@@ -8,8 +12,11 @@ interface MediaDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(media: List<MediaEntity>)
 
-    @Query("UPDATE media_items SET ocrText = :text WHERE uriString = :uriString")
-    suspend fun updateOcrText(uriString: String, text: String)
+    @Delete
+    suspend fun deleteAll(list: List<MediaEntity>)
+
+    @Query("UPDATE media_items SET ocrText = :text WHERE mediaId = :mediaId")
+    suspend fun updateOcrText(mediaId: Long, text: String)
 
     @Query("SELECT * FROM media_items ORDER BY timestampMs DESC")
     suspend fun getAllMedia(): List<MediaEntity>
@@ -24,21 +31,28 @@ interface MediaDao {
         return searchMediaFtsFormatted(formattedQuery)
     }
 
-    @Query("""
+    @Query(
+        """
         SELECT m.*
         FROM media_items AS m
         JOIN media_items_fts AS f ON m.rowid = f.rowid
         WHERE f.ocrText MATCH :formattedQuery
         ORDER BY m.timestampMs DESC
-    """)
+    """
+    )
     suspend fun searchMediaFtsFormatted(formattedQuery: String): List<MediaEntity>
 
     // ===== SIMPLE SEARCH (fallback) =====
-    @Query("""
+    @Query(
+        """
         SELECT *
         FROM media_items
         WHERE ocrText LIKE '%' || :query || '%'
         ORDER BY timestampMs DESC
-    """)
+    """
+    )
     suspend fun searchMediaSimple(query: String): List<MediaEntity>
+
+    @Query("SELECT COUNT(*) FROM media_items")
+    suspend fun count(): Int
 }

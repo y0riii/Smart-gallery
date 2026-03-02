@@ -1,4 +1,4 @@
-package com.example.kotlin_test
+package com.example.gallery.db
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity

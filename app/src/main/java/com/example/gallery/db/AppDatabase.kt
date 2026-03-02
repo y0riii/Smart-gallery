@@ -1,20 +1,22 @@
-package com.example.kotlin_test
+package com.example.gallery.db
 
 import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
 
 @Database(
     // CRITICAL: Include both the main data entity and the FTS index entity.
     // Room will manage the creation and synchronization of the FTS table based on FtsMediaEntity.
-    entities = [MediaEntity::class, FtsMediaEntity::class],
-    version = 6,
+    entities = [MediaEntity::class, FtsMediaEntity::class, FaceEntity::class, ImageFaceCrossRef::class],
+    version = 7,
     exportSchema = false
 )
+@TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
-
     abstract fun mediaDao(): MediaDao
+    abstract fun faceDao(): FaceDao
 
     companion object {
         @Volatile
@@ -35,7 +37,7 @@ abstract class AppDatabase : RoomDatabase() {
                 // The manual SQL callback logic is removed as Room handles the FTS table automatically.
                 // Using destructive migration to ensure a clean database setup
                 // when moving from manual FTS to Room-managed FTS.
-                .fallbackToDestructiveMigration()
+                .fallbackToDestructiveMigration(false)
                 .build()
         }
     }

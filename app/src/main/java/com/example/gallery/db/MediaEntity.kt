@@ -1,4 +1,4 @@
-package com.example.kotlin_test
+package com.example.gallery.db
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
@@ -12,13 +12,14 @@ import androidx.room.PrimaryKey
 data class MediaEntity(
     // The URI string from the MediaStore is used as the unique primary key.
     @PrimaryKey
-    val uriString: String,
-
-    // Flag to differentiate images (false) from videos (true)
-    val isVideo: Boolean,
+    val mediaId: Long,
 
     // The date the item was added, used for sorting.
     val timestampMs: Long,
+
+    val isVideo: Boolean,
+
+    val embedding: FloatArray,
 
     // The text extracted via OCR. Nullable initially, populated after scanning.
     val ocrText: String? = null
