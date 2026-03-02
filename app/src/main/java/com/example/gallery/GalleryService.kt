@@ -8,10 +8,12 @@ import android.util.Log
 import com.example.gallery.db.AppDatabase
 import com.example.gallery.db.MediaEntity
 import com.example.gallery.db.OcrProcessor
+import com.example.gallery.faceDetection.FaceDetectionProcessor
 import com.example.gallery.ml.ClipImageEncoder
 import com.example.gallery.ml.ClipTextEncoder
 import com.example.gallery.ml.ImageUtils
 import com.example.gallery.ml.VectorUtils
+import com.google.mlkit.vision.face.Face
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -32,6 +34,40 @@ class GalleryService(private val context: Context) {
             textEncoder
         }
     }
+
+//    fun saveBitmapToGallery(
+//        bitmap: Bitmap,
+//        fileName: String
+//    ): Boolean {
+//
+//        val resolver = context.contentResolver
+//
+//        val contentValues = ContentValues().apply {
+//            put(MediaStore.Images.Media.DISPLAY_NAME, "$fileName.jpg")
+//            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+//            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/FaceCrops")
+//            put(MediaStore.Images.Media.IS_PENDING, 1)
+//        }
+//
+//        val imageUri = resolver.insert(
+//            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+//            contentValues
+//        ) ?: return false
+//
+//        return try {
+//            resolver.openOutputStream(imageUri)?.use { stream ->
+//                bitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream)
+//            }
+//
+//            contentValues.clear()
+//            contentValues.put(MediaStore.Images.Media.IS_PENDING, 0)
+//            resolver.update(imageUri, contentValues, null, null)
+//
+//            true
+//        } catch (e: Exception) {
+//            false
+//        }
+//    }
 
     /**
      * Compares the device's MediaStore with the Room Database and syncs them.
@@ -70,7 +106,10 @@ class GalleryService(private val context: Context) {
             // 6. Process and insert newly added images
             if (idsToAdd.isNotEmpty()) {
                 val newImagesToProcess = deviceImages.filter { it.first in idsToAdd }
-                Log.d("GalleryService", "Sync: Found ${newImagesToProcess.size} new images to index.")
+                Log.d(
+                    "GalleryService",
+                    "Sync: Found ${newImagesToProcess.size} new images to index."
+                )
                 processAndInsertImages(newImagesToProcess)
             } else {
                 Log.d("GalleryService", "Sync: Database is fully synced. No new images to process.")
@@ -103,6 +142,7 @@ class GalleryService(private val context: Context) {
     private suspend fun processAndInsertImages(imagesToProcess: List<Pair<Long, Long>>) {
         val encoder = ClipImageEncoder(context)
         val ocrProcessor = OcrProcessor()
+        val faceDetector = FaceDetectionProcessor()
         val totalCount = imagesToProcess.size
         var counter = 0
 
@@ -118,6 +158,14 @@ class GalleryService(private val context: Context) {
                     // CLIP & OCR Processing
                     val features = encoder.getImageFeatures(bitmap)
                     val text = ocrProcessor.recognizeText(bitmap)
+                    val faces: List<Face> = faceDetector.detectFaces(bitmap)
+
+                    Log.d("GalleryService", "Detected: ${faces.size} faces (ID: $id)")
+
+//                    faces.forEach { face ->
+//                        val croppedImage = faceDetector.cropFace(bitmap, face.boundingBox)
+//                        saveBitmapToGallery(croppedImage, "face_${System.currentTimeMillis()}")
+//                    }
 
                     dao.insertAll(
                         listOf(MediaEntity(id, timestamp, false, features, text))

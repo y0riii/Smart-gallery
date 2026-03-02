@@ -72,5 +72,6 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
 
-    implementation(libs.play.services.mlkit.text.recognition)
+    implementation(libs.text.recognition)
+    implementation(libs.face.detection)
 }
