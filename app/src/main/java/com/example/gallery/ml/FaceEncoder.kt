@@ -74,9 +74,9 @@ class FaceEncoder(context: Context) : AutoCloseable {
         )
     }
 
-    fun getImageFeatures(bitmap: Bitmap): FloatArray {
+    fun getFaceFeatures(bitmap: Bitmap): FloatArray {
         preprocessImage(bitmap).use { input ->
-            session.run(mapOf("image" to input)).use { result ->
+            session.run(mapOf("input0" to input)).use { result ->
                 return (result[0].value as Array<FloatArray>)[0]
             }
         }

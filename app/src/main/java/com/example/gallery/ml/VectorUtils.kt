@@ -17,5 +17,9 @@ class VectorUtils {
             if (norm == 0.0f) return vector
             return vector.map { it / norm }.toFloatArray()
         }
+
+        fun divide(vector: FloatArray, scaler: Float): FloatArray {
+            return vector.map { it / scaler }.toFloatArray()
+        }
     }
 }

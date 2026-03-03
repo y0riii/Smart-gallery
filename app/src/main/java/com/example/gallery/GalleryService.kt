@@ -11,6 +11,7 @@ import com.example.gallery.db.OcrProcessor
 import com.example.gallery.faceDetection.FaceDetectionProcessor
 import com.example.gallery.ml.ClipImageEncoder
 import com.example.gallery.ml.ClipTextEncoder
+import com.example.gallery.ml.FaceEncoder
 import com.example.gallery.ml.ImageUtils
 import com.example.gallery.ml.VectorUtils
 import com.google.mlkit.vision.face.Face
@@ -20,7 +21,7 @@ import kotlinx.coroutines.withContext
 class GalleryService(private val context: Context) {
 
     private val db = AppDatabase.getDatabase(context)
-    private val dao = db.mediaDao()
+    private val mediaDao = db.mediaDao()
     private val faceDao = db.faceDao() // Groundwork for face recognition
 
     private val textEncoder: ClipTextEncoder by lazy {
@@ -37,7 +38,8 @@ class GalleryService(private val context: Context) {
 
 //    fun saveBitmapToGallery(
 //        bitmap: Bitmap,
-//        fileName: String
+//        fileName: String,
+//        personName: String
 //    ): Boolean {
 //
 //        val resolver = context.contentResolver
@@ -45,7 +47,7 @@ class GalleryService(private val context: Context) {
 //        val contentValues = ContentValues().apply {
 //            put(MediaStore.Images.Media.DISPLAY_NAME, "$fileName.jpg")
 //            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-//            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/FaceCrops")
+//            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/FaceRec/$personName")
 //            put(MediaStore.Images.Media.IS_PENDING, 1)
 //        }
 //
@@ -89,7 +91,7 @@ class GalleryService(private val context: Context) {
 
             // 3. Fetch IDs currently in the database
             // Note: Ensure you have added getAllMediaIds() to your MediaDao or use getAllMedia().map { it.mediaId }
-            val dbImageIds = dao.getAllMedia().map { it.mediaId }.toSet()
+            val dbImageIds = mediaDao.getAllMedia().map { it.mediaId }.toSet()
 
             // 4. Calculate the differences (The Diff)
             val idsToDelete = dbImageIds - deviceImageIds // In DB, but missing from device
@@ -98,8 +100,8 @@ class GalleryService(private val context: Context) {
             // 5. Delete removed images from the database
             if (idsToDelete.isNotEmpty()) {
                 // You may need to add a dedicated deleteByIds(List<Long>) to your MediaDao
-                val itemsToDelete = dao.getAllMedia().filter { it.mediaId in idsToDelete }
-                dao.deleteAll(itemsToDelete)
+                val itemsToDelete = mediaDao.getAllMedia().filter { it.mediaId in idsToDelete }
+                mediaDao.deleteAll(itemsToDelete)
                 Log.d("GalleryService", "Sync: Deleted ${idsToDelete.size} obsolete images from DB")
             }
 
@@ -124,7 +126,7 @@ class GalleryService(private val context: Context) {
      * Iterates through the database and prints content to Logcat for testing.
      */
     private suspend fun logDatabaseContent() {
-        val allItems = dao.getAllMedia()
+        val allItems = mediaDao.getAllMedia()
         Log.d("DB_DEBUG", "=== CURRENT DATABASE CONTENT (${allItems.size} items) ===")
         allItems.forEachIndexed { index, entity ->
             val embeddingPreview = entity.embedding.take(3).joinToString(", ")
@@ -140,9 +142,10 @@ class GalleryService(private val context: Context) {
      * Extracts features (OCR + CLIP) and saves new images to the database.
      */
     private suspend fun processAndInsertImages(imagesToProcess: List<Pair<Long, Long>>) {
-        val encoder = ClipImageEncoder(context)
+        val imageEncoder = ClipImageEncoder(context)
         val ocrProcessor = OcrProcessor()
         val faceDetector = FaceDetectionProcessor()
+        val faceEncoder = FaceEncoder(context)
         val totalCount = imagesToProcess.size
         var counter = 0
 
@@ -156,7 +159,7 @@ class GalleryService(private val context: Context) {
                 val bitmap = ImageUtils.getBitmapFromUri(context, uri)
                 if (bitmap != null) {
                     // CLIP & OCR Processing
-                    val features = encoder.getImageFeatures(bitmap)
+                    val features = imageEncoder.getImageFeatures(bitmap)
                     val text = ocrProcessor.recognizeText(bitmap)
                     val faces: List<Face> = faceDetector.detectFaces(bitmap)
 
@@ -164,10 +167,25 @@ class GalleryService(private val context: Context) {
 
 //                    faces.forEach { face ->
 //                        val croppedImage = faceDetector.cropFace(bitmap, face.boundingBox)
-//                        saveBitmapToGallery(croppedImage, "face_${System.currentTimeMillis()}")
+//                        val faceFeatures = VectorUtils.normalize(faceEncoder.getFaceFeatures(croppedImage))
+//                        val allFaces = faceDao.getAllFaces()
+//                        val bestMatch = allFaces.maxByOrNull {
+//                            VectorUtils.dotProduct(faceFeatures, it.embedding)
+//                        }
+//                        var id : Long = 0
+//                        if (bestMatch == null){
+//                            id = 1
+//                            faceDao.insertFace(FaceEntity(1, "p1", faceFeatures))
+//                        } else if (VectorUtils.dotProduct(faceFeatures, bestMatch.embedding) < 0.6){
+//                            id = (faceDao.countFaces() + 1).toLong()
+//                            faceDao.insertFace(FaceEntity(id, "p$id", faceFeatures))
+//                        } else {
+//                            id = bestMatch.id
+//                        }
+//                        saveBitmapToGallery(croppedImage, "face_${System.currentTimeMillis()}", "p$id")
 //                    }
 
-                    dao.insertAll(
+                    mediaDao.insertAll(
                         listOf(MediaEntity(id, timestamp, false, features, text))
                     )
 
@@ -181,8 +199,10 @@ class GalleryService(private val context: Context) {
             }
         }
 
-        encoder.close()
+        imageEncoder.close()
         ocrProcessor.close()
+        faceDetector.close()
+        faceEncoder.close()
     }
 
     suspend fun getAllDeviceImages(): List<Uri> =
@@ -198,7 +218,7 @@ class GalleryService(private val context: Context) {
     suspend fun search(prompt: String): List<Uri> {
         return withContext(Dispatchers.IO) {
             val textFeatures = textEncoder.getTextFeatures(prompt)
-            val images = dao.getAllMedia()
+            val images = mediaDao.getAllMedia()
 
             val sortedImages = images.map { entity ->
                 val similarity = VectorUtils.dotProduct(textFeatures, entity.embedding)
@@ -217,9 +237,9 @@ class GalleryService(private val context: Context) {
     suspend fun searchDocuments(text: String): List<Uri> {
         return withContext(Dispatchers.IO) {
             val results = if (ftsSupported) {
-                dao.searchMediaFts(text)
+                mediaDao.searchMediaFts(text)
             } else {
-                dao.searchMediaSimple(text)
+                mediaDao.searchMediaSimple(text)
             }
 
             results.map { entity ->
