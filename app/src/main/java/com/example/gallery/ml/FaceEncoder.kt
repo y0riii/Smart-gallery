@@ -11,18 +11,12 @@ import java.io.FileOutputStream
 import java.lang.AutoCloseable
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import kotlin.math.max
-import kotlin.math.min
+import kotlin.io.copyTo
+import kotlin.use
 
-class ClipImageEncoder(context: Context) : AutoCloseable {
+class FaceEncoder(context: Context) : AutoCloseable {
 
-//    private val IMAGE_SIZE = 224
-//    private val NORM_MEAN_RGB = doubleArrayOf(0.48145466, 0.4578275, 0.40821073)
-//    private val NORM_STD_RGB = doubleArrayOf(0.26862954, 0.26130258, 0.27577711)
-
-    private val IMAGE_SIZE = 256
-//    private val NORM_MEAN_RGB = doubleArrayOf(0.0, 0.0, 0.0)
-//    private val NORM_STD_RGB = doubleArrayOf(1.0, 1.0, 1.0)
+    private val IMAGE_SIZE = 112
 
     private val hw = IMAGE_SIZE * IMAGE_SIZE
 
@@ -39,9 +33,9 @@ class ClipImageEncoder(context: Context) : AutoCloseable {
     private val session: OrtSession
 
     init {
-        val file = File(context.filesDir, "image_model.ort")
+        val file = File(context.filesDir, "MobileFaceNet.ort")
         if (!file.exists()) {
-            context.assets.open("image_model.ort").use { inputStream ->
+            context.assets.open("MobileFaceNet.ort").use { inputStream ->
                 FileOutputStream(file).use { outputStream ->
                     inputStream.copyTo(outputStream)
                 }
@@ -54,37 +48,18 @@ class ClipImageEncoder(context: Context) : AutoCloseable {
 
         val safeBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
 
-        // 1. Resize smallest edge to SIZE
-        val w = safeBitmap.width
-        val h = safeBitmap.height
-        val scale = IMAGE_SIZE.toFloat() / min(w, h)
-        val newW = max(IMAGE_SIZE, (w * scale).toInt())
-        val newH = max(IMAGE_SIZE, (h * scale).toInt())
-        val resized = safeBitmap.scale(newW, newH)
+        val resized = safeBitmap.scale(IMAGE_SIZE, IMAGE_SIZE)
 
-        // 2. Center crop
-        val x = (resized.width - IMAGE_SIZE) / 2
-        val y = (resized.height - IMAGE_SIZE) / 2
-        val cropped = Bitmap.createBitmap(resized, x, y, IMAGE_SIZE, IMAGE_SIZE)
-
-        cropped.getPixels(pixels, 0, IMAGE_SIZE, 0, 0, IMAGE_SIZE, IMAGE_SIZE)
+        resized.getPixels(pixels, 0, IMAGE_SIZE, 0, 0, IMAGE_SIZE, IMAGE_SIZE)
 
         floatBuffer.rewind()
 
         for (i in pixels.indices) {
             val p = pixels[i]
 
-//            val r = (((p shr 16) and 0xFF) / 255f - NORM_MEAN_RGB[0]) / NORM_STD_RGB[0]
-//            val g = (((p shr 8) and 0xFF) / 255f - NORM_MEAN_RGB[1]) / NORM_STD_RGB[1]
-//            val b = ((p and 0xFF) / 255f - NORM_MEAN_RGB[2]) / NORM_STD_RGB[2]
-//
-//            floatBuffer.put(i, r.toFloat())           // R channel block
-//            floatBuffer.put(i + hw, g.toFloat())      // G channel block
-//            floatBuffer.put(i + 2 * hw, b.toFloat())  // B channel block
-
-            val r = ((p shr 16) and 0xFF) / 255f
-            val g = ((p shr 8) and 0xFF) / 255f
-            val b = (p and 0xFF) / 255f
+            val r = ((p shr 16) and 0xFF) / 127.5f - 1f
+            val g = ((p shr 8) and 0xFF) / 127.5f - 1f
+            val b = (p and 0xFF) / 127.5f - 1f
 
             floatBuffer.put(i, r)           // R channel block
             floatBuffer.put(i + hw, g)      // G channel block
@@ -102,8 +77,7 @@ class ClipImageEncoder(context: Context) : AutoCloseable {
     fun getImageFeatures(bitmap: Bitmap): FloatArray {
         preprocessImage(bitmap).use { input ->
             session.run(mapOf("image" to input)).use { result ->
-                val output = (result[0].value as Array<FloatArray>)[0]
-                return VectorUtils.normalize(output)
+                return (result[0].value as Array<FloatArray>)[0]
             }
         }
     }

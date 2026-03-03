@@ -13,4 +13,5 @@
 .externalNativeBuild
 .cxx
 local.properties
-*.ort
+image_model.ort
+text_model.ort
