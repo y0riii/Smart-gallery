@@ -1,11 +1,14 @@
 package com.example.gallery
 
+import android.graphics.Bitmap
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
 import com.example.gallery.db.AppDatabase
+import com.example.gallery.db.FaceEntity
 import com.example.gallery.db.MediaEntity
 import com.example.gallery.db.OcrProcessor
 import com.example.gallery.faceDetection.FaceDetectionProcessor
@@ -36,40 +39,41 @@ class GalleryService(private val context: Context) {
         }
     }
 
-//    fun saveBitmapToGallery(
-//        bitmap: Bitmap,
-//        fileName: String,
-//        personName: String
-//    ): Boolean {
-//
-//        val resolver = context.contentResolver
-//
-//        val contentValues = ContentValues().apply {
-//            put(MediaStore.Images.Media.DISPLAY_NAME, "$fileName.jpg")
-//            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-//            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/FaceRec/$personName")
-//            put(MediaStore.Images.Media.IS_PENDING, 1)
-//        }
-//
-//        val imageUri = resolver.insert(
-//            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-//            contentValues
-//        ) ?: return false
-//
-//        return try {
-//            resolver.openOutputStream(imageUri)?.use { stream ->
-//                bitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream)
-//            }
-//
-//            contentValues.clear()
-//            contentValues.put(MediaStore.Images.Media.IS_PENDING, 0)
-//            resolver.update(imageUri, contentValues, null, null)
-//
-//            true
-//        } catch (e: Exception) {
-//            false
-//        }
-//    }
+    fun saveBitmapToGallery(
+        bitmap: Bitmap,
+        fileName: String,
+        personName: String
+    ): Boolean {
+
+        val resolver = context.contentResolver
+
+        val contentValues = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, "$fileName.jpg")
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/FaceRec/$personName")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+
+        val imageUri = resolver.insert(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            contentValues
+        ) ?: return false
+
+
+        return try {
+            resolver.openOutputStream(imageUri)?.use { stream ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream)
+            }
+
+            contentValues.clear()
+            contentValues.put(MediaStore.Images.Media.IS_PENDING, 0)
+            resolver.update(imageUri, contentValues, null, null)
+
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
 
     /**
      * Compares the device's MediaStore with the Room Database and syncs them.
@@ -165,25 +169,26 @@ class GalleryService(private val context: Context) {
 
                     Log.d("GalleryService", "Detected: ${faces.size} faces (ID: $id)")
 
-//                    faces.forEach { face ->
-//                        val croppedImage = faceDetector.cropFace(bitmap, face.boundingBox)
-//                        val faceFeatures = VectorUtils.normalize(faceEncoder.getFaceFeatures(croppedImage))
-//                        val allFaces = faceDao.getAllFaces()
-//                        val bestMatch = allFaces.maxByOrNull {
-//                            VectorUtils.dotProduct(faceFeatures, it.embedding)
-//                        }
-//                        var id : Long = 0
-//                        if (bestMatch == null){
-//                            id = 1
-//                            faceDao.insertFace(FaceEntity(1, "p1", faceFeatures))
-//                        } else if (VectorUtils.dotProduct(faceFeatures, bestMatch.embedding) < 0.6){
-//                            id = (faceDao.countFaces() + 1).toLong()
-//                            faceDao.insertFace(FaceEntity(id, "p$id", faceFeatures))
-//                        } else {
-//                            id = bestMatch.id
-//                        }
-//                        saveBitmapToGallery(croppedImage, "face_${System.currentTimeMillis()}", "p$id")
-//                    }
+                    faces.forEach { face ->
+//                        val alignedImage = faceDetector.alignFace(bitmap, face)
+                        val croppedImage = faceDetector.cropFace(bitmap, face.boundingBox)
+                        val faceFeatures = VectorUtils.normalize(faceEncoder.getFaceFeatures(croppedImage))
+                        val allFaces = faceDao.getAllFaces()
+                        val bestMatch = allFaces.maxByOrNull {
+                            VectorUtils.dotProduct(faceFeatures, it.embedding)
+                        }
+                        var id : Long = 0
+                        if (bestMatch == null){
+                            id = 1
+                            faceDao.insertFace(FaceEntity(1, "p1", faceFeatures))
+                        } else if (VectorUtils.dotProduct(faceFeatures, bestMatch.embedding) < 0.6){
+                            id = (faceDao.countFaces() + 1).toLong()
+                            faceDao.insertFace(FaceEntity(id, "p$id", faceFeatures))
+                        } else {
+                            id = bestMatch.id
+                        }
+                        saveBitmapToGallery(croppedImage, "face_${System.currentTimeMillis()}", "p$id")
+                    }
 
                     mediaDao.insertAll(
                         listOf(MediaEntity(id, timestamp, false, features, text))
