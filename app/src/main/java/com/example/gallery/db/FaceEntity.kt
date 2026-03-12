@@ -8,5 +8,6 @@ data class FaceEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
     val name: String? = null,
-    val embedding: FloatArray
+    val embedding: FloatArray,
+    val counter: Long = 0
 )
