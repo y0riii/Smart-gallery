@@ -21,5 +21,13 @@ class VectorUtils {
         fun divide(vector: FloatArray, scaler: Float): FloatArray {
             return vector.map { it / scaler }.toFloatArray()
         }
+
+        fun add(vecA: FloatArray, vecB: FloatArray): FloatArray {
+            val result = FloatArray(vecA.size)
+            for (i in vecA.indices) {
+                result[i] = vecA[i] + vecB[i]
+            }
+            return result
+        }
     }
 }

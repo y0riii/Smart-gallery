@@ -2,8 +2,10 @@ package com.example.gallery.faceDetection
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Matrix  
+import android.graphics.Matrix
+import android.graphics.Paint
 import android.graphics.Rect
+import android.util.Log
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceDetection
@@ -13,6 +15,8 @@ import java.lang.AutoCloseable
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 import kotlin.math.sqrt
+import androidx.core.graphics.createBitmap
+import kotlin.math.abs
 
 class FaceDetectionProcessor : AutoCloseable {
 
@@ -42,6 +46,37 @@ class FaceDetectionProcessor : AutoCloseable {
             .build()
     )
 
+    private fun hasRequiredLandmarks(face: Face): Boolean {
+        return face.getLandmark(FaceLandmark.LEFT_EYE) != null &&
+                face.getLandmark(FaceLandmark.RIGHT_EYE) != null &&
+                face.getLandmark(FaceLandmark.NOSE_BASE) != null &&
+                face.getLandmark(FaceLandmark.MOUTH_LEFT) != null &&
+                face.getLandmark(FaceLandmark.MOUTH_RIGHT) != null
+    }
+
+    private fun isFaceFrontal(face: Face): Boolean {
+        return abs(face.headEulerAngleY) < 20 &&  // yaw
+                abs(face.headEulerAngleX) < 20 &&  // pitch
+                abs(face.headEulerAngleZ) < 15     // roll
+    }
+
+    private fun hasValidEyeDistance(face: Face): Boolean {
+        val left = face.getLandmark(FaceLandmark.LEFT_EYE)?.position ?: return false
+        val right = face.getLandmark(FaceLandmark.RIGHT_EYE)?.position ?: return false
+
+        val dx = left.x - right.x
+        val dy = left.y - right.y
+        val distance = sqrt(dx * dx + dy * dy)
+
+        return distance > 20f
+    }
+
+    private fun isGoodFace(face: Face): Boolean {
+        return isFaceFrontal(face) &&
+                hasRequiredLandmarks(face) &&
+                hasValidEyeDistance(face)
+    }
+
     // ───────────────────────────── detection ─────────────────────────────
 
     suspend fun detectFaces(bitmap: Bitmap): List<Face> =
@@ -49,7 +84,12 @@ class FaceDetectionProcessor : AutoCloseable {
             try {
                 val image = InputImage.fromBitmap(bitmap, 0)
                 detector.process(image)
-                    .addOnSuccessListener { cont.resume(it) }
+                    .addOnSuccessListener { faces ->
+                        val filtered = faces.filter { face ->
+                            isGoodFace(face)
+                        }
+                        cont.resume(filtered)
+                    }
                     .addOnFailureListener { cont.resume(emptyList()) }
             } catch (e: Exception) {
                 cont.resume(emptyList())
@@ -75,10 +115,24 @@ class FaceDetectionProcessor : AutoCloseable {
 
         val transform = computeSimilarityTransform(srcPoints, REFERENCE_LANDMARKS)
 
+//        val inverse = Matrix()
+//        transform.invert(inverse)
+
+        val values = FloatArray(9)
+        transform.getValues(values)
+
+        Log.d("MATRIX", values.joinToString())
+
         // Warp the full image with the computed affine matrix
-        val aligned = Bitmap.createBitmap(ALIGNED_SIZE, ALIGNED_SIZE, Bitmap.Config.ARGB_8888)
+        val aligned = createBitmap(ALIGNED_SIZE, ALIGNED_SIZE)
         val canvas = Canvas(aligned)
-        canvas.drawBitmap(bitmap, transform, null)
+
+        val paint = Paint().apply {
+            isFilterBitmap = true
+            isAntiAlias = true
+        }
+
+        canvas.drawBitmap(bitmap, transform, paint)
 
         return aligned
     }
@@ -100,6 +154,9 @@ class FaceDetectionProcessor : AutoCloseable {
         val nose = face.getLandmark(FaceLandmark.NOSE_BASE)?.position ?: return null
         val mouthLeft = face.getLandmark(FaceLandmark.MOUTH_LEFT)?.position ?: return null
         val mouthRight = face.getLandmark(FaceLandmark.MOUTH_RIGHT)?.position ?: return null
+
+        Log.d("FaceDetector", "LeftEye: (${leftEye.x}, ${leftEye.y})")
+        Log.d("FaceDetector", "rightEye: (${rightEye.x}, ${rightEye.y})")
 
         return arrayOf(
             floatArrayOf(leftEye.x, leftEye.y),
@@ -169,8 +226,8 @@ class FaceDetectionProcessor : AutoCloseable {
             srcVar += srcC[i][0] * srcC[i][0] + srcC[i][1] * srcC[i][1]
             dstVar += dstC[i][0] * dstC[i][0] + dstC[i][1] * dstC[i][1]
         }
-        val srcStd = sqrt(srcVar / n)
-        val dstStd = sqrt(dstVar / n)
+        val srcStd = sqrt(srcVar / (n * 2))
+        val dstStd = sqrt(dstVar / (n * 2))
 
         // Avoid division by zero for degenerate inputs
         if (srcStd < 1e-6f || dstStd < 1e-6f) {
@@ -192,27 +249,12 @@ class FaceDetectionProcessor : AutoCloseable {
             h11 += srcC[i][1] * dstC[i][1]
         }
 
-        // SVD of a 2×2 matrix – closed-form solution
-        val (u, vt) = svd2x2(h00, h01, h10, h11)
-
-        // R = V_H · U_Hᵀ
-        var r00 = vt[0] * u[0] + vt[2] * u[1]
-        var r01 = vt[0] * u[2] + vt[2] * u[3]
-        var r10 = vt[1] * u[0] + vt[3] * u[1]
-        var r11 = vt[1] * u[2] + vt[3] * u[3]
-
-        // Fix reflection if determinant < 0
-        if (r00 * r11 - r01 * r10 < 0) {
-            r00 = vt[0] * u[0] - vt[2] * u[1]
-            r01 = vt[0] * u[2] - vt[2] * u[3]
-            r10 = vt[1] * u[0] - vt[3] * u[1]
-            r11 = vt[1] * u[2] - vt[3] * u[3]
-        }
+        val r = computeRotationTranspose(h00, h01, h10, h11)
 
         // ── Step 4: build the full affine matrix ──
         val scale = dstStd / srcStd
-        val sR00 = scale * r00; val sR01 = scale * r01
-        val sR10 = scale * r10; val sR11 = scale * r11
+        val sR00 = scale * r[0][0]; val sR01 = scale * r[0][1]
+        val sR10 = scale * r[1][0]; val sR11 = scale * r[1][1]
 
         val tx = dstMeanX - (sR00 * srcMeanX + sR01 * srcMeanY)
         val ty = dstMeanY - (sR10 * srcMeanX + sR11 * srcMeanY)
@@ -230,6 +272,21 @@ class FaceDetectionProcessor : AutoCloseable {
             )
         )
         return matrix
+    }
+
+    private fun computeRotationTranspose(a: Float, b: Float, c: Float, d: Float): Array<FloatArray>{
+        val s = a + d
+        val t = c - b
+
+        val norm = sqrt(s * s + t * t)
+
+        val x = s / norm
+        val y = t / norm
+
+        return arrayOf(
+            floatArrayOf(x,  y),
+            floatArrayOf(-y, x)
+        )
     }
 
     /**

@@ -171,21 +171,28 @@ class GalleryService(private val context: Context) {
 
                     faces.forEach { face ->
 //                        val alignedImage = faceDetector.alignFace(bitmap, face)
-                        val croppedImage = faceDetector.cropFace(bitmap, face.boundingBox)
+                        val croppedImage = faceDetector.alignFace(bitmap, face)
                         val faceFeatures = VectorUtils.normalize(faceEncoder.getFaceFeatures(croppedImage))
                         val allFaces = faceDao.getAllFaces()
                         val bestMatch = allFaces.maxByOrNull {
-                            VectorUtils.dotProduct(faceFeatures, it.embedding)
+                            VectorUtils.dotProduct(faceFeatures, VectorUtils.divide(it.embedding, it.counter.toFloat()))
                         }
                         var id : Long = 0
                         if (bestMatch == null){
                             id = 1
-                            faceDao.insertFace(FaceEntity(1, "p1", faceFeatures))
-                        } else if (VectorUtils.dotProduct(faceFeatures, bestMatch.embedding) < 0.6){
+                            faceDao.insertFace(FaceEntity(1, "p1", faceFeatures, 1))
+                            Log.d("GalleryService", "Inserted new Face with id 1")
+                        } else if (VectorUtils.dotProduct(faceFeatures, VectorUtils.divide(bestMatch.embedding, bestMatch.counter.toFloat())) < 0.6){
                             id = (faceDao.countFaces() + 1).toLong()
-                            faceDao.insertFace(FaceEntity(id, "p$id", faceFeatures))
+                            faceDao.insertFace(FaceEntity(id, "p$id", faceFeatures, 1))
+                            Log.d("GalleryService", "Inserted new Face with id $id")
                         } else {
+                            Log.d("GalleryService", "Face found in DB with id ${bestMatch.id}, the new Count: ${bestMatch.counter + 1}")
                             id = bestMatch.id
+                            val newEmbedding = VectorUtils.add(faceFeatures, bestMatch.embedding)
+                            faceDao.updateFaceEmbedding(bestMatch.id, newEmbedding)
+                            faceDao.incrementFaceCounter(bestMatch.id)
+
                         }
                         saveBitmapToGallery(croppedImage, "face_${System.currentTimeMillis()}", "p$id")
                     }
