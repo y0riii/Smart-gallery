@@ -192,6 +192,7 @@ class GalleryService(private val context: Context) {
                             faceDao.insertFace(FaceEntity(id, "p$id", faceFeatures, 1))
                             Log.d("GalleryService", "Inserted new Face with id $id")
                         } else {
+
                             Log.d("GalleryService", "Face found in DB with id ${bestMatch.id}, the new Count: ${bestMatch.counter + 1}")
                             id = bestMatch.id
                             val newEmbedding = VectorUtils.add(faceFeatures, bestMatch.embedding)
