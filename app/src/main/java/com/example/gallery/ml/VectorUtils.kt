@@ -29,5 +29,14 @@ class VectorUtils {
             }
             return result
         }
+
+        fun euclideanDistance(vecA: FloatArray, vecB: FloatArray): Float {
+            var sum = 0.0f
+            for (i in vecA.indices) {
+                val diff = vecA[i] - vecB[i]
+                sum += diff * diff
+            }
+            return sqrt(sum.toDouble()).toFloat()
+        }
     }
 }
