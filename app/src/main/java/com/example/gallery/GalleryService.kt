@@ -1,11 +1,14 @@
 package com.example.gallery
 
+import android.graphics.Bitmap
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
 import com.example.gallery.db.AppDatabase
+import com.example.gallery.db.FaceEntity
 import com.example.gallery.db.MediaEntity
 import com.example.gallery.db.OcrProcessor
 import com.example.gallery.faceDetection.FaceDetectionProcessor
@@ -55,6 +58,7 @@ class GalleryService(private val context: Context) {
 //            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
 //            contentValues
 //        ) ?: return false
+//
 //
 //        return try {
 //            resolver.openOutputStream(imageUri)?.use { stream ->
@@ -165,25 +169,40 @@ class GalleryService(private val context: Context) {
 
                     Log.d("GalleryService", "Detected: ${faces.size} faces (ID: $id)")
 
-//                    faces.forEach { face ->
-//                        val croppedImage = faceDetector.cropFace(bitmap, face.boundingBox)
-//                        val faceFeatures = VectorUtils.normalize(faceEncoder.getFaceFeatures(croppedImage))
-//                        val allFaces = faceDao.getAllFaces()
-//                        val bestMatch = allFaces.maxByOrNull {
-//                            VectorUtils.dotProduct(faceFeatures, it.embedding)
-//                        }
-//                        var id : Long = 0
-//                        if (bestMatch == null){
-//                            id = 1
-//                            faceDao.insertFace(FaceEntity(1, "p1", faceFeatures))
-//                        } else if (VectorUtils.dotProduct(faceFeatures, bestMatch.embedding) < 0.6){
-//                            id = (faceDao.countFaces() + 1).toLong()
-//                            faceDao.insertFace(FaceEntity(id, "p$id", faceFeatures))
-//                        } else {
-//                            id = bestMatch.id
-//                        }
-//                        saveBitmapToGallery(croppedImage, "face_${System.currentTimeMillis()}", "p$id")
-//                    }
+                    faces.forEach { face ->
+//                        val alignedImage = faceDetector.alignFace(bitmap, face)
+                        val croppedImage = faceDetector.alignFace(bitmap, face)
+                        val faceFeatures = faceEncoder.getFaceFeatures(croppedImage)
+                        val normalizedFaceFeatures = VectorUtils.normalize(faceFeatures)
+
+                        val allFaces = faceDao.getAllFaces()
+                        val bestMatch = allFaces.maxByOrNull {
+                            val newVec = VectorUtils.normalize(VectorUtils.divide(it.embedding, it.counter.toFloat()))
+                            VectorUtils.dotProduct(normalizedFaceFeatures, newVec)
+//                            VectorUtils.euclideanDistance(faceFeatures, VectorUtils.divide(it.embedding, it.counter.toFloat()))
+                        }
+                        var id : Long = 0
+                        if (bestMatch == null){
+                            id = 1
+                            faceDao.insertFace(FaceEntity(1, "#p1", faceFeatures, 1))
+                            Log.d("GalleryService", "Inserted new Face with id 1")
+                        } else {
+                            val normalizedBestMatch = VectorUtils.normalize(VectorUtils.divide(bestMatch.embedding, bestMatch.counter.toFloat()))
+
+                            if (VectorUtils.dotProduct(normalizedFaceFeatures, normalizedBestMatch) < 0.5) {
+                                id = (faceDao.countFaces() + 1).toLong()
+                                faceDao.insertFace(FaceEntity(id, "#p$id", faceFeatures, 1))
+                                Log.d("GalleryService", "Inserted new Face with id $id")
+                            } else {
+
+                                Log.d("GalleryService", "Face found in DB with id ${bestMatch.id}, the new Count: ${bestMatch.counter + 1}")
+                                id = bestMatch.id
+                                val newEmbedding = VectorUtils.add(faceFeatures, bestMatch.embedding)
+                                faceDao.updateFaceEmbedding(bestMatch.id, newEmbedding)
+                                faceDao.incrementFaceCounter(bestMatch.id)
+                            }
+                        }
+                    }
 
                     mediaDao.insertAll(
                         listOf(MediaEntity(id, timestamp, false, features, text))

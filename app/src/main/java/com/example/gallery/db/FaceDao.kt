@@ -19,7 +19,12 @@ interface FaceDao {
     suspend fun getAllFaces(): List<FaceEntity>
 
     @Query("UPDATE face_recognition SET embedding = :newEmbedding WHERE id = :faceId")
-    suspend fun updateFaceEmbedding(faceId: Long, newEmbedding: FloatArray)
+    suspend fun updateFaceEmbeddingRaw(faceId: Long, newEmbedding: ByteArray)
+
+    suspend fun updateFaceEmbedding(faceId: Long, embedding: FloatArray) {
+        val bytes = Converters().fromFloatArray(embedding)
+        updateFaceEmbeddingRaw(faceId, bytes)
+    }
 
     @Query("UPDATE face_recognition SET counter = counter + 1 WHERE id = :faceId")
     suspend fun incrementFaceCounter(faceId: Long)

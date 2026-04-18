@@ -5,6 +5,7 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import androidx.core.graphics.scale
 import java.io.File
 import java.io.FileOutputStream
@@ -75,6 +76,23 @@ class FaceEncoder(context: Context) : AutoCloseable {
     }
 
     fun getFaceFeatures(bitmap: Bitmap): FloatArray {
+        val feat1 = runInference(bitmap)
+
+        // Create a horizontally flipped version of the bitmap
+        val matrix = Matrix().apply { postScale(-1f, 1f, bitmap.width / 2f, bitmap.height / 2f) }
+        val flippedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+
+        val feat2 = runInference(flippedBitmap)
+
+        // Element-wise average
+        for (i in feat1.indices) {
+            feat1[i] = (feat1[i] + feat2[i]) / 2f
+        }
+
+        return feat1
+    }
+
+    private fun runInference(bitmap: Bitmap): FloatArray {
         preprocessImage(bitmap).use { input ->
             session.run(mapOf("input0" to input)).use { result ->
                 return (result[0].value as Array<FloatArray>)[0]
