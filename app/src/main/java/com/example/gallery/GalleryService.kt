@@ -39,41 +39,41 @@ class GalleryService(private val context: Context) {
         }
     }
 
-    fun saveBitmapToGallery(
-        bitmap: Bitmap,
-        fileName: String,
-        personName: String
-    ): Boolean {
-
-        val resolver = context.contentResolver
-
-        val contentValues = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, "$fileName.jpg")
-            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/FaceRec/$personName")
-            put(MediaStore.Images.Media.IS_PENDING, 1)
-        }
-
-        val imageUri = resolver.insert(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            contentValues
-        ) ?: return false
-
-
-        return try {
-            resolver.openOutputStream(imageUri)?.use { stream ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream)
-            }
-
-            contentValues.clear()
-            contentValues.put(MediaStore.Images.Media.IS_PENDING, 0)
-            resolver.update(imageUri, contentValues, null, null)
-
-            true
-        } catch (e: Exception) {
-            false
-        }
-    }
+//    fun saveBitmapToGallery(
+//        bitmap: Bitmap,
+//        fileName: String,
+//        personName: String
+//    ): Boolean {
+//
+//        val resolver = context.contentResolver
+//
+//        val contentValues = ContentValues().apply {
+//            put(MediaStore.Images.Media.DISPLAY_NAME, "$fileName.jpg")
+//            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+//            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/FaceRec/$personName")
+//            put(MediaStore.Images.Media.IS_PENDING, 1)
+//        }
+//
+//        val imageUri = resolver.insert(
+//            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+//            contentValues
+//        ) ?: return false
+//
+//
+//        return try {
+//            resolver.openOutputStream(imageUri)?.use { stream ->
+//                bitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream)
+//            }
+//
+//            contentValues.clear()
+//            contentValues.put(MediaStore.Images.Media.IS_PENDING, 0)
+//            resolver.update(imageUri, contentValues, null, null)
+//
+//            true
+//        } catch (e: Exception) {
+//            false
+//        }
+//    }
 
     /**
      * Compares the device's MediaStore with the Room Database and syncs them.
@@ -182,25 +182,26 @@ class GalleryService(private val context: Context) {
 //                            VectorUtils.euclideanDistance(faceFeatures, VectorUtils.divide(it.embedding, it.counter.toFloat()))
                         }
                         var id : Long = 0
-                        val normalizedBestMatch = VectorUtils.normalize(VectorUtils.divide(bestMatch.embedding, bestMatch.counter.toFloat()))
                         if (bestMatch == null){
                             id = 1
-                            faceDao.insertFace(FaceEntity(1, "p1", faceFeatures, 1))
+                            faceDao.insertFace(FaceEntity(1, "#p1", faceFeatures, 1))
                             Log.d("GalleryService", "Inserted new Face with id 1")
-                        } else if (VectorUtils.dotProduct(normalizedFaceFeatures, normalizedBestMatch) < 0.6){
-                            id = (faceDao.countFaces() + 1).toLong()
-                            faceDao.insertFace(FaceEntity(id, "p$id", faceFeatures, 1))
-                            Log.d("GalleryService", "Inserted new Face with id $id")
                         } else {
+                            val normalizedBestMatch = VectorUtils.normalize(VectorUtils.divide(bestMatch.embedding, bestMatch.counter.toFloat()))
 
-                            Log.d("GalleryService", "Face found in DB with id ${bestMatch.id}, the new Count: ${bestMatch.counter + 1}")
-                            id = bestMatch.id
-                            val newEmbedding = VectorUtils.add(faceFeatures, bestMatch.embedding)
-                            faceDao.updateFaceEmbedding(bestMatch.id, newEmbedding)
-                            faceDao.incrementFaceCounter(bestMatch.id)
+                            if (VectorUtils.dotProduct(normalizedFaceFeatures, normalizedBestMatch) < 0.5) {
+                                id = (faceDao.countFaces() + 1).toLong()
+                                faceDao.insertFace(FaceEntity(id, "#p$id", faceFeatures, 1))
+                                Log.d("GalleryService", "Inserted new Face with id $id")
+                            } else {
 
+                                Log.d("GalleryService", "Face found in DB with id ${bestMatch.id}, the new Count: ${bestMatch.counter + 1}")
+                                id = bestMatch.id
+                                val newEmbedding = VectorUtils.add(faceFeatures, bestMatch.embedding)
+                                faceDao.updateFaceEmbedding(bestMatch.id, newEmbedding)
+                                faceDao.incrementFaceCounter(bestMatch.id)
+                            }
                         }
-                        saveBitmapToGallery(croppedImage, "face_${System.currentTimeMillis()}", "p$id")
                     }
 
                     mediaDao.insertAll(
