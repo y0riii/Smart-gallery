@@ -7,13 +7,17 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.gallery.GalleryService
+import com.example.gallery.db.FaceDao
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class GalleryViewModel(
-    private val service: GalleryService
+    private val service: GalleryService,
+    private val faceDao: FaceDao
 ) : ViewModel() {
 
     var images by mutableStateOf<List<Uri>>(emptyList())
@@ -23,6 +27,12 @@ class GalleryViewModel(
         private set
 
     var statusText by mutableStateOf("")
+
+    val allNames = faceDao.getAllNamesFlow().stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
 
     private var preloadJob: Deferred<Unit>
 

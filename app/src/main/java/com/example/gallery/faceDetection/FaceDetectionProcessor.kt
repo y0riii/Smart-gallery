@@ -6,6 +6,7 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
 import android.util.Log
+import androidx.core.graphics.createBitmap
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceDetection
@@ -14,9 +15,8 @@ import com.google.mlkit.vision.face.FaceLandmark
 import java.lang.AutoCloseable
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
-import kotlin.math.sqrt
-import androidx.core.graphics.createBitmap
 import kotlin.math.abs
+import kotlin.math.sqrt
 
 class FaceDetectionProcessor : AutoCloseable {
 
@@ -208,8 +208,10 @@ class FaceDetectionProcessor : AutoCloseable {
         val n = src.size
 
         // ── Step 1: compute centroids ──
-        var srcMeanX = 0f; var srcMeanY = 0f
-        var dstMeanX = 0f; var dstMeanY = 0f
+        var srcMeanX = 0f
+        var srcMeanY = 0f
+        var dstMeanX = 0f
+        var dstMeanY = 0f
         for (i in 0 until n) {
             srcMeanX += src[i][0]; srcMeanY += src[i][1]
             dstMeanX += dst[i][0]; dstMeanY += dst[i][1]
@@ -221,7 +223,8 @@ class FaceDetectionProcessor : AutoCloseable {
         val srcC = Array(n) { floatArrayOf(src[it][0] - srcMeanX, src[it][1] - srcMeanY) }
         val dstC = Array(n) { floatArrayOf(dst[it][0] - dstMeanX, dst[it][1] - dstMeanY) }
 
-        var srcVar = 0f; var dstVar = 0f
+        var srcVar = 0f
+        var dstVar = 0f
         for (i in 0 until n) {
             srcVar += srcC[i][0] * srcC[i][0] + srcC[i][1] * srcC[i][1]
             dstVar += dstC[i][0] * dstC[i][0] + dstC[i][1] * dstC[i][1]
@@ -240,8 +243,10 @@ class FaceDetectionProcessor : AutoCloseable {
         }
 
         // ── Step 3: 2×2 cross-covariance matrix H = srcᵀ · dst ──
-        var h00 = 0f; var h01 = 0f
-        var h10 = 0f; var h11 = 0f
+        var h00 = 0f
+        var h01 = 0f
+        var h10 = 0f
+        var h11 = 0f
         for (i in 0 until n) {
             h00 += srcC[i][0] * dstC[i][0]
             h01 += srcC[i][0] * dstC[i][1]
@@ -253,8 +258,10 @@ class FaceDetectionProcessor : AutoCloseable {
 
         // ── Step 4: build the full affine matrix ──
         val scale = dstStd / srcStd
-        val sR00 = scale * r[0][0]; val sR01 = scale * r[0][1]
-        val sR10 = scale * r[1][0]; val sR11 = scale * r[1][1]
+        val sR00 = scale * r[0][0]
+        val sR01 = scale * r[0][1]
+        val sR10 = scale * r[1][0]
+        val sR11 = scale * r[1][1]
 
         val tx = dstMeanX - (sR00 * srcMeanX + sR01 * srcMeanY)
         val ty = dstMeanY - (sR10 * srcMeanX + sR11 * srcMeanY)
@@ -268,13 +275,18 @@ class FaceDetectionProcessor : AutoCloseable {
             floatArrayOf(
                 sR00, sR01, tx,
                 sR10, sR11, ty,
-                0f,   0f,   1f
+                0f, 0f, 1f
             )
         )
         return matrix
     }
 
-    private fun computeRotationTranspose(a: Float, b: Float, c: Float, d: Float): Array<FloatArray>{
+    private fun computeRotationTranspose(
+        a: Float,
+        b: Float,
+        c: Float,
+        d: Float
+    ): Array<FloatArray> {
         val s = a + d
         val t = c - b
 
@@ -284,7 +296,7 @@ class FaceDetectionProcessor : AutoCloseable {
         val y = t / norm
 
         return arrayOf(
-            floatArrayOf(x,  y),
+            floatArrayOf(x, y),
             floatArrayOf(-y, x)
         )
     }

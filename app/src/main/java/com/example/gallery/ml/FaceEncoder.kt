@@ -80,7 +80,8 @@ class FaceEncoder(context: Context) : AutoCloseable {
 
         // Create a horizontally flipped version of the bitmap
         val matrix = Matrix().apply { postScale(-1f, 1f, bitmap.width / 2f, bitmap.height / 2f) }
-        val flippedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        val flippedBitmap =
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
 
         val feat2 = runInference(flippedBitmap)
 

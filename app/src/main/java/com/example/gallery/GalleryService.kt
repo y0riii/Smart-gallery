@@ -1,14 +1,13 @@
 package com.example.gallery
 
-import android.graphics.Bitmap
 import android.content.ContentUris
-import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
 import com.example.gallery.db.AppDatabase
 import com.example.gallery.db.FaceEntity
+import com.example.gallery.db.ImageFaceCrossRef
 import com.example.gallery.db.MediaEntity
 import com.example.gallery.db.OcrProcessor
 import com.example.gallery.faceDetection.FaceDetectionProcessor
@@ -153,11 +152,11 @@ class GalleryService(private val context: Context) {
         val totalCount = imagesToProcess.size
         var counter = 0
 
-        imagesToProcess.forEach { (id, timestamp) ->
+        imagesToProcess.forEach { (mediaId, timestamp) ->
             try {
                 val uri = ContentUris.withAppendedId(
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    id
+                    mediaId
                 )
 
                 val bitmap = ImageUtils.getBitmapFromUri(context, uri)
@@ -167,7 +166,11 @@ class GalleryService(private val context: Context) {
                     val text = ocrProcessor.recognizeText(bitmap)
                     val faces: List<Face> = faceDetector.detectFaces(bitmap)
 
-                    Log.d("GalleryService", "Detected: ${faces.size} faces (ID: $id)")
+                    Log.d("GalleryService", "Detected: ${faces.size} faces (ID: $mediaId)")
+
+                    mediaDao.insertAll(
+                        listOf(MediaEntity(mediaId, timestamp, false, features, text))
+                    )
 
                     faces.forEach { face ->
 //                        val alignedImage = faceDetector.alignFace(bitmap, face)
@@ -177,44 +180,59 @@ class GalleryService(private val context: Context) {
 
                         val allFaces = faceDao.getAllFaces()
                         val bestMatch = allFaces.maxByOrNull {
-                            val newVec = VectorUtils.normalize(VectorUtils.divide(it.embedding, it.counter.toFloat()))
+                            val newVec = VectorUtils.normalize(
+                                VectorUtils.divide(
+                                    it.embedding,
+                                    it.counter.toFloat()
+                                )
+                            )
                             VectorUtils.dotProduct(normalizedFaceFeatures, newVec)
 //                            VectorUtils.euclideanDistance(faceFeatures, VectorUtils.divide(it.embedding, it.counter.toFloat()))
                         }
-                        var id : Long = 0
-                        if (bestMatch == null){
-                            id = 1
+                        var faceId: Long = 0
+                        if (bestMatch == null) {
+                            faceId = 1
                             faceDao.insertFace(FaceEntity(1, "#p1", faceFeatures, 1))
                             Log.d("GalleryService", "Inserted new Face with id 1")
                         } else {
-                            val normalizedBestMatch = VectorUtils.normalize(VectorUtils.divide(bestMatch.embedding, bestMatch.counter.toFloat()))
+                            val normalizedBestMatch = VectorUtils.normalize(
+                                VectorUtils.divide(
+                                    bestMatch.embedding,
+                                    bestMatch.counter.toFloat()
+                                )
+                            )
 
-                            if (VectorUtils.dotProduct(normalizedFaceFeatures, normalizedBestMatch) < 0.5) {
-                                id = (faceDao.countFaces() + 1).toLong()
-                                faceDao.insertFace(FaceEntity(id, "#p$id", faceFeatures, 1))
-                                Log.d("GalleryService", "Inserted new Face with id $id")
+                            if (VectorUtils.dotProduct(
+                                    normalizedFaceFeatures,
+                                    normalizedBestMatch
+                                ) < 0.5
+                            ) {
+                                faceId = (faceDao.countFaces() + 1).toLong()
+                                faceDao.insertFace(FaceEntity(faceId, "#p$faceId", faceFeatures, 1))
+                                Log.d("GalleryService", "Inserted new Face with id $faceId")
                             } else {
 
-                                Log.d("GalleryService", "Face found in DB with id ${bestMatch.id}, the new Count: ${bestMatch.counter + 1}")
-                                id = bestMatch.id
-                                val newEmbedding = VectorUtils.add(faceFeatures, bestMatch.embedding)
+                                Log.d(
+                                    "GalleryService",
+                                    "Face found in DB with id ${bestMatch.id}, the new Count: ${bestMatch.counter + 1}"
+                                )
+                                faceId = bestMatch.id
+                                val newEmbedding =
+                                    VectorUtils.add(faceFeatures, bestMatch.embedding)
                                 faceDao.updateFaceEmbedding(bestMatch.id, newEmbedding)
                                 faceDao.incrementFaceCounter(bestMatch.id)
                             }
                         }
+                        faceDao.insertCrossRef(ImageFaceCrossRef(mediaId, faceId))
                     }
-
-                    mediaDao.insertAll(
-                        listOf(MediaEntity(id, timestamp, false, features, text))
-                    )
 
                     // Note: Face recognition logic will be integrated here in the next step.
 
                     counter++
-                    Log.d("GalleryService", "Processed: $counter / $totalCount (ID: $id)")
+                    Log.d("GalleryService", "Processed: $counter / $totalCount (ID: $mediaId)")
                 }
             } catch (e: Exception) {
-                Log.e("GalleryService", "Error processing image $id", e)
+                Log.e("GalleryService", "Error processing image $mediaId", e)
             }
         }
 
@@ -222,6 +240,53 @@ class GalleryService(private val context: Context) {
         ocrProcessor.close()
         faceDetector.close()
         faceEncoder.close()
+    }
+
+    private suspend fun findNamesInPrompt(text: String): List<String> {
+
+        val allNames = faceDao.getAllNames()
+
+        val results = mutableListOf<String>()
+
+        var i = 0
+        while (i < text.length) {
+            if (text[i] == '@') {
+
+                var bestEnd = -1
+                var bestName = ""
+
+                for (name in allNames) {
+                    val candidate = "@$name"
+
+                    if (text.startsWith(candidate, i, true)) {
+                        val end = i + candidate.length
+
+                        // Ensure boundary (space or end of text)
+                        val validBoundary =
+                            end == text.length || text[end].isWhitespace()
+
+                        if (validBoundary && end > bestEnd) {
+                            bestEnd = end
+                            bestName = name
+                        }
+                    }
+                }
+
+                if (bestEnd != -1) {
+                    results.add(bestName)
+                    i = bestEnd
+                    continue
+                }
+            }
+            i++
+        }
+        Log.d("GalleryService", "found ${allNames.size} names in DB")
+        Log.d("GalleryService", "found ${results.size} names in prompt")
+        for (name in results) {
+            Log.d("GalleryService", "$name")
+        }
+
+        return results
     }
 
     suspend fun getAllDeviceImages(): List<Uri> =
@@ -236,8 +301,17 @@ class GalleryService(private val context: Context) {
 
     suspend fun search(prompt: String): List<Uri> {
         return withContext(Dispatchers.IO) {
+            val names = findNamesInPrompt(prompt)
             val textFeatures = textEncoder.getTextFeatures(prompt)
-            val images = mediaDao.getAllMedia()
+            val images = if (names.isEmpty()) {
+                mediaDao.getAllMedia()
+            } else {
+                Log.d("GalleryService", "names passed to query: $names")
+                val testNames = faceDao.getAllNames()
+                Log.d("GalleryService", "names in DB: $testNames")
+                faceDao.getImagesByNames(names, names.size)
+            }
+            Log.d("GalleryService", "found ${images.size} images in prompt")
 
             val sortedImages = images.map { entity ->
                 val similarity = VectorUtils.dotProduct(textFeatures, entity.embedding)

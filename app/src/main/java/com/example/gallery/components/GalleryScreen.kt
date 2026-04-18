@@ -13,6 +13,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
@@ -21,10 +23,12 @@ import androidx.core.net.toUri
 
 @Composable
 fun GalleryScreen(viewModel: GalleryViewModel) {
+    val allNames by viewModel.allNames.collectAsState()
     GalleryContent(
         images = viewModel.images,
         isSearching = viewModel.isSearching,
         statusText = viewModel.statusText,
+        allNames = allNames,
         onSearch = { prompt, useClip ->
             viewModel.search(prompt, useClip)
         }
@@ -36,6 +40,7 @@ fun GalleryContent(
     images: List<Uri>,
     isSearching: Boolean,
     statusText: String,
+    allNames: List<String>,
     onSearch: (String, Boolean) -> Unit
 ) {
     val gridState = rememberLazyGridState()
@@ -49,7 +54,8 @@ fun GalleryContent(
     Column(modifier = Modifier.fillMaxSize()) {
         SearchBar(
             isSearching = isSearching,
-            onSearch = onSearch
+            onSearch = onSearch,
+            allNames = allNames
         )
 
         if (isSearching || statusText.isNotEmpty()) {
@@ -86,6 +92,7 @@ fun GalleryScreenPreview() {
                 },
                 isSearching = false,
                 statusText = "Showing results for \"placeholder images\"",
+                allNames = emptyList(),
                 onSearch = { _, _ -> }
             )
         }
@@ -101,6 +108,7 @@ fun GalleryScreenSearchingPreview() {
                 images = emptyList(),
                 isSearching = true,
                 statusText = "Searching...",
+                allNames = emptyList(),
                 onSearch = { _, _ -> }
             )
         }

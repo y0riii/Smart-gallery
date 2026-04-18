@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface FaceDao {
@@ -17,6 +18,17 @@ interface FaceDao {
 
     @Query("SELECT * FROM face_recognition")
     suspend fun getAllFaces(): List<FaceEntity>
+
+    @Query("SELECT name FROM face_recognition")
+    suspend fun getAllNames(): List<String>
+
+    @Query(
+        """
+        SELECT name FROM face_recognition
+        ORDER BY counter DESC, name ASC
+    """
+    )
+    fun getAllNamesFlow(): Flow<List<String>>
 
     @Query("UPDATE face_recognition SET embedding = :newEmbedding WHERE id = :faceId")
     suspend fun updateFaceEmbeddingRaw(faceId: Long, newEmbedding: ByteArray)
@@ -62,6 +74,19 @@ interface FaceDao {
     """
     )
     suspend fun getImagesByFaces(faceIds: List<Long>, count: Int): List<MediaEntity>
+
+    @Transaction
+    @Query(
+        """
+    SELECT m.* FROM media_items AS m
+    JOIN media_face_join AS j ON m.mediaId = j.mediaId
+    JOIN face_recognition AS f ON j.faceId = f.id
+    WHERE f.name IN (:names)
+    GROUP BY m.mediaId
+    HAVING COUNT(DISTINCT f.name) = :count
+    """
+    )
+    suspend fun getImagesByNames(names: List<String>, count: Int): List<MediaEntity>
 
     @Query("SELECT COUNT(*) FROM face_recognition")
     suspend fun countFaces(): Int
