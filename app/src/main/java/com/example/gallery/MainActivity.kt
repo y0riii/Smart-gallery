@@ -8,13 +8,25 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import com.example.gallery.components.GalleryScreen
 import com.example.gallery.components.GalleryViewModel
 
@@ -58,6 +70,7 @@ private fun getPermissionsToRequest(): Array<String> {
 fun GalleryApp(viewModel: GalleryViewModel) {
 
     var hasPermission by remember { mutableStateOf(false) }
+    var currentTab by remember { mutableIntStateOf(1) }
 
     val permissionsToRequest = remember { getPermissionsToRequest() }
 
@@ -80,6 +93,30 @@ fun GalleryApp(viewModel: GalleryViewModel) {
         }
     }
 
-    GalleryScreen(viewModel)
-
+    Scaffold(
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(
+                    selected = currentTab == 0,
+                    onClick = { currentTab = 0 },
+                    icon = { Icon(Icons.Default.FolderOpen, contentDescription = "Folders") },
+                    label = { Text("Folders") }
+                )
+                NavigationBarItem(
+                    selected = currentTab == 1,
+                    onClick = { currentTab = 1 },
+                    icon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+                    label = { Text("Search") }
+                )
+            }
+        }
+    ) { innerPadding ->
+        Box(modifier = Modifier.padding(innerPadding)) {
+            when {
+                !hasPermission -> GalleryScreen(viewModel)
+                currentTab == 0 -> FoldersScreen(onFolderClick = { _ -> })
+                else -> GalleryScreen(viewModel)
+            }
+        }
+    }
 }

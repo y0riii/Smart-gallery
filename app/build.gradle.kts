@@ -70,7 +70,9 @@ dependencies {
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
+    implementation("androidx.compose.material:material-icons-extended")
     ksp(libs.androidx.room.compiler)
+
 
     implementation(libs.text.recognition)
     implementation(libs.face.detection)

@@ -10,7 +10,7 @@ import androidx.room.TypeConverters
     // CRITICAL: Include both the main data entity and the FTS index entity.
     // Room will manage the creation and synchronization of the FTS table based on FtsMediaEntity.
     entities = [MediaEntity::class, FtsMediaEntity::class, FaceEntity::class, ImageFaceCrossRef::class],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
