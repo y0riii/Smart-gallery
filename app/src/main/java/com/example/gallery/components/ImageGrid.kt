@@ -3,6 +3,7 @@ package com.example.gallery.components
 
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,7 +30,8 @@ import com.example.gallery.R
 fun ImageGrid(
     images: List<Uri>,
     gridState: LazyGridState,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onImageClick: (Int) -> Unit = {}
 ) {
     LazyVerticalGrid(
         state = gridState,
@@ -37,7 +39,7 @@ fun ImageGrid(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(4.dp)
     ) {
-        itemsIndexed(images, key = { index, uri -> "$index-$uri" }) { _, result ->
+        itemsIndexed(images, key = { index, uri -> "$index-$uri" }) { index, result ->
             AsyncImage(
                 model = result,
                 contentDescription = "Image result",
@@ -46,7 +48,8 @@ fun ImageGrid(
                 modifier = Modifier
                     .padding(4.dp)
                     .aspectRatio(1f)
-                    .background(Color.LightGray),
+                    .background(Color.LightGray)
+                    .clickable { onImageClick(index) },
                 contentScale = ContentScale.Crop
             )
         }

@@ -1,6 +1,7 @@
 package com.example.gallery.components
 
 import android.net.Uri
+import androidx.activity.result.IntentSenderRequest
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -28,6 +29,9 @@ class GalleryViewModel(
 
     var statusText by mutableStateOf("")
 
+    var intentSenderRequest by mutableStateOf<IntentSenderRequest?>(null)
+        private set
+
     val allNames = faceDao.getAllNamesFlow().stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -43,11 +47,8 @@ class GalleryViewModel(
     }
 
     fun onPermissionGranted() {
-
         viewModelScope.launch {
-
             images = service.getAllDeviceImages()
-
             service.indexImagesBackground()
         }
     }
@@ -70,6 +71,28 @@ class GalleryViewModel(
                 "Showing OCR document search results"
 
             isSearching = false
+        }
+    }
+
+    fun deleteImage(uri: Uri) {
+        viewModelScope.launch {
+            val pendingIntent = service.deleteImage(uri)
+            if (pendingIntent != null) {
+                intentSenderRequest = IntentSenderRequest.Builder(pendingIntent).build()
+            } else {
+                // If deleted immediately (Pre-R or DB only)
+                images = images.filter { it != uri }
+            }
+        }
+    }
+
+    fun onDeletionResult(success: Boolean) {
+        intentSenderRequest = null
+        if (success) {
+            viewModelScope.launch {
+                // Refresh images list
+                images = service.getAllDeviceImages()
+            }
         }
     }
 }

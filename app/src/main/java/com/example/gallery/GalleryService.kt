@@ -1,8 +1,10 @@
 package com.example.gallery
 
+import android.app.PendingIntent
 import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 import com.example.gallery.db.AppDatabase
@@ -242,53 +244,6 @@ class GalleryService(private val context: Context) {
         faceEncoder.close()
     }
 
-    private suspend fun findNamesInPrompt(text: String): List<String> {
-
-        val allNames = faceDao.getAllNames()
-
-        val results = mutableListOf<String>()
-
-        var i = 0
-        while (i < text.length) {
-            if (text[i] == '@') {
-
-                var bestEnd = -1
-                var bestName = ""
-
-                for (name in allNames) {
-                    val candidate = "@$name"
-
-                    if (text.startsWith(candidate, i, true)) {
-                        val end = i + candidate.length
-
-                        // Ensure boundary (space or end of text)
-                        val validBoundary =
-                            end == text.length || text[end].isWhitespace()
-
-                        if (validBoundary && end > bestEnd) {
-                            bestEnd = end
-                            bestName = name
-                        }
-                    }
-                }
-
-                if (bestEnd != -1) {
-                    results.add(bestName)
-                    i = bestEnd
-                    continue
-                }
-            }
-            i++
-        }
-        Log.d("GalleryService", "found ${allNames.size} names in DB")
-        Log.d("GalleryService", "found ${results.size} names in prompt")
-        for (name in results) {
-            Log.d("GalleryService", "$name")
-        }
-
-        return results
-    }
-
     suspend fun getAllDeviceImages(): List<Uri> =
         withContext(Dispatchers.IO) {
             ImageUtils.scanMediaStore(context).map { (id, _) ->
@@ -340,6 +295,70 @@ class GalleryService(private val context: Context) {
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                     entity.mediaId
                 )
+            }
+        }
+    }
+
+    private suspend fun findNamesInPrompt(text: String): List<String> {
+        val allNames = faceDao.getAllNames()
+        val results = mutableListOf<String>()
+        var i = 0
+        while (i < text.length) {
+            if (text[i] == '@') {
+                var bestEnd = -1
+                var bestName = ""
+                for (name in allNames) {
+                    val candidate = "@$name"
+                    if (text.startsWith(candidate, i, true)) {
+                        val end = i + candidate.length
+                        val validBoundary = end == text.length || text[end].isWhitespace()
+                        if (validBoundary && end > bestEnd) {
+                            bestEnd = end
+                            bestName = name
+                        }
+                    }
+                }
+                if (bestEnd != -1) {
+                    results.add(bestName)
+                    i = bestEnd
+                    continue
+                }
+            }
+            i++
+        }
+        return results
+    }
+
+    /**
+     * Deletes an image from the database and returns a PendingIntent if 
+     * explicit user permission is required for device deletion (Android 11+).
+     */
+    suspend fun deleteImage(uri: Uri): PendingIntent? {
+        return withContext(Dispatchers.IO) {
+            val mediaId = try {
+                ContentUris.parseId(uri)
+            } catch (e: Exception) {
+                null
+            }
+
+            // 1. Remove from Database
+            if (mediaId != null) {
+                val entity = mediaDao.getMediaById(mediaId)
+                if (entity != null) {
+                    mediaDao.delete(entity)
+                }
+            }
+
+            // 2. Handle Device Deletion
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                MediaStore.createDeleteRequest(context.contentResolver, listOf(uri))
+            } else {
+                try {
+                    context.contentResolver.delete(uri, null, null)
+                } catch (e: Exception) {
+                    Log.e("GalleryService", "Failed to delete image from device", e)
+                }
+                null
             }
         }
     }
