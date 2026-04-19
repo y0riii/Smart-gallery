@@ -15,11 +15,17 @@ interface MediaDao {
     @Delete
     suspend fun deleteAll(list: List<MediaEntity>)
 
+    @Delete
+    suspend fun delete(entity: MediaEntity)
+
     @Query("UPDATE media_items SET ocrText = :text WHERE mediaId = :mediaId")
     suspend fun updateOcrText(mediaId: Long, text: String)
 
     @Query("SELECT * FROM media_items ORDER BY timestampMs DESC")
     suspend fun getAllMedia(): List<MediaEntity>
+
+    @Query("SELECT * FROM media_items WHERE mediaId = :id LIMIT 1")
+    suspend fun getMediaById(id: Long): MediaEntity?
 
     // ===== REGULAR FTS SEARCH =====
     suspend fun searchMediaFts(query: String): List<MediaEntity> {
