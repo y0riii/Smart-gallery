@@ -21,5 +21,30 @@ class VectorUtils {
         fun divide(vector: FloatArray, scaler: Float): FloatArray {
             return vector.map { it / scaler }.toFloatArray()
         }
+
+        fun add(vecA: FloatArray, vecB: FloatArray): FloatArray {
+            val result = FloatArray(vecA.size)
+            for (i in vecA.indices) {
+                result[i] = vecA[i] + vecB[i]
+            }
+            return result
+        }
+
+        fun subtract(vecA: FloatArray, vecB: FloatArray): FloatArray {
+            val result = FloatArray(vecA.size)
+            for (i in vecA.indices) {
+                result[i] = vecA[i] - vecB[i]
+            }
+            return result
+        }
+
+        fun euclideanDistance(vecA: FloatArray, vecB: FloatArray): Float {
+            var sum = 0.0f
+            for (i in vecA.indices) {
+                val diff = vecA[i] - vecB[i]
+                sum += diff * diff
+            }
+            return sqrt(sum.toDouble()).toFloat()
+        }
     }
 }

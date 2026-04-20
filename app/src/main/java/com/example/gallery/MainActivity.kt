@@ -15,8 +15,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import com.example.gallery.components.GalleryScreen
 import com.example.gallery.components.GalleryViewModel
+import com.example.gallery.db.GalleryIndexerWorker
+import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
 
@@ -26,11 +32,28 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        scheduleBackgroundIndexing()
         setContent {
             MaterialTheme {
                 GalleryApp(viewModel)
             }
         }
+    }
+
+    private fun scheduleBackgroundIndexing() {
+        val constraints = Constraints.Builder()
+            .setRequiresBatteryNotLow(true) // Battery > 20%
+            .build()
+
+        val indexingRequest = PeriodicWorkRequestBuilder<GalleryIndexerWorker>(12, TimeUnit.HOURS)
+            .setConstraints(constraints)
+            .build()
+
+        WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+            "GalleryIndexing",
+            ExistingPeriodicWorkPolicy.KEEP,
+            indexingRequest
+        )
     }
 }
 

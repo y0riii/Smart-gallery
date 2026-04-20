@@ -1,13 +1,19 @@
 package com.example.gallery
 
+import android.app.PendingIntent
 import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
+import androidx.room.Transaction
 import com.example.gallery.db.AppDatabase
+import com.example.gallery.db.MediaCategoryCrossRef
 import com.example.gallery.db.MediaEntity
+import com.example.gallery.db.MediaPersonCrossRef
 import com.example.gallery.db.OcrProcessor
+import com.example.gallery.db.PersonEntity
 import com.example.gallery.faceDetection.FaceDetectionProcessor
 import com.example.gallery.ml.ClipImageEncoder
 import com.example.gallery.ml.ClipTextEncoder
@@ -20,9 +26,15 @@ import kotlinx.coroutines.withContext
 
 class GalleryService(private val context: Context) {
 
+    companion object {
+        private const val FACE_MATCH_THRESHOLD = 0.5f
+        private const val CATEGORY_MATCH_THRESHOLD = 0.75f
+    }
+
     private val db = AppDatabase.getDatabase(context)
     private val mediaDao = db.mediaDao()
-    private val faceDao = db.faceDao() // Groundwork for face recognition
+    private val personDao = db.personDao()
+    private val categoryDao = db.categoryDao()
 
     private val textEncoder: ClipTextEncoder by lazy {
         ClipTextEncoder(context)
@@ -35,41 +47,6 @@ class GalleryService(private val context: Context) {
             textEncoder
         }
     }
-
-//    fun saveBitmapToGallery(
-//        bitmap: Bitmap,
-//        fileName: String,
-//        personName: String
-//    ): Boolean {
-//
-//        val resolver = context.contentResolver
-//
-//        val contentValues = ContentValues().apply {
-//            put(MediaStore.Images.Media.DISPLAY_NAME, "$fileName.jpg")
-//            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-//            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/FaceRec/$personName")
-//            put(MediaStore.Images.Media.IS_PENDING, 1)
-//        }
-//
-//        val imageUri = resolver.insert(
-//            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-//            contentValues
-//        ) ?: return false
-//
-//        return try {
-//            resolver.openOutputStream(imageUri)?.use { stream ->
-//                bitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream)
-//            }
-//
-//            contentValues.clear()
-//            contentValues.put(MediaStore.Images.Media.IS_PENDING, 0)
-//            resolver.update(imageUri, contentValues, null, null)
-//
-//            true
-//        } catch (e: Exception) {
-//            false
-//        }
-//    }
 
     /**
      * Compares the device's MediaStore with the Room Database and syncs them.
@@ -90,19 +67,18 @@ class GalleryService(private val context: Context) {
             val deviceImageIds = deviceImages.map { it.first }.toSet()
 
             // 3. Fetch IDs currently in the database
-            // Note: Ensure you have added getAllMediaIds() to your MediaDao or use getAllMedia().map { it.mediaId }
             val dbImageIds = mediaDao.getAllMedia().map { it.mediaId }.toSet()
 
             // 4. Calculate the differences (The Diff)
             val idsToDelete = dbImageIds - deviceImageIds // In DB, but missing from device
             val idsToAdd = deviceImageIds - dbImageIds    // On device, but missing from DB
 
-            // 5. Delete removed images from the database
+            // 5. Delete removed images from the database and cleanup associations
             if (idsToDelete.isNotEmpty()) {
-                // You may need to add a dedicated deleteByIds(List<Long>) to your MediaDao
-                val itemsToDelete = mediaDao.getAllMedia().filter { it.mediaId in idsToDelete }
-                mediaDao.deleteAll(itemsToDelete)
-                Log.d("GalleryService", "Sync: Deleted ${idsToDelete.size} obsolete images from DB")
+                Log.d("GalleryService", "Sync: Deleting ${idsToDelete.size} obsolete images")
+                idsToDelete.forEach { mediaId ->
+                    deleteImageFromDb(mediaId)
+                }
             }
 
             // 6. Process and insert newly added images
@@ -117,14 +93,10 @@ class GalleryService(private val context: Context) {
                 Log.d("GalleryService", "Sync: Database is fully synced. No new images to process.")
             }
 
-            // 7. Testing Purpose: Print DB Content to Logcat
             logDatabaseContent()
         }
     }
 
-    /**
-     * Iterates through the database and prints content to Logcat for testing.
-     */
     private suspend fun logDatabaseContent() {
         val allItems = mediaDao.getAllMedia()
         Log.d("DB_DEBUG", "=== CURRENT DATABASE CONTENT (${allItems.size} items) ===")
@@ -138,9 +110,6 @@ class GalleryService(private val context: Context) {
         Log.d("DB_DEBUG", "============================================")
     }
 
-    /**
-     * Extracts features (OCR + CLIP) and saves new images to the database.
-     */
     private suspend fun processAndInsertImages(imagesToProcess: List<Pair<Long, Long>>) {
         val imageEncoder = ClipImageEncoder(context)
         val ocrProcessor = OcrProcessor()
@@ -149,53 +118,68 @@ class GalleryService(private val context: Context) {
         val totalCount = imagesToProcess.size
         var counter = 0
 
-        imagesToProcess.forEach { (id, timestamp) ->
+        imagesToProcess.forEach { (mediaId, timestamp) ->
             try {
                 val uri = ContentUris.withAppendedId(
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    id
+                    mediaId
                 )
 
                 val bitmap = ImageUtils.getBitmapFromUri(context, uri)
                 if (bitmap != null) {
-                    // CLIP & OCR Processing
                     val features = imageEncoder.getImageFeatures(bitmap)
                     val text = ocrProcessor.recognizeText(bitmap)
                     val faces: List<Face> = faceDetector.detectFaces(bitmap)
 
-                    Log.d("GalleryService", "Detected: ${faces.size} faces (ID: $id)")
-
-//                    faces.forEach { face ->
-//                        val croppedImage = faceDetector.cropFace(bitmap, face.boundingBox)
-//                        val faceFeatures = VectorUtils.normalize(faceEncoder.getFaceFeatures(croppedImage))
-//                        val allFaces = faceDao.getAllFaces()
-//                        val bestMatch = allFaces.maxByOrNull {
-//                            VectorUtils.dotProduct(faceFeatures, it.embedding)
-//                        }
-//                        var id : Long = 0
-//                        if (bestMatch == null){
-//                            id = 1
-//                            faceDao.insertFace(FaceEntity(1, "p1", faceFeatures))
-//                        } else if (VectorUtils.dotProduct(faceFeatures, bestMatch.embedding) < 0.6){
-//                            id = (faceDao.countFaces() + 1).toLong()
-//                            faceDao.insertFace(FaceEntity(id, "p$id", faceFeatures))
-//                        } else {
-//                            id = bestMatch.id
-//                        }
-//                        saveBitmapToGallery(croppedImage, "face_${System.currentTimeMillis()}", "p$id")
-//                    }
-
                     mediaDao.insertAll(
-                        listOf(MediaEntity(id, timestamp, false, features, text))
+                        listOf(MediaEntity(mediaId, timestamp, false, features, text))
                     )
 
-                    // Note: Face recognition logic will be integrated here in the next step.
+                    // 1. Process Faces
+                    faces.forEach { face ->
+                        val croppedImage = faceDetector.alignFace(bitmap, face)
+                        val faceFeatures = faceEncoder.getFaceFeatures(croppedImage)
+                        val normalizedFaceFeatures = VectorUtils.normalize(faceFeatures)
+
+                        val allPersons = personDao.getAllPersons()
+                        val bestMatch = allPersons.maxByOrNull {
+                            val avgVec = VectorUtils.normalize(
+                                VectorUtils.divide(it.embedding, it.counter.toFloat())
+                            )
+                            VectorUtils.dotProduct(normalizedFaceFeatures, avgVec)
+                        }
+
+                        var personId: Long
+                        if (bestMatch == null || VectorUtils.dotProduct(
+                                normalizedFaceFeatures,
+                                VectorUtils.normalize(VectorUtils.divide(bestMatch.embedding, bestMatch.counter.toFloat()))
+                            ) < FACE_MATCH_THRESHOLD
+                        ) {
+                            personId = (personDao.countPersons() + 1).toLong()
+                            personDao.insertPerson(PersonEntity(personId, "#p$personId", faceFeatures, 1))
+                        } else {
+                            personId = bestMatch.id
+                            val newEmbedding = VectorUtils.add(bestMatch.embedding, faceFeatures)
+                            personDao.updatePersonEmbedding(personId, newEmbedding)
+                            personDao.incrementPersonCounter(personId)
+                        }
+                        personDao.insertCrossRef(MediaPersonCrossRef(mediaId, personId, faceFeatures))
+                    }
+
+                    // 2. Process Categories (Auto-assignment logic)
+                    val allCategories = categoryDao.getAllCategories()
+                    allCategories.forEach { category ->
+                        val similarity = VectorUtils.dotProduct(features, category.embedding)
+                        if (similarity > CATEGORY_MATCH_THRESHOLD) { // Threshold for auto-categorization
+                            categoryDao.insertCrossRef(MediaCategoryCrossRef(mediaId, category.id))
+                        }
+                    }
 
                     counter++
-                    Log.d("GalleryService", "Processed: $counter / $totalCount (ID: $id)")
+                    Log.d("GalleryService", "Processed: $counter / $totalCount (ID: $mediaId)")
                 }
             } catch (e: Exception) {
-                Log.e("GalleryService", "Error processing image $id", e)
+                Log.e("GalleryService", "Error processing image $mediaId", e)
             }
         }
 
@@ -203,6 +187,34 @@ class GalleryService(private val context: Context) {
         ocrProcessor.close()
         faceDetector.close()
         faceEncoder.close()
+    }
+
+    /**
+     * Deletes an image from the database and cleans up all associations (Person embeddings, Categories).
+     */
+    @Transaction
+    private suspend fun deleteImageFromDb(mediaId: Long) {
+        // 1. Cleanup Person Embeddings
+        val crossRefs = personDao.getCrossRefsForMedia(mediaId)
+        crossRefs.forEach { ref ->
+            val person = personDao.getPersonById(ref.personId)
+            if (person != null) {
+                if (person.counter > 1) {
+                    val updatedEmbedding = VectorUtils.subtract(person.embedding, ref.embedding)
+                    personDao.updatePersonEmbedding(person.id, updatedEmbedding)
+                    personDao.decrementPersonCounter(person.id)
+                } else {
+                    // Only one image for this person, delete the person entirely
+                    personDao.deletePerson(person.id)
+                }
+            }
+        }
+
+        // 2. Cross-refs are deleted automatically via CASCADE in Room
+        val entity = mediaDao.getMediaById(mediaId)
+        if (entity != null) {
+            mediaDao.delete(entity)
+        }
     }
 
     suspend fun getAllDeviceImages(): List<Uri> =
@@ -217,8 +229,13 @@ class GalleryService(private val context: Context) {
 
     suspend fun search(prompt: String): List<Uri> {
         return withContext(Dispatchers.IO) {
+            val names = findNamesInPrompt(prompt)
             val textFeatures = textEncoder.getTextFeatures(prompt)
-            val images = mediaDao.getAllMedia()
+            val images = if (names.isEmpty()) {
+                mediaDao.getAllMedia()
+            } else {
+                personDao.getImagesByNames(names, names.size)
+            }
 
             val sortedImages = images.map { entity ->
                 val similarity = VectorUtils.dotProduct(textFeatures, entity.embedding)
@@ -247,6 +264,79 @@ class GalleryService(private val context: Context) {
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                     entity.mediaId
                 )
+            }
+        }
+    }
+
+    private suspend fun findNamesInPrompt(text: String): List<String> {
+        val allNames = personDao.getAllNames()
+        val results = mutableListOf<String>()
+        var i = 0
+        while (i < text.length) {
+            if (text[i] == '@') {
+                var bestEnd = -1
+                var bestName = ""
+                for (name in allNames) {
+                    val candidate = "@$name"
+                    if (text.startsWith(candidate, i, true)) {
+                        val end = i + candidate.length
+                        val validBoundary = end == text.length || text[end].isWhitespace()
+                        if (validBoundary && end > bestEnd) {
+                            bestEnd = end
+                            bestName = name
+                        }
+                    }
+                }
+                if (bestEnd != -1) {
+                    results.add(bestName)
+                    i = bestEnd
+                    continue
+                }
+            }
+            i++
+        }
+        return results
+    }
+
+    /**
+     * Phase 1 of deletion: Prepare the Intent to ask the user.
+     * We don't delete from the DB yet.
+     */
+    suspend fun prepareDeleteImage(uri: Uri): PendingIntent? {
+        return withContext(Dispatchers.IO) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                MediaStore.createDeleteRequest(context.contentResolver, listOf(uri))
+            } else {
+                // For older versions, we just return null and handle in ViewModel
+                // or you could return a dummy intent.
+                null
+            }
+        }
+    }
+
+    /**
+     * Phase 2: User accepted. Now cleanup DB.
+     */
+    suspend fun finalizeDeleteImage(uri: Uri) {
+        withContext(Dispatchers.IO) {
+            val mediaId = try {
+                ContentUris.parseId(uri)
+            } catch (e: Exception) {
+                null
+            }
+
+            if (mediaId != null) {
+                deleteImageFromDb(mediaId)
+            }
+            
+            // On older versions where createDeleteRequest is null, 
+            // we perform actual file deletion here.
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                try {
+                    context.contentResolver.delete(uri, null, null)
+                } catch (e: Exception) {
+                    Log.e("GalleryService", "Failed to delete image from device", e)
+                }
             }
         }
     }

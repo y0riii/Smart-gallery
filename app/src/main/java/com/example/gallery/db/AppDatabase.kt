@@ -7,16 +7,22 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 
 @Database(
-    // CRITICAL: Include both the main data entity and the FTS index entity.
-    // Room will manage the creation and synchronization of the FTS table based on FtsMediaEntity.
-    entities = [MediaEntity::class, FtsMediaEntity::class, FaceEntity::class, ImageFaceCrossRef::class],
-    version = 7,
+    entities = [
+        MediaEntity::class,
+        FtsMediaEntity::class,
+        PersonEntity::class,
+        MediaPersonCrossRef::class,
+        CategoryEntity::class,
+        MediaCategoryCrossRef::class
+    ],
+    version = 9,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun mediaDao(): MediaDao
-    abstract fun faceDao(): FaceDao
+    abstract fun personDao(): PersonDao
+    abstract fun categoryDao(): CategoryDao
 
     companion object {
         @Volatile
@@ -34,10 +40,7 @@ abstract class AppDatabase : RoomDatabase() {
                 AppDatabase::class.java,
                 DB_NAME
             )
-                // The manual SQL callback logic is removed as Room handles the FTS table automatically.
-                // Using destructive migration to ensure a clean database setup
-                // when moving from manual FTS to Room-managed FTS.
-                .fallbackToDestructiveMigration(false)
+                .fallbackToDestructiveMigration()
                 .build()
         }
     }

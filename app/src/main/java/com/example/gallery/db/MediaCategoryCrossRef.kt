@@ -5,8 +5,8 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 
 @Entity(
-    tableName = "media_face_join",
-    primaryKeys = ["mediaId", "faceId"],
+    tableName = "media_category_join",
+    primaryKeys = ["mediaId", "categoryId"],
     foreignKeys = [
         ForeignKey(
             entity = MediaEntity::class,
@@ -15,15 +15,15 @@ import androidx.room.Index
             onDelete = ForeignKey.CASCADE
         ),
         ForeignKey(
-            entity = FaceEntity::class,
+            entity = CategoryEntity::class,
             parentColumns = ["id"],
-            childColumns = ["faceId"],
+            childColumns = ["categoryId"],
             onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index("faceId")]
+    indices = [Index("categoryId")]
 )
-data class ImageFaceCrossRef(
+data class MediaCategoryCrossRef(
     val mediaId: Long,
-    val faceId: Long
+    val categoryId: Long
 )
