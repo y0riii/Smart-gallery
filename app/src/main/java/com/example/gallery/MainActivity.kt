@@ -73,6 +73,7 @@ fun GalleryApp(viewModel: GalleryViewModel) {
 
     var hasPermission by remember { mutableStateOf(false) }
     var currentTab by remember { mutableIntStateOf(0) }
+    var fullScreenIndex by remember { mutableStateOf<Int?>(null) }
 
     val permissionsToRequest = remember { getPermissionsToRequest() }
 
@@ -97,32 +98,39 @@ fun GalleryApp(viewModel: GalleryViewModel) {
 
     Scaffold(
         bottomBar = {
-            NavigationBar {
-                NavigationBarItem(
-                    selected = currentTab == 0,
-                    onClick = { currentTab = 0 },
-                    icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
-                    label = { Text("Home") }
-                )
-                NavigationBarItem(
-                    selected = currentTab == 1,
-                    onClick = { currentTab = 1 },
-                    icon = { Icon(Icons.Default.People, contentDescription = "People") },
-                    label = { Text("People") }
-                )
-                NavigationBarItem(
-                    selected = currentTab == 2,
-                    onClick = { currentTab = 2 },
-                    icon = { Icon(Icons.Default.CollectionsBookmark, contentDescription = "Tags") },
-                    label = { Text("Tags") }
-                )
+            if (fullScreenIndex == null) {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = currentTab == 0,
+                        onClick = { currentTab = 0 },
+                        icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
+                        label = { Text("Home") }
+                    )
+                    NavigationBarItem(
+                        selected = currentTab == 1,
+                        onClick = { currentTab = 1 },
+                        icon = { Icon(Icons.Default.People, contentDescription = "People") },
+                        label = { Text("People") }
+                    )
+                    NavigationBarItem(
+                        selected = currentTab == 2,
+                        onClick = { currentTab = 2 },
+                        icon = {
+                            Icon(
+                                Icons.Default.CollectionsBookmark,
+                                contentDescription = "Tags"
+                            )
+                        },
+                        label = { Text("Tags") }
+                    )
+                }
             }
         }
     ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding)) {
             when {
-                !hasPermission -> GalleryScreen(viewModel)
-                currentTab == 0 -> GalleryScreen(viewModel)
+                !hasPermission -> GalleryScreen(viewModel, fullScreenIndex, { fullScreenIndex = it })
+                currentTab == 0 -> GalleryScreen(viewModel, fullScreenIndex, { fullScreenIndex = it })
                 currentTab == 1 -> FoldersScreen(onFolderClick = { _ -> })
                 currentTab == 2 -> FoldersScreen(onFolderClick = { _ -> })
             }

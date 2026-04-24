@@ -19,9 +19,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
@@ -29,9 +26,12 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 
 @Composable
-fun GalleryScreen(viewModel: GalleryViewModel) {
+fun GalleryScreen(
+    viewModel: GalleryViewModel,
+    fullScreenIndex: Int?,
+    onIndexChanged: (Int?) -> Unit
+) {
     val allNames by viewModel.allNames.collectAsState()
-    var selectedImageIndex by remember { mutableStateOf<Int?>(null) }
 
     val intentSenderLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -46,31 +46,33 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        GalleryContent(
-            images = viewModel.images,
-            isSearching = viewModel.isSearching,
-            statusText = viewModel.statusText,
-            allNames = allNames,
-            onSearch = { prompt, useClip ->
-                viewModel.search(prompt, useClip)
-            },
-            onImageClick = { index ->
-                selectedImageIndex = index
-            }
-        )
+        if (fullScreenIndex == null) {
+            GalleryContent(
+                images = viewModel.images,
+                isSearching = viewModel.isSearching,
+                statusText = viewModel.statusText,
+                allNames = allNames,
+                onSearch = { prompt, useClip ->
+                    viewModel.search(prompt, useClip)
+                },
+                onImageClick = { index ->
+                    onIndexChanged(index)
+                }
+            )
+        }
 
-        selectedImageIndex?.let { index ->
+        fullScreenIndex?.let { index ->
             FullScreenImage(
                 images = viewModel.images,
                 initialIndex = index,
-                onClose = { selectedImageIndex = null },
+                onClose = { onIndexChanged(null) },
                 onDelete = { uri ->
                     viewModel.deleteImage(uri)
                 }
             )
 
             BackHandler {
-                selectedImageIndex = null
+                onIndexChanged(null)
             }
         }
     }

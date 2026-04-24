@@ -90,26 +90,36 @@ private fun FolderTile(folder: FolderItem, onClick: () -> Unit) {
     ) {
         Column {
             // 2×2 thumbnail grid
-            Row(Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+            ) {
                 val thumbs = folder.thumbnailUris
                 Column(Modifier.weight(1f)) {
-                    ThumbCell(thumbs.getOrNull(0), Modifier
-                        .weight(1f)
-                        .fillMaxWidth())
-                    ThumbCell(thumbs.getOrNull(2), Modifier
-                        .weight(1f)
-                        .fillMaxWidth())
+                    ThumbCell(
+                        thumbs.getOrNull(0), Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                    )
+                    ThumbCell(
+                        thumbs.getOrNull(2), Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                    )
                 }
                 Spacer(Modifier.width(1.dp))
                 Column(Modifier.weight(1f)) {
-                    ThumbCell(thumbs.getOrNull(1), Modifier
-                        .weight(1f)
-                        .fillMaxWidth())
-                    ThumbCell(thumbs.getOrNull(3), Modifier
-                        .weight(1f)
-                        .fillMaxWidth())
+                    ThumbCell(
+                        thumbs.getOrNull(1), Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                    )
+                    ThumbCell(
+                        thumbs.getOrNull(3), Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                    )
                 }
             }
             // Name + count
