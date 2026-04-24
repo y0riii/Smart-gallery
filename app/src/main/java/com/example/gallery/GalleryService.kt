@@ -152,18 +152,36 @@ class GalleryService(private val context: Context) {
                         var personId: Long
                         if (bestMatch == null || VectorUtils.dotProduct(
                                 normalizedFaceFeatures,
-                                VectorUtils.normalize(VectorUtils.divide(bestMatch.embedding, bestMatch.counter.toFloat()))
+                                VectorUtils.normalize(
+                                    VectorUtils.divide(
+                                        bestMatch.embedding,
+                                        bestMatch.counter.toFloat()
+                                    )
+                                )
                             ) < FACE_MATCH_THRESHOLD
                         ) {
                             personId = (personDao.countPersons() + 1).toLong()
-                            personDao.insertPerson(PersonEntity(personId, "#p$personId", faceFeatures, 1))
+                            personDao.insertPerson(
+                                PersonEntity(
+                                    personId,
+                                    "#p$personId",
+                                    faceFeatures,
+                                    1
+                                )
+                            )
                         } else {
                             personId = bestMatch.id
                             val newEmbedding = VectorUtils.add(bestMatch.embedding, faceFeatures)
                             personDao.updatePersonEmbedding(personId, newEmbedding)
                             personDao.incrementPersonCounter(personId)
                         }
-                        personDao.insertCrossRef(MediaPersonCrossRef(mediaId, personId, faceFeatures))
+                        personDao.insertCrossRef(
+                            MediaPersonCrossRef(
+                                mediaId,
+                                personId,
+                                faceFeatures
+                            )
+                        )
                     }
 
                     // 2. Process Categories (Auto-assignment logic)

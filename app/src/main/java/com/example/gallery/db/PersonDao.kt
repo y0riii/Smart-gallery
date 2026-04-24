@@ -96,7 +96,7 @@ interface PersonDao {
 
     @Query("SELECT COUNT(*) FROM person")
     suspend fun countPersons(): Int
-    
+
     @Query("DELETE FROM person WHERE id = :personId")
     suspend fun deletePerson(personId: Long)
 }

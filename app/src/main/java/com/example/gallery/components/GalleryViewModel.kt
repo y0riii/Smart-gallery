@@ -90,7 +90,7 @@ class GalleryViewModel(
         val uri = pendingDeleteUri
         pendingDeleteUri = null
         intentSenderRequest = null
-        
+
         if (success && uri != null) {
             viewModelScope.launch {
                 service.finalizeDeleteImage(uri)
