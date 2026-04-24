@@ -11,8 +11,9 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.CollectionsBookmark
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -27,6 +28,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.example.gallery.components.FoldersScreen
 import com.example.gallery.components.GalleryScreen
 import com.example.gallery.components.GalleryViewModel
 
@@ -70,7 +72,7 @@ private fun getPermissionsToRequest(): Array<String> {
 fun GalleryApp(viewModel: GalleryViewModel) {
 
     var hasPermission by remember { mutableStateOf(false) }
-    var currentTab by remember { mutableIntStateOf(1) }
+    var currentTab by remember { mutableIntStateOf(0) }
 
     val permissionsToRequest = remember { getPermissionsToRequest() }
 
@@ -99,14 +101,20 @@ fun GalleryApp(viewModel: GalleryViewModel) {
                 NavigationBarItem(
                     selected = currentTab == 0,
                     onClick = { currentTab = 0 },
-                    icon = { Icon(Icons.Default.FolderOpen, contentDescription = "Folders") },
-                    label = { Text("Folders") }
+                    icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
+                    label = { Text("Home") }
                 )
                 NavigationBarItem(
                     selected = currentTab == 1,
                     onClick = { currentTab = 1 },
-                    icon = { Icon(Icons.Default.Search, contentDescription = "Search") },
-                    label = { Text("Search") }
+                    icon = { Icon(Icons.Default.People, contentDescription = "People") },
+                    label = { Text("People") }
+                )
+                NavigationBarItem(
+                    selected = currentTab == 2,
+                    onClick = { currentTab = 2 },
+                    icon = { Icon(Icons.Default.CollectionsBookmark, contentDescription = "Tags") },
+                    label = { Text("Tags") }
                 )
             }
         }
@@ -114,8 +122,9 @@ fun GalleryApp(viewModel: GalleryViewModel) {
         Box(modifier = Modifier.padding(innerPadding)) {
             when {
                 !hasPermission -> GalleryScreen(viewModel)
-                currentTab == 0 -> FoldersScreen(onFolderClick = { _ -> })
-                else -> GalleryScreen(viewModel)
+                currentTab == 0 -> GalleryScreen(viewModel)
+                currentTab == 1 -> FoldersScreen(onFolderClick = { _ -> })
+                currentTab == 2 -> FoldersScreen(onFolderClick = { _ -> })
             }
         }
     }

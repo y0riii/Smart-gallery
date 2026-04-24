@@ -100,7 +100,8 @@ fun FullScreenImage(
                 controller.show(WindowInsetsCompat.Type.systemBars())
             } else {
                 controller.hide(WindowInsetsCompat.Type.systemBars())
-                controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             }
         }
     }
@@ -127,7 +128,7 @@ fun FullScreenImage(
             userScrollEnabled = !isCurrentPageZoomed && !isDraggingDownGlobal
         ) { pageIndex ->
             val uri = images[pageIndex]
-            
+
             val scale = remember { Animatable(1f) }
             val offset = remember { Animatable(Offset.Zero, Offset.VectorConverter) }
             val dismissOffset = remember { Animatable(0f) }
@@ -159,7 +160,7 @@ fun FullScreenImage(
                         .pointerInput(Unit) {
                             var lastTapTime = 0L
                             awaitEachGesture {
-                                val down = awaitFirstDown(requireUnconsumed = false)
+                                awaitFirstDown(requireUnconsumed = false)
                                 var isDraggingDown = false
                                 var hasMovedSignificant = false
                                 var isTransforming = false
@@ -194,8 +195,9 @@ fun FullScreenImage(
 
                                         if (!scale.isRunning && !offset.isRunning) {
                                             scope.launch {
-                                                val newScale = (scale.value * zoomChange).coerceIn(1f, 3f)
-                                                
+                                                val newScale =
+                                                    (scale.value * zoomChange).coerceIn(1f, 3f)
+
                                                 val screenAspectRatio = boxWidth / boxHeight
                                                 var displayedWidth = boxWidth
                                                 var displayedHeight = boxHeight
@@ -206,14 +208,28 @@ fun FullScreenImage(
                                                     displayedWidth = boxHeight * imageAspectRatio
                                                 }
 
-                                                val maxX = ((displayedWidth * newScale) - boxWidth).coerceAtLeast(0f) / 2f
-                                                val maxY = ((displayedHeight * newScale) - boxHeight).coerceAtLeast(0f) / 2f
+                                                val maxX =
+                                                    ((displayedWidth * newScale) - boxWidth).coerceAtLeast(
+                                                        0f
+                                                    ) / 2f
+                                                val maxY =
+                                                    ((displayedHeight * newScale) - boxHeight).coerceAtLeast(
+                                                        0f
+                                                    ) / 2f
 
                                                 scale.snapTo(newScale)
 
                                                 if (newScale > 1f) {
-                                                    val newOffsetX = (offset.value.x + panChange.x).coerceIn(-maxX, maxX)
-                                                    val newOffsetY = (offset.value.y + panChange.y).coerceIn(-maxY, maxY)
+                                                    val newOffsetX =
+                                                        (offset.value.x + panChange.x).coerceIn(
+                                                            -maxX,
+                                                            maxX
+                                                        )
+                                                    val newOffsetY =
+                                                        (offset.value.y + panChange.y).coerceIn(
+                                                            -maxY,
+                                                            maxY
+                                                        )
                                                     offset.snapTo(Offset(newOffsetX, newOffsetY))
                                                 } else {
                                                     offset.snapTo(Offset.Zero)
@@ -222,7 +238,10 @@ fun FullScreenImage(
                                         }
                                     } else if (!isDoubleTap) {
                                         // Swipe down detection
-                                        if (!isDraggingDown && panChange.y > 10f && abs(panChange.y) > abs(panChange.x) * 2) {
+                                        if (!isDraggingDown && panChange.y > 10f && abs(panChange.y) > abs(
+                                                panChange.x
+                                            ) * 2
+                                        ) {
                                             isDraggingDown = true
                                             isDraggingDownGlobal = true
                                             showControls = false
@@ -295,9 +314,11 @@ fun FullScreenImage(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Brush.verticalGradient(
-                        colors = listOf(Color.Black.copy(alpha = 0.8f), Color.Transparent)
-                    ))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Black.copy(alpha = 0.8f), Color.Transparent)
+                        )
+                    )
                     .padding(top = 40.dp, bottom = 24.dp, start = 8.dp, end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {

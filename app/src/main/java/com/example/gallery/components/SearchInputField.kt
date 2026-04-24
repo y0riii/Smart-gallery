@@ -1,6 +1,7 @@
 package com.example.gallery.components
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
@@ -11,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
@@ -107,7 +109,8 @@ fun SearchInputField(
     prompt: TextFieldValue,
     onValueChange: (TextFieldValue) -> Unit,
     allNames: List<String>,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onFocusChanged: (Boolean) -> Unit
 ) {
     var mentionQuery by remember { mutableStateOf<MentionQuery?>(null) }
     var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -136,9 +139,12 @@ fun SearchInputField(
                     emptyList()
                 }
             },
-            label = { Text("Search") },
+            placeholder = { Text("Search") },
             singleLine = true,
-            visualTransformation = mentionTransformation
+            visualTransformation = mentionTransformation,
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { onFocusChanged(it.isFocused) }
         )
         DropdownMenu(
             expanded = suggestions.isNotEmpty(),

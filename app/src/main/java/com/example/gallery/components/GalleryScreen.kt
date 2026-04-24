@@ -68,7 +68,7 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
                     viewModel.deleteImage(uri)
                 }
             )
-            
+
             BackHandler {
                 selectedImageIndex = null
             }

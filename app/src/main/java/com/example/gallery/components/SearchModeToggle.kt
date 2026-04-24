@@ -1,10 +1,8 @@
 package com.example.gallery.components
 
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -16,23 +14,16 @@ fun SearchModeToggle(
     useClip: Boolean,
     onChange: (Boolean) -> Unit
 ) {
-    Column(modifier = Modifier.padding(start = 16.dp)) {
-        Text("Search Type:", style = MaterialTheme.typography.bodyMedium)
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            RadioButton(
-                selected = useClip,
-                onClick = { onChange(true) }
-            )
-            Text("Image Search (CLIP)")
-        }
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            RadioButton(
-                selected = !useClip,
-                onClick = { onChange(false) }
-            )
-            Text("Document Search (OCR)")
-        }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(start = 16.dp, top = 8.dp)
+    ) {
+        Checkbox(
+            checked = !useClip,
+            onCheckedChange = { isChecked ->
+                onChange(!isChecked)
+            }
+        )
+        Text("Document Search (OCR)")
     }
 }
