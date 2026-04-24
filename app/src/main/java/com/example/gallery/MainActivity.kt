@@ -34,11 +34,11 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.example.gallery.components.FoldersScreen
 import com.example.gallery.components.GalleryScreen
-import com.example.gallery.components.GalleryViewModel
 import com.example.gallery.db.AppDatabase
 import com.example.gallery.db.GalleryIndexerWorker
 import com.example.gallery.folders.PersonFolderRepository
 import com.example.gallery.viewModels.FoldersViewModel
+import com.example.gallery.viewModels.GalleryViewModel
 import com.example.gallery.viewModels.factories.FoldersViewModelFactory
 import com.example.gallery.viewModels.factories.GalleryViewModelFactory
 import java.util.concurrent.TimeUnit

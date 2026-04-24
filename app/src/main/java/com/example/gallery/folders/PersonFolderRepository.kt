@@ -3,7 +3,7 @@ package com.example.gallery.folders
 import android.content.ContentUris
 import android.net.Uri
 import android.provider.MediaStore
-import com.example.gallery.db.PersonDao
+import com.example.gallery.db.daos.PersonDao
 
 class PersonFolderRepository(
     private val personDao: PersonDao

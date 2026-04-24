@@ -4,8 +4,8 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.example.gallery.GalleryService
-import com.example.gallery.components.GalleryViewModel
 import com.example.gallery.db.AppDatabase
+import com.example.gallery.viewModels.GalleryViewModel
 
 class GalleryViewModelFactory(
     private val context: Context

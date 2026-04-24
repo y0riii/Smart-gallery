@@ -1,4 +1,4 @@
-package com.example.gallery.db
+package com.example.gallery.ml.ocr
 
 import android.graphics.Bitmap
 import com.google.mlkit.vision.common.InputImage

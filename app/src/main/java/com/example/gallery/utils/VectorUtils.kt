@@ -1,4 +1,4 @@
-package com.example.gallery.ml
+package com.example.gallery.utils
 
 import kotlin.math.sqrt
 

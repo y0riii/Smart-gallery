@@ -1,10 +1,14 @@
-package com.example.gallery.db
+package com.example.gallery.db.daos
 
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import com.example.gallery.db.Converters
+import com.example.gallery.db.entities.MediaEntity
+import com.example.gallery.db.entities.MediaPersonCrossRef
+import com.example.gallery.db.entities.PersonEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao

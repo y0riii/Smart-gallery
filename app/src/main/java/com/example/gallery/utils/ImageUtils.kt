@@ -1,4 +1,4 @@
-package com.example.gallery.ml
+package com.example.gallery.utils
 
 import android.content.Context
 import android.graphics.Bitmap

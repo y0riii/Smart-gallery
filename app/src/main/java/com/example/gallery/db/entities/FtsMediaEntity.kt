@@ -1,4 +1,4 @@
-package com.example.gallery.db
+package com.example.gallery.db.entities
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity

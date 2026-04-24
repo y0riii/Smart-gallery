@@ -1,4 +1,4 @@
-package com.example.gallery.db
+package com.example.gallery.db.daos
 
 import androidx.room.Dao
 import androidx.room.Delete
@@ -6,6 +6,9 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import com.example.gallery.db.entities.CategoryEntity
+import com.example.gallery.db.entities.MediaCategoryCrossRef
+import com.example.gallery.db.entities.MediaEntity
 
 @Dao
 interface CategoryDao {

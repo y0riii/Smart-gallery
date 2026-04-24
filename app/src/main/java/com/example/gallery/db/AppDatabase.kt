@@ -5,6 +5,15 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import com.example.gallery.db.daos.CategoryDao
+import com.example.gallery.db.daos.MediaDao
+import com.example.gallery.db.daos.PersonDao
+import com.example.gallery.db.entities.CategoryEntity
+import com.example.gallery.db.entities.FtsMediaEntity
+import com.example.gallery.db.entities.MediaCategoryCrossRef
+import com.example.gallery.db.entities.MediaEntity
+import com.example.gallery.db.entities.MediaPersonCrossRef
+import com.example.gallery.db.entities.PersonEntity
 
 @Database(
     entities = [

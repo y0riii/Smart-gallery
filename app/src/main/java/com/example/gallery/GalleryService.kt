@@ -9,17 +9,17 @@ import android.provider.MediaStore
 import android.util.Log
 import androidx.room.Transaction
 import com.example.gallery.db.AppDatabase
-import com.example.gallery.db.MediaCategoryCrossRef
-import com.example.gallery.db.MediaEntity
-import com.example.gallery.db.MediaPersonCrossRef
-import com.example.gallery.db.OcrProcessor
-import com.example.gallery.db.PersonEntity
-import com.example.gallery.faceDetection.FaceDetectionProcessor
-import com.example.gallery.ml.ClipImageEncoder
-import com.example.gallery.ml.ClipTextEncoder
-import com.example.gallery.ml.FaceEncoder
-import com.example.gallery.ml.ImageUtils
-import com.example.gallery.ml.VectorUtils
+import com.example.gallery.db.entities.MediaCategoryCrossRef
+import com.example.gallery.db.entities.MediaEntity
+import com.example.gallery.db.entities.MediaPersonCrossRef
+import com.example.gallery.db.entities.PersonEntity
+import com.example.gallery.ml.face.FaceDetectionProcessor
+import com.example.gallery.ml.face.FaceEncoder
+import com.example.gallery.ml.image.ClipImageEncoder
+import com.example.gallery.ml.ocr.OcrProcessor
+import com.example.gallery.ml.text.ClipTextEncoder
+import com.example.gallery.utils.ImageUtils
+import com.example.gallery.utils.VectorUtils
 import com.google.mlkit.vision.face.Face
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -353,11 +353,4 @@ class GalleryService(private val context: Context) {
             }
         }
     }
-
-    /**
-     * Combined method for ViewModels that expect a single call.
-     * WARNING: On Android 11+, DB deletion will happen BEFORE user confirmation.
-     * Use prepareDeleteImage/finalizeDeleteImage for better synchronization.
-     */
-    suspend fun deleteImage(uri: Uri): PendingIntent? = prepareDeleteImage(uri)
 }

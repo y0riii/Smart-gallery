@@ -1,10 +1,11 @@
-package com.example.gallery.db
+package com.example.gallery.db.daos
 
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import com.example.gallery.db.entities.MediaEntity
 
 @Dao
 interface MediaDao {
@@ -28,9 +29,20 @@ interface MediaDao {
     suspend fun getMediaById(id: Long): MediaEntity?
 
     // ===== REGULAR FTS SEARCH =====
+
+    private fun formatForFts(query: String): String {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return ""
+
+        val escapedWords = trimmed.split("\\s+".toRegex())
+            .map { it.replace("\"", "\"\"") + "*" } // add * for prefix search
+
+        return escapedWords.joinToString(" OR ")
+    }
+
     suspend fun searchMediaFts(query: String): List<MediaEntity> {
         // Format the query using FtsQueryHelper before passing to Room
-        val formattedQuery = FtsQueryHelper.formatForFts(query)
+        val formattedQuery = formatForFts(query)
         if (formattedQuery.isEmpty()) {
             return getAllMedia()
         }

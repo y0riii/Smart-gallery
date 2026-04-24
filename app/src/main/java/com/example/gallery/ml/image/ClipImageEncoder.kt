@@ -1,4 +1,4 @@
-package com.example.gallery.ml
+package com.example.gallery.ml.image
 
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
@@ -6,6 +6,7 @@ import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.graphics.Bitmap
 import androidx.core.graphics.scale
+import com.example.gallery.utils.VectorUtils
 import java.io.File
 import java.io.FileOutputStream
 import java.lang.AutoCloseable

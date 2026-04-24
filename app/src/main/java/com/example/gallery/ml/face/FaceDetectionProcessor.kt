@@ -1,4 +1,4 @@
-package com.example.gallery.faceDetection
+package com.example.gallery.ml.face
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -16,6 +16,9 @@ import java.lang.AutoCloseable
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.math.sqrt
 
 class FaceDetectionProcessor : AutoCloseable {
@@ -197,7 +200,7 @@ class FaceDetectionProcessor : AutoCloseable {
      *
      * @param src detected landmark positions (N × 2)
      * @param dst reference/target positions      (N × 2)
-     * @return an Android [Matrix] ready for [Canvas.drawBitmap] or
+     * @return an Android [android.graphics.Matrix] ready for [Canvas.drawBitmap] or
      *         [Bitmap.createBitmap] that warps the source image so that
      *         the landmarks land on their target positions.
      */
@@ -328,9 +331,9 @@ class FaceDetectionProcessor : AutoCloseable {
         val s2 = sqrt(s2sq).coerceAtLeast(1e-10f)
 
         // Eigenvectors of AᵀA → columns of V
-        val theta = kotlin.math.atan2(2f * ata01, ata00 - ata11) / 2f
-        val cosT = kotlin.math.cos(theta)
-        val sinT = kotlin.math.sin(theta)
+        val theta = atan2(2f * ata01, ata00 - ata11) / 2f
+        val cosT = cos(theta)
+        val sinT = sin(theta)
 
         // V  = [[cosT, -sinT], [sinT, cosT]]
         // Vᵀ = [[cosT, sinT], [-sinT, cosT]]

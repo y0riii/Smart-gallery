@@ -1,9 +1,10 @@
-package com.example.gallery.ml
+package com.example.gallery.ml.text
 
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
+import com.example.gallery.utils.VectorUtils
 import java.io.File
 import java.io.FileOutputStream
 

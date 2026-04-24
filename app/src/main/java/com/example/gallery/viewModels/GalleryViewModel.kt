@@ -1,4 +1,4 @@
-package com.example.gallery.components
+package com.example.gallery.viewModels
 
 import android.net.Uri
 import androidx.activity.result.IntentSenderRequest
@@ -8,7 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.gallery.GalleryService
-import com.example.gallery.db.PersonDao
+import com.example.gallery.db.daos.PersonDao
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -22,15 +22,12 @@ class GalleryViewModel(
 ) : ViewModel() {
 
     var images by mutableStateOf<List<Uri>>(emptyList())
-        private set
 
     var isSearching by mutableStateOf(false)
-        private set
 
     var statusText by mutableStateOf("")
 
     var intentSenderRequest by mutableStateOf<IntentSenderRequest?>(null)
-        private set
 
     val allNames = personDao.getAllNamesFlow().stateIn(
         scope = viewModelScope,

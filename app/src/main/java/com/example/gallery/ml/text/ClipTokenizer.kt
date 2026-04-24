@@ -1,4 +1,4 @@
-package com.example.gallery.ml
+package com.example.gallery.ml.text
 
 import android.content.Context
 import kotlinx.serialization.json.Json
@@ -132,7 +132,7 @@ class ClipTokenizer(
                 val truncatedTokens = tokens.subList(0, contextLength)
                 truncatedTokens[contextLength - 1] = eotToken
             } else {
-                throw java.lang.RuntimeException("Input $text is too long for context length $contextLength")
+                throw RuntimeException("Input $text is too long for context length $contextLength")
             }
         }
         val intArrayResult = IntArray(contextLength) {

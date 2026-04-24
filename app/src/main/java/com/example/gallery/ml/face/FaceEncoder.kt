@@ -1,4 +1,4 @@
-package com.example.gallery.ml
+package com.example.gallery.ml.face
 
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
