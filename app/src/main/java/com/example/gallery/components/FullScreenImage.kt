@@ -13,15 +13,11 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -29,16 +25,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -58,7 +48,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -69,7 +58,6 @@ import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FullScreenImage(
     images: List<Uri>,
@@ -87,10 +75,6 @@ fun FullScreenImage(
     var isCurrentPageZoomed by remember { mutableStateOf(false) }
     var isDraggingDownGlobal by remember { mutableStateOf(false) }
     var showControls by remember { mutableStateOf(true) }
-
-    // Confirmation dialog state
-    var showDeleteConfirmation by remember { mutableStateOf(false) }
-    val sheetState = rememberModalBottomSheetState()
 
     // Handle System Bars Visibility (Immersive Mode)
     LaunchedEffect(showControls) {
@@ -342,73 +326,10 @@ fun FullScreenImage(
                 }
 
                 IconButton(onClick = {
-                    showDeleteConfirmation = true
+                    val currentUri = images[pagerState.currentPage]
+                    onDelete(currentUri)
                 }) {
                     Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.White)
-                }
-            }
-        }
-
-        if (showDeleteConfirmation) {
-            ModalBottomSheet(
-                onDismissRequest = { showDeleteConfirmation = false },
-                sheetState = sheetState,
-                containerColor = MaterialTheme.colorScheme.surface,
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "Delete Image?",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "This will permanently remove the image from your device.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                scope.launch { sheetState.hide() }.invokeOnCompletion {
-                                    showDeleteConfirmation = false
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        ) {
-                            Text("Cancel")
-                        }
-                        Button(
-                            onClick = {
-                                scope.launch { sheetState.hide() }.invokeOnCompletion {
-                                    showDeleteConfirmation = false
-                                    val currentUri = images[pagerState.currentPage]
-                                    onDelete(currentUri)
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.error,
-                                contentColor = MaterialTheme.colorScheme.onError
-                            )
-                        ) {
-                            Text("Delete")
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
                 }
             }
         }

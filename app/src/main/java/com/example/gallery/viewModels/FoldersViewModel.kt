@@ -24,7 +24,9 @@ class FoldersViewModel(
     var selectedFolderId by mutableStateOf<Long?>(null)
 
     var intentSenderRequest by mutableStateOf<IntentSenderRequest?>(null)
+        private set
 
+    private var pendingDeleteUri: Uri? = null
 
     init {
         viewModelScope.launch {
@@ -53,11 +55,28 @@ class FoldersViewModel(
 
     fun deleteImage(uri: Uri) {
         viewModelScope.launch {
-            val pendingIntent = service.deleteImage(uri)
+            val pendingIntent = service.prepareDeleteImage(uri)
             if (pendingIntent != null) {
+                pendingDeleteUri = uri
                 intentSenderRequest = IntentSenderRequest.Builder(pendingIntent).build()
-            } else {
-                images = images.filter { it != uri }
+            }
+        }
+    }
+
+    fun onDeletionResult(success: Boolean) {
+        val uri = pendingDeleteUri
+        pendingDeleteUri = null
+        intentSenderRequest = null
+        
+        if (success && uri != null) {
+            viewModelScope.launch {
+                service.finalizeDeleteImage(uri)
+                // Refresh folder images
+                selectedFolderId?.let { bucketId ->
+                    images = folderSource.getImages(bucketId)
+                }
+                // Also refresh folders list in case a folder became empty/too small
+                folders = folderSource.getFolders()
             }
         }
     }

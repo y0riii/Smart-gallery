@@ -3,18 +3,18 @@ package com.example.gallery.folders
 import android.content.ContentUris
 import android.net.Uri
 import android.provider.MediaStore
-import com.example.gallery.db.FaceDao
+import com.example.gallery.db.PersonDao
 
 class PersonFolderRepository(
-    private val faceDao: FaceDao
+    private val personDao: PersonDao
 ) : FolderSource {
     val MIN_IMAGES = 10
 
     override suspend fun getFolders(): List<FolderItem> {
-        val faces = faceDao.getAllFaces()
+        val persons = personDao.getAllPersons()
 
-        return faces.mapNotNull { face ->
-            val images = faceDao.getImagesByFaces(listOf(face.id), 1)
+        return persons.mapNotNull { person ->
+            val images = personDao.getImagesByPersons(listOf(person.id), 1)
 
             if (images.size < MIN_IMAGES) return@mapNotNull null
 
@@ -26,8 +26,8 @@ class PersonFolderRepository(
             }
 
             FolderItem(
-                bucketId = face.id,
-                name = face.name ?: "Unknown",
+                bucketId = person.id,
+                name = person.name ?: "Unknown",
                 photoCount = images.size,
                 thumbnailUris = thumbnails
             )
@@ -35,7 +35,7 @@ class PersonFolderRepository(
     }
 
     override suspend fun getImages(bucketId: Long): List<Uri> {
-        val images = faceDao.getImagesByFaces(listOf(bucketId), 1)
+        val images = personDao.getImagesByPersons(listOf(bucketId), 1)
         return images.map {
             ContentUris.withAppendedId(
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI,

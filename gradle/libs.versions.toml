@@ -14,6 +14,7 @@ composeBom = "2025.12.00"
 onnxruntimeAndroid = "1.23.2"
 roomRuntime = "2.8.4"
 textRecognition = "16.0.1"
+workRuntimeKtx = "2.10.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -39,6 +40,7 @@ androidx-compose-material-icons-extended = { group = "androidx.compose.material"
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntimeAndroid" }
 text-recognition = { module = "com.google.mlkit:text-recognition", version.ref = "textRecognition" }
+androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "workRuntimeKtx" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -8,7 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.gallery.GalleryService
-import com.example.gallery.db.FaceDao
+import com.example.gallery.db.PersonDao
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 
 class GalleryViewModel(
     private val service: GalleryService,
-    private val faceDao: FaceDao
+    private val personDao: PersonDao
 ) : ViewModel() {
 
     var images by mutableStateOf<List<Uri>>(emptyList())
@@ -32,7 +32,7 @@ class GalleryViewModel(
     var intentSenderRequest by mutableStateOf<IntentSenderRequest?>(null)
         private set
 
-    val allNames = faceDao.getAllNamesFlow().stateIn(
+    val allNames = personDao.getAllNamesFlow().stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = emptyList()
@@ -74,22 +74,26 @@ class GalleryViewModel(
         }
     }
 
+    private var pendingDeleteUri: Uri? = null
+
     fun deleteImage(uri: Uri) {
         viewModelScope.launch {
-            val pendingIntent = service.deleteImage(uri)
+            val pendingIntent = service.prepareDeleteImage(uri)
             if (pendingIntent != null) {
+                pendingDeleteUri = uri
                 intentSenderRequest = IntentSenderRequest.Builder(pendingIntent).build()
-            } else {
-                // If deleted immediately (Pre-R or DB only)
-                images = images.filter { it != uri }
             }
         }
     }
 
     fun onDeletionResult(success: Boolean) {
+        val uri = pendingDeleteUri
+        pendingDeleteUri = null
         intentSenderRequest = null
-        if (success) {
+        
+        if (success && uri != null) {
             viewModelScope.launch {
+                service.finalizeDeleteImage(uri)
                 // Refresh images list
                 images = service.getAllDeviceImages()
             }
