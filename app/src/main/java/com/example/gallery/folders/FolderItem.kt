@@ -1,4 +1,4 @@
-package com.example.gallery
+package com.example.gallery.folders
 
 import android.net.Uri
 

@@ -1,6 +1,7 @@
 package com.example.gallery.components
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -23,56 +24,48 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import com.example.gallery.FolderItem
-import com.example.gallery.FolderRepository
-import kotlinx.coroutines.launch
+import com.example.gallery.folders.FolderItem
+import com.example.gallery.viewModels.FoldersViewModel
 
 @Composable
-fun FoldersScreen(onFolderClick: (FolderItem) -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val repo = remember { FolderRepository(context) }
+fun FoldersScreen(
+    foldersViewModel: FoldersViewModel, fullScreenIndex: Int?,
+    onIndexChanged: (Int?) -> Unit
+) {
 
-    var folders by remember { mutableStateOf<List<FolderItem>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-
-    LaunchedEffect(Unit) {
-        scope.launch {
-            folders = repo.getFolders()
-            isLoading = false
-        }
-    }
-
-    if (isLoading) {
+    if (foldersViewModel.isLoading) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
-        return
-    }
-
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(2),
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        items(folders, key = { it.bucketId }) { folder ->
-            FolderTile(folder = folder, onClick = { onFolderClick(folder) })
+    } else if (foldersViewModel.selectedFolderId == null) {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(foldersViewModel.folders, key = { it.bucketId }) { folder ->
+                FolderTile(
+                    folder = folder,
+                    onClick = { foldersViewModel.loadFolder(folder.bucketId) })
+            }
         }
+    } else {
+        ImageGridScreen(
+            images = foldersViewModel.images,
+            onDelete = { foldersViewModel.deleteImage(it) },
+            fullScreenIndex = fullScreenIndex,
+            onIndexChanged = onIndexChanged
+        )
+
+        BackHandler { foldersViewModel.clear() }
     }
 }
 

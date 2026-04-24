@@ -1,4 +1,4 @@
-package com.example.gallery
+package com.example.gallery.folders
 
 import android.content.ContentUris
 import android.content.Context
@@ -20,19 +20,21 @@ class FolderRepository(private val context: Context) {
         val sortOrder = "${MediaStore.Images.Media.BUCKET_DISPLAY_NAME} ASC," +
                 "${MediaStore.Images.Media.DATE_ADDED} DESC"
 
-        val grouped = mutableMapOf<Long, MutableList<Pair<Long, String>>>() // bucketId → [(imageId, name)]
+        val grouped =
+            mutableMapOf<Long, MutableList<Pair<Long, String>>>() // bucketId → [(imageId, name)]
 
         context.contentResolver.query(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
             projection, null, null, sortOrder
         )?.use { cursor ->
-            val idCol        = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-            val bucketIdCol  = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_ID)
-            val bucketNameCol= cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+            val bucketIdCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_ID)
+            val bucketNameCol =
+                cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
 
             while (cursor.moveToNext()) {
-                val imageId    = cursor.getLong(idCol)
-                val bucketId   = cursor.getLong(bucketIdCol)
+                val imageId = cursor.getLong(idCol)
+                val bucketId = cursor.getLong(bucketIdCol)
                 val bucketName = cursor.getString(bucketNameCol) ?: "Unknown"
                 grouped.getOrPut(bucketId) { mutableListOf() }.add(imageId to bucketName)
             }
@@ -44,9 +46,9 @@ class FolderRepository(private val context: Context) {
                 ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
             }
             FolderItem(
-                bucketId     = bucketId,
-                name         = name,
-                photoCount   = entries.size,
+                bucketId = bucketId,
+                name = name,
+                photoCount = entries.size,
                 thumbnailUris = thumbUris
             )
         }.sortedBy { it.name }

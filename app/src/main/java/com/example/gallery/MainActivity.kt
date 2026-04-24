@@ -31,18 +31,29 @@ import androidx.compose.ui.Modifier
 import com.example.gallery.components.FoldersScreen
 import com.example.gallery.components.GalleryScreen
 import com.example.gallery.components.GalleryViewModel
+import com.example.gallery.db.AppDatabase
+import com.example.gallery.folders.PersonFolderRepository
+import com.example.gallery.viewModels.FoldersViewModel
+import com.example.gallery.viewModels.factories.FoldersViewModelFactory
+import com.example.gallery.viewModels.factories.GalleryViewModelFactory
 
 class MainActivity : ComponentActivity() {
 
-    private val viewModel: GalleryViewModel by viewModels {
+    private val db by lazy { AppDatabase.getDatabase(applicationContext) }
+
+    private val galleryViewModel: GalleryViewModel by viewModels {
         GalleryViewModelFactory(applicationContext)
+    }
+
+    private val peopleViewModel: FoldersViewModel by viewModels {
+        FoldersViewModelFactory(PersonFolderRepository(db.faceDao()), applicationContext)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                GalleryApp(viewModel)
+                GalleryApp(galleryViewModel, peopleViewModel)
             }
         }
     }
@@ -69,7 +80,7 @@ private fun getPermissionsToRequest(): Array<String> {
 }
 
 @Composable
-fun GalleryApp(viewModel: GalleryViewModel) {
+fun GalleryApp(galleryViewModel: GalleryViewModel, peopleViewModel: FoldersViewModel) {
 
     var hasPermission by remember { mutableStateOf(false) }
     var currentTab by remember { mutableIntStateOf(0) }
@@ -89,10 +100,10 @@ fun GalleryApp(viewModel: GalleryViewModel) {
 
     LaunchedEffect(hasPermission) {
         if (hasPermission) {
-            viewModel.statusText = "Showing all images."
-            viewModel.onPermissionGranted()
+            galleryViewModel.statusText = "Showing all images."
+            galleryViewModel.onPermissionGranted()
         } else {
-            viewModel.statusText = "Permission denied."
+            galleryViewModel.statusText = "Permission denied."
         }
     }
 
@@ -129,10 +140,25 @@ fun GalleryApp(viewModel: GalleryViewModel) {
     ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding)) {
             when {
-                !hasPermission -> GalleryScreen(viewModel, fullScreenIndex, { fullScreenIndex = it })
-                currentTab == 0 -> GalleryScreen(viewModel, fullScreenIndex, { fullScreenIndex = it })
-                currentTab == 1 -> FoldersScreen(onFolderClick = { _ -> })
-                currentTab == 2 -> FoldersScreen(onFolderClick = { _ -> })
+                !hasPermission -> GalleryScreen(
+                    galleryViewModel,
+                    fullScreenIndex,
+                    { fullScreenIndex = it })
+
+                currentTab == 0 -> GalleryScreen(
+                    galleryViewModel,
+                    fullScreenIndex,
+                    { fullScreenIndex = it })
+
+                currentTab == 1 -> FoldersScreen(
+                    peopleViewModel,
+                    fullScreenIndex,
+                    { fullScreenIndex = it })
+
+                currentTab == 2 -> FoldersScreen(
+                    peopleViewModel,
+                    fullScreenIndex,
+                    { fullScreenIndex = it })
             }
         }
     }
