@@ -28,14 +28,20 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import com.example.gallery.components.FoldersScreen
 import com.example.gallery.components.GalleryScreen
 import com.example.gallery.components.GalleryViewModel
 import com.example.gallery.db.AppDatabase
+import com.example.gallery.db.GalleryIndexerWorker
 import com.example.gallery.folders.PersonFolderRepository
 import com.example.gallery.viewModels.FoldersViewModel
 import com.example.gallery.viewModels.factories.FoldersViewModelFactory
 import com.example.gallery.viewModels.factories.GalleryViewModelFactory
+import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
 
@@ -46,16 +52,33 @@ class MainActivity : ComponentActivity() {
     }
 
     private val peopleViewModel: FoldersViewModel by viewModels {
-        FoldersViewModelFactory(PersonFolderRepository(db.faceDao()), applicationContext)
+        FoldersViewModelFactory(PersonFolderRepository(db.personDao()), applicationContext)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        scheduleBackgroundIndexing()
         setContent {
             MaterialTheme {
                 GalleryApp(galleryViewModel, peopleViewModel)
             }
         }
+    }
+
+    private fun scheduleBackgroundIndexing() {
+        val constraints = Constraints.Builder()
+            .setRequiresBatteryNotLow(true)
+            .build()
+
+        val indexingRequest = PeriodicWorkRequestBuilder<GalleryIndexerWorker>(12, TimeUnit.HOURS)
+            .setConstraints(constraints)
+            .build()
+
+        WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+            "GalleryIndexing",
+            ExistingPeriodicWorkPolicy.KEEP,
+            indexingRequest
+        )
     }
 }
 

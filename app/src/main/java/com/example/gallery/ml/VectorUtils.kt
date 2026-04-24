@@ -30,6 +30,14 @@ class VectorUtils {
             return result
         }
 
+        fun subtract(vecA: FloatArray, vecB: FloatArray): FloatArray {
+            val result = FloatArray(vecA.size)
+            for (i in vecA.indices) {
+                result[i] = vecA[i] - vecB[i]
+            }
+            return result
+        }
+
         fun euclideanDistance(vecA: FloatArray, vecB: FloatArray): Float {
             var sum = 0.0f
             for (i in vecA.indices) {

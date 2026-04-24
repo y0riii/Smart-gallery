@@ -15,7 +15,7 @@ class GalleryViewModelFactory(
         if (modelClass.isAssignableFrom(GalleryViewModel::class.java)) {
             val db = AppDatabase.getDatabase(context)
             val service = GalleryService(context)
-            return GalleryViewModel(service, db.faceDao()) as T
+            return GalleryViewModel(service, db.personDao()) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
