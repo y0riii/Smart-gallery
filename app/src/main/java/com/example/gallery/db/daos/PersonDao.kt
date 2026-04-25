@@ -54,6 +54,9 @@ interface PersonDao {
     @Query("UPDATE person SET counter = :newCount WHERE id = :personId")
     suspend fun updatePersonCounter(personId: Long, newCount: Long)
 
+    @Query("UPDATE person SET thumbnailPath = :thumbnailPath, thumbnailSize = :thumbnailSize WHERE id = :personId")
+    suspend fun updatePersonThumbnail(personId: Long, thumbnailPath: String, thumbnailSize: Int)
+
     @Query("SELECT * FROM person WHERE name = :name LIMIT 1")
     suspend fun getPersonByName(name: String): PersonEntity?
 
@@ -103,4 +106,14 @@ interface PersonDao {
 
     @Query("DELETE FROM person WHERE id = :personId")
     suspend fun deletePerson(personId: Long)
+
+    @Query(
+        """
+    SELECT EXISTS(
+        SELECT 1 FROM media_person_join
+        WHERE mediaId = :mediaId AND personId = :personId
+    )
+    """
+    )
+    suspend fun crossRefExists(mediaId: Long, personId: Long): Boolean
 }

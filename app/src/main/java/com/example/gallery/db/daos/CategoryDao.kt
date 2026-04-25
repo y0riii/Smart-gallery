@@ -50,4 +50,7 @@ interface CategoryDao {
     """
     )
     suspend fun getImagesByCategory(categoryId: Long): List<MediaEntity>
+
+    @Query("DELETE FROM category WHERE id = :categoryId")
+    suspend fun deleteCategory(categoryId: Long)
 }
