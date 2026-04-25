@@ -12,7 +12,7 @@ import com.example.gallery.folders.FolderItem
 import com.example.gallery.folders.FolderSource
 import kotlinx.coroutines.launch
 
-class FoldersViewModel(
+abstract class FoldersViewModel(
     private val folderSource: FolderSource,
     private val service: GalleryService
 ) : ViewModel() {
@@ -21,7 +21,7 @@ class FoldersViewModel(
 
     var images by mutableStateOf<List<Uri>>(emptyList())
 
-    var selectedFolderId by mutableStateOf<Long?>(null)
+    var selectedFolder by mutableStateOf<FolderItem?>(null)
 
     var intentSenderRequest by mutableStateOf<IntentSenderRequest?>(null)
         private set
@@ -37,9 +37,9 @@ class FoldersViewModel(
 
     fun loadFolder(bucketId: Long) {
         // Avoid reloading same folder
-        if (selectedFolderId == bucketId) return
+        if (selectedFolder?.bucketId == bucketId) return
 
-        selectedFolderId = bucketId
+        selectedFolder = folders.find { it.bucketId == bucketId }
 
         viewModelScope.launch {
             isLoading = true
@@ -50,7 +50,7 @@ class FoldersViewModel(
 
     fun clear() {
         images = emptyList()
-        selectedFolderId = null
+        selectedFolder = null
     }
 
     fun deleteImage(uri: Uri) {
@@ -72,8 +72,8 @@ class FoldersViewModel(
             viewModelScope.launch {
                 service.finalizeDeleteImage(uri)
                 // Refresh folder images
-                selectedFolderId?.let { bucketId ->
-                    images = folderSource.getImages(bucketId)
+                selectedFolder?.let { folder ->
+                    images = folderSource.getImages(folder.bucketId)
                 }
                 // Also refresh folders list in case a folder became empty/too small
                 folders = folderSource.getFolders()

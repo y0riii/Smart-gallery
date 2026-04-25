@@ -4,9 +4,9 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.Rect
 import android.util.Log
 import androidx.core.graphics.createBitmap
+import com.example.gallery.utils.ImageUtils
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceDetection
@@ -105,7 +105,7 @@ class FaceDetectionProcessor : AutoCloseable {
      * Aligns a detected face to a canonical 112×112 pose using a
      * similarity transformation derived from facial landmarks.
      *
-     * Falls back to [cropFace] when ML Kit does not return enough
+     * Falls back to [ImageUtils.cropImage] when ML Kit does not return enough
      * landmarks for a reliable alignment.
      *
      * @param bitmap  the full original image
@@ -114,7 +114,7 @@ class FaceDetectionProcessor : AutoCloseable {
      */
     fun alignFace(bitmap: Bitmap, face: Face): Bitmap {
         val srcPoints = extractLandmarks(face)
-            ?: return cropFace(bitmap, face.boundingBox)
+            ?: return ImageUtils.cropImage(bitmap, face.boundingBox)
 
         val transform = computeSimilarityTransform(srcPoints, REFERENCE_LANDMARKS)
 
@@ -352,34 +352,6 @@ class FaceDetectionProcessor : AutoCloseable {
         )
 
         return Pair(u, vt)
-    }
-
-    // ───────────────── fallback crop (no alignment) ─────────────────────
-
-    /**
-     * Simple bounding-box crop with a 30 % margin expansion.
-     * Used as a fallback when landmarks are not available.
-     */
-    fun cropFace(bitmap: Bitmap, rect: Rect): Bitmap {
-        val scale = 1.3f
-        val centerX = rect.centerX()
-        val centerY = rect.centerY()
-
-        val newWidth = (rect.width() * scale).toInt()
-        val newHeight = (rect.height() * scale).toInt()
-
-        val left = (centerX - newWidth / 2).coerceAtLeast(0)
-        val top = (centerY - newHeight / 2).coerceAtLeast(0)
-        val right = (centerX + newWidth / 2).coerceAtMost(bitmap.width)
-        val bottom = (centerY + newHeight / 2).coerceAtMost(bitmap.height)
-
-        return Bitmap.createBitmap(
-            bitmap,
-            left,
-            top,
-            right - left,
-            bottom - top
-        )
     }
 
     override fun close() {

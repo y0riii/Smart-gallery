@@ -9,9 +9,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.gallery.GalleryService
 import com.example.gallery.db.daos.PersonDao
-import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -35,14 +32,6 @@ class GalleryViewModel(
         initialValue = emptyList()
     )
 
-    private var preloadJob: Deferred<Unit>
-
-    init {
-        preloadJob = viewModelScope.async(Dispatchers.IO) {
-            service.preloadTextModel()
-        }
-    }
-
     fun onPermissionGranted() {
         viewModelScope.launch {
             images = service.getAllDeviceImages()
@@ -54,8 +43,6 @@ class GalleryViewModel(
         viewModelScope.launch {
             isSearching = true
             statusText = "Searching..."
-
-            preloadJob.await()   // 🔒 Ensure model is ready
 
             images = if (useClip)
                 service.search(prompt)

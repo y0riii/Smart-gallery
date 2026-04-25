@@ -32,27 +32,37 @@ import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
-import com.example.gallery.components.FoldersScreen
+import com.example.gallery.components.CategoryFoldersScreen
 import com.example.gallery.components.GalleryScreen
+import com.example.gallery.components.PeopleFoldersScreen
 import com.example.gallery.db.AppDatabase
 import com.example.gallery.db.GalleryIndexerWorker
+import com.example.gallery.folders.CategoryFolderRepository
 import com.example.gallery.folders.PersonFolderRepository
-import com.example.gallery.viewModels.FoldersViewModel
+import com.example.gallery.viewModels.CategoryViewModel
 import com.example.gallery.viewModels.GalleryViewModel
-import com.example.gallery.viewModels.factories.FoldersViewModelFactory
+import com.example.gallery.viewModels.PeopleViewModel
+import com.example.gallery.viewModels.factories.CategoryViewModelFactory
 import com.example.gallery.viewModels.factories.GalleryViewModelFactory
+import com.example.gallery.viewModels.factories.PeopleViewModelFactory
 import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
 
     private val db by lazy { AppDatabase.getDatabase(applicationContext) }
 
+    private val galleryService by lazy { GalleryService(applicationContext) }
+
     private val galleryViewModel: GalleryViewModel by viewModels {
-        GalleryViewModelFactory(applicationContext)
+        GalleryViewModelFactory(db.personDao(), galleryService)
     }
 
-    private val peopleViewModel: FoldersViewModel by viewModels {
-        FoldersViewModelFactory(PersonFolderRepository(db.personDao()), applicationContext)
+    private val peopleViewModel: PeopleViewModel by viewModels {
+        PeopleViewModelFactory(PersonFolderRepository(db.personDao()), galleryService)
+    }
+
+    private val categoryViewModel: CategoryViewModel by viewModels {
+        CategoryViewModelFactory(CategoryFolderRepository(db.categoryDao()), galleryService)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,7 +70,7 @@ class MainActivity : ComponentActivity() {
         scheduleBackgroundIndexing()
         setContent {
             MaterialTheme {
-                GalleryApp(galleryViewModel, peopleViewModel)
+                GalleryApp(galleryViewModel, peopleViewModel, categoryViewModel)
             }
         }
     }
@@ -103,7 +113,11 @@ private fun getPermissionsToRequest(): Array<String> {
 }
 
 @Composable
-fun GalleryApp(galleryViewModel: GalleryViewModel, peopleViewModel: FoldersViewModel) {
+fun GalleryApp(
+    galleryViewModel: GalleryViewModel,
+    peopleViewModel: PeopleViewModel,
+    categoryViewModel: CategoryViewModel
+) {
 
     var hasPermission by remember { mutableStateOf(false) }
     var currentTab by remember { mutableIntStateOf(0) }
@@ -173,13 +187,13 @@ fun GalleryApp(galleryViewModel: GalleryViewModel, peopleViewModel: FoldersViewM
                     fullScreenIndex,
                     { fullScreenIndex = it })
 
-                currentTab == 1 -> FoldersScreen(
+                currentTab == 1 -> PeopleFoldersScreen(
                     peopleViewModel,
                     fullScreenIndex,
                     { fullScreenIndex = it })
 
-                currentTab == 2 -> FoldersScreen(
-                    peopleViewModel,
+                currentTab == 2 -> CategoryFoldersScreen(
+                    categoryViewModel,
                     fullScreenIndex,
                     { fullScreenIndex = it })
             }

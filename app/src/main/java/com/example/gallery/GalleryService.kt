@@ -9,6 +9,7 @@ import android.provider.MediaStore
 import android.util.Log
 import androidx.room.Transaction
 import com.example.gallery.db.AppDatabase
+import com.example.gallery.db.entities.CategoryEntity
 import com.example.gallery.db.entities.MediaCategoryCrossRef
 import com.example.gallery.db.entities.MediaEntity
 import com.example.gallery.db.entities.MediaPersonCrossRef
@@ -21,14 +22,18 @@ import com.example.gallery.ml.text.ClipTextEncoder
 import com.example.gallery.utils.ImageUtils
 import com.example.gallery.utils.VectorUtils
 import com.google.mlkit.vision.face.Face
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 
 class GalleryService(private val context: Context) {
 
     companion object {
         private const val FACE_MATCH_THRESHOLD = 0.5f
-        private const val CATEGORY_MATCH_THRESHOLD = 0.75f
+        private const val CATEGORY_MATCH_THRESHOLD = 0.2f
     }
 
     private val db = AppDatabase.getDatabase(context)
@@ -40,13 +45,16 @@ class GalleryService(private val context: Context) {
         ClipTextEncoder(context)
     }
 
-    private var ftsSupported: Boolean = false
+    private var initJob: Deferred<Unit>
 
-    suspend fun preloadTextModel() {
-        withContext(Dispatchers.IO) {
-            textEncoder
+    init {
+        initJob = CoroutineScope(SupervisorJob() + Dispatchers.IO).async {
+            textEncoder // triggers initialization immediately
         }
     }
+
+
+    private var ftsSupported: Boolean = false
 
     /**
      * Compares the device's MediaStore with the Room Database and syncs them.
@@ -150,6 +158,8 @@ class GalleryService(private val context: Context) {
                         }
 
                         var personId: Long
+                        val thumbnail = ImageUtils.cropImage(bitmap, face.boundingBox)
+                        val thumbnailSize = thumbnail.width * thumbnail.height
                         if (bestMatch == null || VectorUtils.dotProduct(
                                 normalizedFaceFeatures,
                                 VectorUtils.normalize(
@@ -161,19 +171,35 @@ class GalleryService(private val context: Context) {
                             ) < FACE_MATCH_THRESHOLD
                         ) {
                             personId = (personDao.countPersons() + 1).toLong()
+                            val thumbnailPath = ImageUtils.createThumbnail(context, thumbnail)
                             personDao.insertPerson(
                                 PersonEntity(
                                     personId,
                                     "#p$personId",
                                     faceFeatures,
-                                    1
+                                    1,
+                                    thumbnailPath,
+                                    thumbnailSize
                                 )
                             )
                         } else {
                             personId = bestMatch.id
-                            val newEmbedding = VectorUtils.add(bestMatch.embedding, faceFeatures)
-                            personDao.updatePersonEmbedding(personId, newEmbedding)
-                            personDao.incrementPersonCounter(personId)
+                            if (!personDao.crossRefExists(mediaId, personId)) {
+                                val newEmbedding =
+                                    VectorUtils.add(bestMatch.embedding, faceFeatures)
+                                personDao.updatePersonEmbedding(personId, newEmbedding)
+                                personDao.incrementPersonCounter(personId)
+                                if (thumbnailSize > bestMatch.thumbnailSize) {
+                                    ImageUtils.deleteThumbnail(bestMatch.thumbnailPath)
+                                    val thumbnailPath =
+                                        ImageUtils.createThumbnail(context, thumbnail)
+                                    personDao.updatePersonThumbnail(
+                                        personId,
+                                        thumbnailPath,
+                                        thumbnailSize
+                                    )
+                                }
+                            }
                         }
                         personDao.insertCrossRef(
                             MediaPersonCrossRef(
@@ -224,6 +250,7 @@ class GalleryService(private val context: Context) {
                 } else {
                     // Only one image for this person, delete the person entirely
                     personDao.deletePerson(person.id)
+                    ImageUtils.deleteThumbnail(person.thumbnailPath)
                 }
             }
         }
@@ -245,9 +272,26 @@ class GalleryService(private val context: Context) {
             }
         }
 
+    suspend fun createCategory(prompt: String) {
+        withContext(Dispatchers.IO) {
+            initJob.await()
+            val textFeatures = textEncoder.getTextFeatures("An Image of $prompt")
+            val categoryId =
+                categoryDao.insertCategory(CategoryEntity(name = prompt, embedding = textFeatures))
+            val allImages = mediaDao.getAllMedia()
+            allImages.forEach { image ->
+                val similarity = VectorUtils.dotProduct(image.embedding, textFeatures)
+                if (similarity > CATEGORY_MATCH_THRESHOLD) {
+                    categoryDao.insertCrossRef(MediaCategoryCrossRef(image.mediaId, categoryId))
+                }
+            }
+        }
+    }
+
     suspend fun search(prompt: String): List<Uri> {
         return withContext(Dispatchers.IO) {
             val names = findNamesInPrompt(prompt)
+            initJob.await()
             val textFeatures = textEncoder.getTextFeatures(prompt)
             val images = if (names.isEmpty()) {
                 mediaDao.getAllMedia()

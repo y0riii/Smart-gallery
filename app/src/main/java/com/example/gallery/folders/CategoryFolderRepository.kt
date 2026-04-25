@@ -3,21 +3,17 @@ package com.example.gallery.folders
 import android.content.ContentUris
 import android.net.Uri
 import android.provider.MediaStore
-import androidx.core.net.toUri
-import com.example.gallery.db.daos.PersonDao
+import com.example.gallery.db.daos.CategoryDao
 
-class PersonFolderRepository(
-    private val personDao: PersonDao
+class CategoryFolderRepository(
+    private val categoryDao: CategoryDao
 ) : FolderSource {
-    private val MIN_IMAGES = 10
 
     override suspend fun getFolders(): List<FolderItem> {
-        val persons = personDao.getAllPersons()
+        val categories = categoryDao.getAllCategories()
 
-        return persons.mapNotNull { person ->
-            val images = personDao.getImagesByPersons(listOf(person.id), 1)
-
-            if (images.size < MIN_IMAGES) return@mapNotNull null
+        return categories.map { category ->
+            val images = categoryDao.getImagesByCategory(category.id)
 
             val thumbnails = images.take(4).map {
                 ContentUris.withAppendedId(
@@ -27,17 +23,17 @@ class PersonFolderRepository(
             }
 
             FolderItem(
-                bucketId = person.id,
-                name = person.name ?: "Unknown",
+                bucketId = category.id,
+                name = category.name,
                 photoCount = images.size,
                 thumbnailUris = thumbnails,
-                insideFolderThumbnail = person.thumbnailPath.toUri()
+                null
             )
         }.sortedBy { it.name }
     }
 
     override suspend fun getImages(bucketId: Long): List<Uri> {
-        val images = personDao.getImagesByPersons(listOf(bucketId), 1)
+        val images = categoryDao.getImagesByCategory(bucketId)
         return images.map {
             ContentUris.withAppendedId(
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
@@ -46,7 +42,7 @@ class PersonFolderRepository(
         }
     }
 
-    suspend fun renameFolder(bucketId: Long, name: String) {
-        personDao.updatePersonName(bucketId, name)
+    suspend fun deleteCategory(bucketId: Long) {
+        categoryDao.deleteCategory(bucketId)
     }
 }
