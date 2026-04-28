@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.MediaStore
 import androidx.core.net.toUri
 import com.example.gallery.db.daos.PersonDao
+import java.io.File
 
 class PersonFolderRepository(
     private val personDao: PersonDao
@@ -31,7 +32,7 @@ class PersonFolderRepository(
                 name = person.name ?: "Unknown",
                 photoCount = images.size,
                 thumbnailUris = thumbnails,
-                insideFolderThumbnail = person.thumbnailPath.toUri()
+                insideFolderThumbnail = File(person.thumbnailPath).toUri()
             )
         }.sortedBy { it.name }
     }
