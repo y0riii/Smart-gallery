@@ -290,15 +290,20 @@ class GalleryService(private val context: Context) {
 
     suspend fun search(prompt: String): List<Uri> {
         return withContext(Dispatchers.IO) {
-            val names = findNamesInPrompt(prompt)
+            val (names, cleanPrompt) = findNamesInPrompt(prompt)
             initJob.await()
-            val textFeatures = textEncoder.getTextFeatures(prompt)
+            
+            // Provide CLIP with the clean prompt where "@name" is replaced by "a person"
+            val textFeatures = textEncoder.getTextFeatures(cleanPrompt)
+            
+            // Filter by names first if there are any
             val images = if (names.isEmpty()) {
                 mediaDao.getAllMedia()
             } else {
                 personDao.getImagesByNames(names, names.size)
             }
 
+            // Sort the filtered images by their similarity to the modified text prompt
             val sortedImages = images.map { entity ->
                 val similarity = VectorUtils.dotProduct(textFeatures, entity.embedding)
                 entity.mediaId to similarity
@@ -330,10 +335,12 @@ class GalleryService(private val context: Context) {
         }
     }
 
-    private suspend fun findNamesInPrompt(text: String): List<String> {
+    private suspend fun findNamesInPrompt(text: String): Pair<List<String>, String> {
         val allNames = personDao.getAllNames()
         val results = mutableListOf<String>()
+        val cleanPromptBuilder = StringBuilder()
         var i = 0
+        
         while (i < text.length) {
             if (text[i] == '@') {
                 var bestEnd = -1
@@ -351,13 +358,15 @@ class GalleryService(private val context: Context) {
                 }
                 if (bestEnd != -1) {
                     results.add(bestName)
+                    cleanPromptBuilder.append("a person") // Replace the tag for CLIP
                     i = bestEnd
                     continue
                 }
             }
+            cleanPromptBuilder.append(text[i])
             i++
         }
-        return results
+        return Pair(results, cleanPromptBuilder.toString())
     }
 
     /**
