@@ -211,7 +211,13 @@ class GalleryService(private val context: Context) {
                     allCategories.forEach { category ->
                         val similarity = VectorUtils.dotProduct(features, category.embedding)
                         if (similarity > CATEGORY_MATCH_THRESHOLD) {
-                            categoryDao.insertCrossRef(MediaCategoryCrossRef(mediaId, category.id, similarity))
+                            categoryDao.insertCrossRef(
+                                MediaCategoryCrossRef(
+                                    mediaId,
+                                    category.id,
+                                    similarity
+                                )
+                            )
                         }
                     }
 
@@ -278,7 +284,13 @@ class GalleryService(private val context: Context) {
             allImages.forEach { image ->
                 val similarity = VectorUtils.dotProduct(image.embedding, textFeatures)
                 if (similarity > CATEGORY_MATCH_THRESHOLD) {
-                    categoryDao.insertCrossRef(MediaCategoryCrossRef(image.mediaId, categoryId, similarity))
+                    categoryDao.insertCrossRef(
+                        MediaCategoryCrossRef(
+                            image.mediaId,
+                            categoryId,
+                            similarity
+                        )
+                    )
                 }
             }
         }
@@ -288,10 +300,10 @@ class GalleryService(private val context: Context) {
         return withContext(Dispatchers.IO) {
             val (names, cleanPrompt) = findNamesInPrompt(prompt)
             initJob.await()
-            
+
             // Provide CLIP with the clean prompt where "@name" is replaced by "a person"
             val textFeatures = textEncoder.getTextFeatures(cleanPrompt)
-            
+
             // Filter by names first if there are any
             val images = if (names.isEmpty()) {
                 mediaDao.getAllMedia()
@@ -336,7 +348,7 @@ class GalleryService(private val context: Context) {
         val results = mutableListOf<String>()
         val cleanPromptBuilder = StringBuilder()
         var i = 0
-        
+
         while (i < text.length) {
             if (text[i] == '@') {
                 var bestEnd = -1

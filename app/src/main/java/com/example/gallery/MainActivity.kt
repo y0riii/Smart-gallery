@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -32,16 +33,20 @@ import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.example.gallery.components.AlbumsFoldersScreen
 import com.example.gallery.components.CategoryFoldersScreen
 import com.example.gallery.components.GalleryScreen
 import com.example.gallery.components.PeopleFoldersScreen
 import com.example.gallery.db.AppDatabase
 import com.example.gallery.db.GalleryIndexerWorker
+import com.example.gallery.folders.AlbumsFolderRepository
 import com.example.gallery.folders.CategoryFolderRepository
 import com.example.gallery.folders.PersonFolderRepository
+import com.example.gallery.viewModels.AlbumsViewModel
 import com.example.gallery.viewModels.CategoryViewModel
 import com.example.gallery.viewModels.GalleryViewModel
 import com.example.gallery.viewModels.PeopleViewModel
+import com.example.gallery.viewModels.factories.AlbumsViewModelFactory
 import com.example.gallery.viewModels.factories.CategoryViewModelFactory
 import com.example.gallery.viewModels.factories.GalleryViewModelFactory
 import com.example.gallery.viewModels.factories.PeopleViewModelFactory
@@ -65,12 +70,16 @@ class MainActivity : ComponentActivity() {
         CategoryViewModelFactory(CategoryFolderRepository(db.categoryDao()), galleryService)
     }
 
+    private val albumsViewModel: AlbumsViewModel by viewModels {
+        AlbumsViewModelFactory(AlbumsFolderRepository(applicationContext), galleryService)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         scheduleBackgroundIndexing()
         setContent {
             MaterialTheme {
-                GalleryApp(galleryViewModel, peopleViewModel, categoryViewModel)
+                GalleryApp(galleryViewModel, peopleViewModel, categoryViewModel, albumsViewModel)
             }
         }
     }
@@ -116,7 +125,8 @@ private fun getPermissionsToRequest(): Array<String> {
 fun GalleryApp(
     galleryViewModel: GalleryViewModel,
     peopleViewModel: PeopleViewModel,
-    categoryViewModel: CategoryViewModel
+    categoryViewModel: CategoryViewModel,
+    albumsViewModel: AlbumsViewModel
 ) {
 
     var hasPermission by remember { mutableStateOf(false) }
@@ -171,6 +181,17 @@ fun GalleryApp(
                         },
                         label = { Text("Tags") }
                     )
+                    NavigationBarItem(
+                        selected = currentTab == 3,
+                        onClick = { currentTab = 3 },
+                        icon = {
+                            Icon(
+                                Icons.Default.PhotoAlbum,
+                                contentDescription = "Albums"
+                            )
+                        },
+                        label = { Text("Albums") }
+                    )
                 }
             }
         }
@@ -194,6 +215,11 @@ fun GalleryApp(
 
                 currentTab == 2 -> CategoryFoldersScreen(
                     categoryViewModel,
+                    fullScreenIndex,
+                    { fullScreenIndex = it })
+
+                currentTab == 3 -> AlbumsFoldersScreen(
+                    albumsViewModel,
                     fullScreenIndex,
                     { fullScreenIndex = it })
             }
