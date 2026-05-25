@@ -47,6 +47,7 @@ interface CategoryDao {
         SELECT m.* FROM media_items AS m
         JOIN media_category_join AS j ON m.mediaId = j.mediaId
         WHERE j.categoryId = :categoryId
+        ORDER BY j.similarity DESC
     """
     )
     suspend fun getImagesByCategory(categoryId: Long): List<MediaEntity>

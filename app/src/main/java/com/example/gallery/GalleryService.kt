@@ -32,8 +32,8 @@ import kotlinx.coroutines.withContext
 class GalleryService(private val context: Context) {
 
     companion object {
-        private const val FACE_MATCH_THRESHOLD = 0.5f
-        private const val CATEGORY_MATCH_THRESHOLD = 0.2f
+        private const val FACE_MATCH_THRESHOLD = 0.45f
+        private const val CATEGORY_MATCH_THRESHOLD = 0.22f
     }
 
     private val db = AppDatabase.getDatabase(context)
@@ -45,12 +45,8 @@ class GalleryService(private val context: Context) {
         ClipTextEncoder(context)
     }
 
-    private var initJob: Deferred<Unit>
-
-    init {
-        initJob = CoroutineScope(SupervisorJob() + Dispatchers.IO).async {
-            textEncoder // triggers initialization immediately
-        }
+    private var initJob: Deferred<Unit> = CoroutineScope(SupervisorJob() + Dispatchers.IO).async {
+        textEncoder // triggers initialization immediately
     }
 
 
@@ -215,7 +211,7 @@ class GalleryService(private val context: Context) {
                     allCategories.forEach { category ->
                         val similarity = VectorUtils.dotProduct(features, category.embedding)
                         if (similarity > CATEGORY_MATCH_THRESHOLD) {
-                            categoryDao.insertCrossRef(MediaCategoryCrossRef(mediaId, category.id))
+                            categoryDao.insertCrossRef(MediaCategoryCrossRef(mediaId, category.id, similarity))
                         }
                     }
 
@@ -282,7 +278,7 @@ class GalleryService(private val context: Context) {
             allImages.forEach { image ->
                 val similarity = VectorUtils.dotProduct(image.embedding, textFeatures)
                 if (similarity > CATEGORY_MATCH_THRESHOLD) {
-                    categoryDao.insertCrossRef(MediaCategoryCrossRef(image.mediaId, categoryId))
+                    categoryDao.insertCrossRef(MediaCategoryCrossRef(image.mediaId, categoryId, similarity))
                 }
             }
         }

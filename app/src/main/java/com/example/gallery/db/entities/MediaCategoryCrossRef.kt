@@ -25,5 +25,6 @@ import androidx.room.Index
 )
 data class MediaCategoryCrossRef(
     val mediaId: Long,
-    val categoryId: Long
+    val categoryId: Long,
+    val similarity: Float
 )
