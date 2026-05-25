@@ -1,5 +1,6 @@
 package com.example.gallery.utils
 
+import android.content.ContentUris
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -100,3 +101,10 @@ class ImageUtils {
         }
     }
 }
+
+/**
+ * Converts a MediaStore image ID to its content URI.
+ * Replaces the verbose ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id) pattern.
+ */
+fun Long.toMediaUri(): Uri =
+    ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, this)

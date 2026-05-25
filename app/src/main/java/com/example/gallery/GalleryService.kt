@@ -21,6 +21,7 @@ import com.example.gallery.ml.ocr.OcrProcessor
 import com.example.gallery.ml.text.ClipTextEncoder
 import com.example.gallery.utils.ImageUtils
 import com.example.gallery.utils.VectorUtils
+import com.example.gallery.utils.toMediaUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -123,10 +124,7 @@ class GalleryService(private val context: Context) {
 
         imagesToProcess.forEach { (mediaId, timestamp) ->
             try {
-                val uri = ContentUris.withAppendedId(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    mediaId
-                )
+                val uri = mediaId.toMediaUri()
 
                 val bitmap = ImageUtils.getBitmapFromUri(context, uri)
                 if (bitmap != null) {
@@ -274,12 +272,7 @@ class GalleryService(private val context: Context) {
 
     suspend fun getAllDeviceImages(): List<Uri> =
         withContext(Dispatchers.IO) {
-            ImageUtils.scanMediaStore(context).map { (id, _) ->
-                ContentUris.withAppendedId(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    id
-                )
-            }
+            ImageUtils.scanMediaStore(context).map { (id, _) -> id.toMediaUri() }
         }
 
     suspend fun createCategory(prompt: String) {
@@ -333,12 +326,7 @@ class GalleryService(private val context: Context) {
                 }.sortedByDescending { it.second }
             }
 
-            sortedImages.map {
-                ContentUris.withAppendedId(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    it.first
-                )
-            }
+            sortedImages.map { it.first.toMediaUri() }
         }
     }
 
@@ -350,12 +338,7 @@ class GalleryService(private val context: Context) {
                 mediaDao.searchMediaSimple(text)
             }
 
-            results.map { entity ->
-                ContentUris.withAppendedId(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    entity.mediaId
-                )
-            }
+            results.map { it.mediaId.toMediaUri() }
         }
     }
 

@@ -1,10 +1,9 @@
 package com.example.gallery.folders
 
-import android.content.ContentUris
 import android.net.Uri
-import android.provider.MediaStore
 import androidx.core.net.toUri
 import com.example.gallery.db.daos.PersonDao
+import com.example.gallery.utils.toMediaUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -22,12 +21,7 @@ class PersonFolderRepository(
 
             if (images.size < MIN_IMAGES) return@mapNotNull null
 
-            val thumbnails = images.take(4).map {
-                ContentUris.withAppendedId(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    it.mediaId
-                )
-            }
+            val thumbnails = images.take(4).map { it.mediaId.toMediaUri() }
 
             FolderItem(
                 bucketId = person.id,
@@ -40,13 +34,7 @@ class PersonFolderRepository(
     }
 
     override suspend fun getImages(bucketId: Long): List<Uri> = withContext(Dispatchers.IO) {
-        val images = personDao.getImagesByPersons(listOf(bucketId), 1)
-        images.map {
-            ContentUris.withAppendedId(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                it.mediaId
-            )
-        }
+        personDao.getImagesByPersons(listOf(bucketId), 1).map { it.mediaId.toMediaUri() }
     }
 
     suspend fun renameFolder(bucketId: Long, name: String) = withContext(Dispatchers.IO) {

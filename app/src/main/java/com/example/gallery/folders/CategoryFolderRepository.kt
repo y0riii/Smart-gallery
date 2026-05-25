@@ -1,9 +1,8 @@
 package com.example.gallery.folders
 
-import android.content.ContentUris
 import android.net.Uri
-import android.provider.MediaStore
 import com.example.gallery.db.daos.CategoryDao
+import com.example.gallery.utils.toMediaUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -17,12 +16,7 @@ class CategoryFolderRepository(
         categories.map { category ->
             val images = categoryDao.getImagesByCategory(category.id)
 
-            val thumbnails = images.take(4).map {
-                ContentUris.withAppendedId(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    it.mediaId
-                )
-            }
+            val thumbnails = images.take(4).map { it.mediaId.toMediaUri() }
 
             FolderItem(
                 bucketId = category.id,
@@ -35,13 +29,7 @@ class CategoryFolderRepository(
     }
 
     override suspend fun getImages(bucketId: Long): List<Uri> = withContext(Dispatchers.IO) {
-        val images = categoryDao.getImagesByCategory(bucketId)
-        images.map {
-            ContentUris.withAppendedId(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                it.mediaId
-            )
-        }
+        categoryDao.getImagesByCategory(bucketId).map { it.mediaId.toMediaUri() }
     }
 
     suspend fun deleteCategory(bucketId: Long) = withContext(Dispatchers.IO) {

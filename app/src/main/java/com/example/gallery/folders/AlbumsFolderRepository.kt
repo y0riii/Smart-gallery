@@ -1,9 +1,9 @@
 package com.example.gallery.folders
 
-import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
+import com.example.gallery.utils.toMediaUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -42,9 +42,7 @@ class AlbumsFolderRepository(private val context: Context) : FolderSource {
 
         grouped.map { (bucketId, entries) ->
             val name = entries.first().second
-            val thumbUris: List<Uri> = entries.take(4).map { (id, _) ->
-                ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
-            }
+            val thumbUris: List<Uri> = entries.take(4).map { (id, _) -> id.toMediaUri() }
             FolderItem(
                 bucketId = bucketId,
                 name = name,
@@ -84,15 +82,7 @@ class AlbumsFolderRepository(private val context: Context) : FolderSource {
                     cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
 
                 while (cursor.moveToNext()) {
-
-                    val imageId = cursor.getLong(idCol)
-
-                    val imageUri = ContentUris.withAppendedId(
-                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                        imageId
-                    )
-
-                    images.add(imageUri)
+                    images.add(cursor.getLong(idCol).toMediaUri())
                 }
             }
 
