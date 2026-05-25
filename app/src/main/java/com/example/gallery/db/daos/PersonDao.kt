@@ -9,6 +9,8 @@ import com.example.gallery.db.Converters
 import com.example.gallery.db.entities.MediaEntity
 import com.example.gallery.db.entities.MediaPersonCrossRef
 import com.example.gallery.db.entities.PersonEntity
+import com.example.gallery.db.previews.PersonMediaRef
+import com.example.gallery.db.previews.PersonPreview
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -76,17 +78,13 @@ interface PersonDao {
     )
     suspend fun getPersonsForImage(mediaId: Long): List<PersonEntity>
 
-    @Transaction
     @Query(
         """
-        SELECT m.* FROM media_items AS m
-        JOIN media_person_join AS j ON m.mediaId = j.mediaId
-        WHERE j.personId IN (:personIds)
-        GROUP BY m.mediaId
-        HAVING COUNT(DISTINCT j.personId) = :count
+        SELECT mediaId FROM media_person_join
+        WHERE personId = :personId
     """
     )
-    suspend fun getImagesByPersons(personIds: List<Long>, count: Int): List<MediaEntity>
+    suspend fun getImagesIdsByPersonId(personId: Long): List<Long>
 
     @Transaction
     @Query(
@@ -116,4 +114,42 @@ interface PersonDao {
     """
     )
     suspend fun crossRefExists(mediaId: Long, personId: Long): Boolean
+
+    @Query(
+        """
+        SELECT
+            id,
+            name,
+            thumbnailPath
+        FROM person
+        """
+    )
+    suspend fun getPersonPreviews(): List<PersonPreview>
+
+    @Query(
+        """
+        SELECT
+            personId,
+            mediaId
+        FROM media_person_join
+        """
+    )
+    suspend fun getPersonMediaRefs(): List<PersonMediaRef>
+
+    @Transaction
+    suspend fun getPersonsWithMediaIds():
+            List<Pair<PersonPreview, List<Long>>> {
+
+        val persons = getPersonPreviews()
+        val refs = getPersonMediaRefs()
+
+        val mediaMap = refs.groupBy(
+            keySelector = { it.personId },
+            valueTransform = { it.mediaId }
+        )
+
+        return persons.map { person ->
+            person to mediaMap[person.id].orEmpty()
+        }
+    }
 }

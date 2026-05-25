@@ -11,17 +11,15 @@ class CategoryFolderRepository(
 ) : FolderSource {
 
     override suspend fun getFolders(): List<FolderItem> = withContext(Dispatchers.IO) {
-        val categories = categoryDao.getAllCategories()
+        val categories = categoryDao.getCategoriesWithMediaIds()
 
-        categories.map { category ->
-            val images = categoryDao.getImagesByCategory(category.id)
-
-            val thumbnails = images.take(4).map { it.mediaId.toMediaUri() }
+        categories.map { (category, mediaIds) ->
+            val thumbnails = mediaIds.take(4).map { it.toMediaUri() }
 
             FolderItem(
                 bucketId = category.id,
                 name = category.name,
-                photoCount = images.size,
+                photoCount = mediaIds.size,
                 thumbnailUris = thumbnails,
                 null
             )
@@ -29,7 +27,7 @@ class CategoryFolderRepository(
     }
 
     override suspend fun getImages(bucketId: Long): List<Uri> = withContext(Dispatchers.IO) {
-        categoryDao.getImagesByCategory(bucketId).map { it.mediaId.toMediaUri() }
+        categoryDao.getImagesIdsByCategory(bucketId).map { it.toMediaUri() }
     }
 
     suspend fun deleteCategory(bucketId: Long) = withContext(Dispatchers.IO) {

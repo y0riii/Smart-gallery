@@ -9,6 +9,7 @@ import androidx.room.Transaction
 import com.example.gallery.db.entities.CategoryEntity
 import com.example.gallery.db.entities.MediaCategoryCrossRef
 import com.example.gallery.db.entities.MediaEntity
+import com.example.gallery.db.previews.CategoryPreview
 
 @Dao
 interface CategoryDao {
@@ -52,6 +53,52 @@ interface CategoryDao {
     )
     suspend fun getImagesByCategory(categoryId: Long): List<MediaEntity>
 
+    @Query(
+        """
+        SELECT mediaId FROM media_category_join
+        WHERE categoryId = :categoryId
+        ORDER BY similarity DESC
+    """
+    )
+    suspend fun getImagesIdsByCategory(categoryId: Long): List<Long>
+
     @Query("DELETE FROM category WHERE id = :categoryId")
     suspend fun deleteCategory(categoryId: Long)
+
+    @Query(
+        """
+        SELECT
+            id,
+            name
+        FROM category
+        """
+    )
+    suspend fun getCategoryPreviews(): List<CategoryPreview>
+
+    @Query(
+        """
+        SELECT
+            *
+        FROM media_category_join
+        """
+    )
+    suspend fun getCategoryMediaRefs(): List<MediaCategoryCrossRef>
+
+    @Transaction
+    suspend fun getCategoriesWithMediaIds():
+            List<Pair<CategoryPreview, List<Long>>> {
+
+        val categories = getCategoryPreviews()
+
+        val refs = getCategoryMediaRefs()
+
+        val mediaMap = refs.groupBy(
+            keySelector = { it.categoryId },
+            valueTransform = { it.mediaId }
+        )
+
+        return categories.map { category ->
+            category to mediaMap[category.id].orEmpty()
+        }
+    }
 }

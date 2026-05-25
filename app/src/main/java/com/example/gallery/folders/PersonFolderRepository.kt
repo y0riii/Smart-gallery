@@ -14,19 +14,18 @@ class PersonFolderRepository(
     private val MIN_IMAGES = 10
 
     override suspend fun getFolders(): List<FolderItem> = withContext(Dispatchers.IO) {
-        val persons = personDao.getAllPersons()
+        val persons = personDao.getPersonsWithMediaIds()
 
-        persons.mapNotNull { person ->
-            val images = personDao.getImagesByPersons(listOf(person.id), 1)
+        persons.mapNotNull { (person, mediaIds) ->
 
-            if (images.size < MIN_IMAGES) return@mapNotNull null
+            if (mediaIds.size < MIN_IMAGES) return@mapNotNull null
 
-            val thumbnails = images.take(4).map { it.mediaId.toMediaUri() }
+            val thumbnails = mediaIds.take(4).map { it.toMediaUri() }
 
             FolderItem(
                 bucketId = person.id,
                 name = person.name ?: "Unknown",
-                photoCount = images.size,
+                photoCount = mediaIds.size,
                 thumbnailUris = thumbnails,
                 insideFolderThumbnail = File(person.thumbnailPath).toUri()
             )
@@ -34,7 +33,7 @@ class PersonFolderRepository(
     }
 
     override suspend fun getImages(bucketId: Long): List<Uri> = withContext(Dispatchers.IO) {
-        personDao.getImagesByPersons(listOf(bucketId), 1).map { it.mediaId.toMediaUri() }
+        personDao.getImagesIdsByPersonId(bucketId).map { it.toMediaUri() }
     }
 
     suspend fun renameFolder(bucketId: Long, name: String) = withContext(Dispatchers.IO) {
