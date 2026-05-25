@@ -7,7 +7,7 @@ import kotlinx.coroutines.launch
 
 class CategoryViewModel(
     private val categoryFolderRepository: CategoryFolderRepository,
-    private val service: GalleryService
+    service: GalleryService
 ) : FoldersViewModel(categoryFolderRepository, service) {
     fun createCategory(name: String) {
         viewModelScope.launch {

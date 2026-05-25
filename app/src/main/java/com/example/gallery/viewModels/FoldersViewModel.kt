@@ -1,11 +1,9 @@
 package com.example.gallery.viewModels
 
 import android.net.Uri
-import androidx.activity.result.IntentSenderRequest
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.gallery.GalleryService
 import com.example.gallery.folders.FolderItem
@@ -14,19 +12,14 @@ import kotlinx.coroutines.launch
 
 abstract class FoldersViewModel(
     private val folderSource: FolderSource,
-    private val service: GalleryService
-) : ViewModel() {
+    service: GalleryService
+) : DeletableViewModel(service) {
     var folders by mutableStateOf<List<FolderItem>>(emptyList())
     var isLoading by mutableStateOf(true)
 
     var images by mutableStateOf<List<Uri>>(emptyList())
 
     var selectedFolder by mutableStateOf<FolderItem?>(null)
-
-    var intentSenderRequest by mutableStateOf<IntentSenderRequest?>(null)
-        private set
-
-    private var pendingDeleteUri: Uri? = null
 
     init {
         viewModelScope.launch {
@@ -53,31 +46,12 @@ abstract class FoldersViewModel(
         selectedFolder = null
     }
 
-    fun deleteImage(uri: Uri) {
-        viewModelScope.launch {
-            val pendingIntent = service.prepareDeleteImage(uri)
-            if (pendingIntent != null) {
-                pendingDeleteUri = uri
-                intentSenderRequest = IntentSenderRequest.Builder(pendingIntent).build()
-            }
+    override suspend fun onDeleteSuccess(uri: Uri) {
+        // Refresh images for the open folder
+        selectedFolder?.let { folder ->
+            images = folderSource.getImages(folder.bucketId)
         }
-    }
-
-    fun onDeletionResult(success: Boolean) {
-        val uri = pendingDeleteUri
-        pendingDeleteUri = null
-        intentSenderRequest = null
-
-        if (success && uri != null) {
-            viewModelScope.launch {
-                service.finalizeDeleteImage(uri)
-                // Refresh folder images
-                selectedFolder?.let { folder ->
-                    images = folderSource.getImages(folder.bucketId)
-                }
-                // Also refresh folders list in case a folder became empty/too small
-                folders = folderSource.getFolders()
-            }
-        }
+        // Refresh the folder list in case a folder became empty/too small
+        folders = folderSource.getFolders()
     }
 }
