@@ -4,14 +4,8 @@ import androidx.compose.runtime.Composable
 import com.example.gallery.viewModels.AlbumsViewModel
 
 @Composable
-fun AlbumsFoldersScreen(
-    albumsViewModel: AlbumsViewModel,
-    fullScreenIndex: Int?,
-    onIndexChanged: (Int?) -> Unit,
-) {
+fun AlbumsFoldersScreen(albumsViewModel: AlbumsViewModel) {
     FoldersScreen(
-        viewModel = albumsViewModel,
-        fullScreenIndex = fullScreenIndex,
-        onIndexChanged = onIndexChanged
+        viewModel = albumsViewModel
     )
 }

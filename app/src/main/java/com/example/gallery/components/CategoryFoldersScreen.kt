@@ -16,17 +16,11 @@ import androidx.compose.ui.unit.dp
 import com.example.gallery.viewModels.CategoryViewModel
 
 @Composable
-fun CategoryFoldersScreen(
-    categoryViewModel: CategoryViewModel,
-    fullScreenIndex: Int?,
-    onIndexChanged: (Int?) -> Unit,
-) {
+fun CategoryFoldersScreen(categoryViewModel: CategoryViewModel) {
     var showDeleteDialog by remember { mutableStateOf(false) }
 
     FoldersScreen(
         viewModel = categoryViewModel,
-        fullScreenIndex = fullScreenIndex,
-        onIndexChanged = onIndexChanged,
         folderGridHeader = {
             CreateButton { category -> categoryViewModel.createCategory(category) }
         },

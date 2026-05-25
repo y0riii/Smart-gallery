@@ -131,7 +131,6 @@ fun GalleryApp(
 
     var hasPermission by remember { mutableStateOf(false) }
     var currentTab by remember { mutableIntStateOf(0) }
-    var fullScreenIndex by remember { mutableStateOf<Int?>(null) }
 
     val permissionsToRequest = remember { getPermissionsToRequest() }
 
@@ -154,9 +153,18 @@ fun GalleryApp(
         }
     }
 
+    val isFullScreen = when {
+        !hasPermission -> galleryViewModel.fullScreenIndex != null
+        currentTab == 0 -> galleryViewModel.fullScreenIndex != null
+        currentTab == 1 -> peopleViewModel.fullScreenIndex != null
+        currentTab == 2 -> categoryViewModel.fullScreenIndex != null
+        currentTab == 3 -> albumsViewModel.fullScreenIndex != null
+        else -> false
+    }
+
     Scaffold(
         bottomBar = {
-            if (fullScreenIndex == null) {
+            if (!isFullScreen) {
                 NavigationBar {
                     NavigationBarItem(
                         selected = currentTab == 0,
@@ -198,30 +206,15 @@ fun GalleryApp(
     ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding)) {
             when {
-                !hasPermission -> GalleryScreen(
-                    galleryViewModel,
-                    fullScreenIndex,
-                    { fullScreenIndex = it })
+                !hasPermission -> GalleryScreen(galleryViewModel)
 
-                currentTab == 0 -> GalleryScreen(
-                    galleryViewModel,
-                    fullScreenIndex,
-                    { fullScreenIndex = it })
+                currentTab == 0 -> GalleryScreen(galleryViewModel)
 
-                currentTab == 1 -> PeopleFoldersScreen(
-                    peopleViewModel,
-                    fullScreenIndex,
-                    { fullScreenIndex = it })
+                currentTab == 1 -> PeopleFoldersScreen(peopleViewModel)
 
-                currentTab == 2 -> CategoryFoldersScreen(
-                    categoryViewModel,
-                    fullScreenIndex,
-                    { fullScreenIndex = it })
+                currentTab == 2 -> CategoryFoldersScreen(categoryViewModel)
 
-                currentTab == 3 -> AlbumsFoldersScreen(
-                    albumsViewModel,
-                    fullScreenIndex,
-                    { fullScreenIndex = it })
+                currentTab == 3 -> AlbumsFoldersScreen(albumsViewModel)
             }
         }
     }

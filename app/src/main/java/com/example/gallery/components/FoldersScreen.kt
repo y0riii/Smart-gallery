@@ -36,13 +36,12 @@ import com.example.gallery.viewModels.FoldersViewModel
 @Composable
 fun FoldersScreen(
     viewModel: FoldersViewModel,
-    fullScreenIndex: Int?,
     modifier: Modifier = Modifier,
-    onIndexChanged: (Int?) -> Unit,
     folderGridHeader: @Composable ColumnScope.() -> Unit = {},
     selectedFolderActions: @Composable RowScope.(FolderItem) -> Unit = {}
 ) {
     val selectedFolder = viewModel.selectedFolder
+    val fullScreenIndex = viewModel.fullScreenIndex
 
     val intentSenderLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -116,10 +115,16 @@ fun FoldersScreen(
                 images = viewModel.images,
                 onDelete = { viewModel.deleteImage(it) },
                 fullScreenIndex = fullScreenIndex,
-                onIndexChanged = onIndexChanged
+                onIndexChanged = { index ->
+                    if (index == null) {
+                        viewModel.closeFullScreen()
+                    } else {
+                        viewModel.openFullScreen(index)
+                    }
+                }
             )
         }
 
-        BackHandler { viewModel.clear() }
+        BackHandler { viewModel.clearSelectedFolder() }
     }
 }

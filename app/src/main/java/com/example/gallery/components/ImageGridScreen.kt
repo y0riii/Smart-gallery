@@ -16,11 +16,11 @@ fun ImageGridScreen(
     fullScreenIndex: Int?,
     onIndexChanged: (Int?) -> Unit
 ) {
+    val gridState = rememberLazyGridState()
+
     Box(modifier = modifier.fillMaxSize()) {
 
         if (fullScreenIndex == null) {
-            val gridState = rememberLazyGridState()
-
             ImageGrid(
                 images = images,
                 gridState = gridState,

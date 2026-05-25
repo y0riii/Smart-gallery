@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -19,20 +20,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import com.example.gallery.viewModels.GalleryViewModel
+import kotlinx.coroutines.launch
 
 @Composable
-fun GalleryScreen(
-    viewModel: GalleryViewModel,
-    fullScreenIndex: Int?,
-    onIndexChanged: (Int?) -> Unit
-) {
+fun GalleryScreen(viewModel: GalleryViewModel) {
     val allNames by viewModel.allNames.collectAsState()
+    val fullScreenIndex = viewModel.fullScreenIndex
+    val gridState = rememberLazyGridState()
+    val coroutineScope = rememberCoroutineScope()
 
     val intentSenderLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -47,33 +49,35 @@ fun GalleryScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        if (fullScreenIndex == null) {
-            GalleryContent(
-                images = viewModel.images,
-                isSearching = viewModel.isSearching,
-                statusText = viewModel.statusText,
-                allNames = allNames,
-                onSearch = { prompt, useClip ->
-                    viewModel.search(prompt, useClip)
-                },
-                onImageClick = { index ->
-                    onIndexChanged(index)
+        GalleryContent(
+            images = viewModel.images,
+            isSearching = viewModel.isSearching,
+            statusText = viewModel.statusText,
+            allNames = allNames,
+            gridState = gridState,
+            onSearch = { prompt, useClip ->
+                coroutineScope.launch {
+                    gridState.scrollToItem(0)
                 }
-            )
-        }
+                viewModel.search(prompt, useClip)
+            },
+            onImageClick = { index ->
+                viewModel.openFullScreen(index)
+            }
+        )
 
         fullScreenIndex?.let { index ->
             FullScreenImage(
                 images = viewModel.images,
                 initialIndex = index,
-                onClose = { onIndexChanged(null) },
+                onClose = { viewModel.closeFullScreen() },
                 onDelete = { uri ->
                     viewModel.deleteImage(uri)
                 }
             )
 
             BackHandler {
-                onIndexChanged(null)
+                viewModel.closeFullScreen()
             }
         }
     }
@@ -85,11 +89,10 @@ fun GalleryContent(
     isSearching: Boolean,
     statusText: String,
     allNames: List<String>,
+    gridState: LazyGridState,
     onSearch: (String, Boolean) -> Unit,
     onImageClick: (Int) -> Unit
 ) {
-    val gridState = rememberLazyGridState()
-
     Column(modifier = Modifier.fillMaxSize()) {
         SearchBar(
             isSearching = isSearching,
@@ -133,6 +136,7 @@ fun GalleryScreenPreview() {
                 isSearching = false,
                 statusText = "Showing results for \"placeholder images\"",
                 allNames = emptyList(),
+                gridState = rememberLazyGridState(),
                 onSearch = { _, _ -> },
                 onImageClick = {}
             )

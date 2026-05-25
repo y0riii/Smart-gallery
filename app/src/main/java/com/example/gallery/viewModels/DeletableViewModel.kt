@@ -22,7 +22,18 @@ abstract class DeletableViewModel(protected val service: GalleryService) : ViewM
     var intentSenderRequest by mutableStateOf<IntentSenderRequest?>(null)
         private set
 
+    var fullScreenIndex by mutableStateOf<Int?>(null)
+        private set
+
     private var pendingDeleteUri: Uri? = null
+
+    fun openFullScreen(index: Int) {
+        fullScreenIndex = index
+    }
+
+    fun closeFullScreen() {
+        fullScreenIndex = null
+    }
 
     fun deleteImage(uri: Uri) {
         viewModelScope.launch {

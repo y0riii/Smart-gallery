@@ -41,7 +41,7 @@ abstract class FoldersViewModel(
         }
     }
 
-    fun clear() {
+    fun clearSelectedFolder() {
         images = emptyList()
         selectedFolder = null
     }
