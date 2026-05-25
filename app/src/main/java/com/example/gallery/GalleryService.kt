@@ -21,7 +21,6 @@ import com.example.gallery.ml.ocr.OcrProcessor
 import com.example.gallery.ml.text.ClipTextEncoder
 import com.example.gallery.utils.ImageUtils
 import com.example.gallery.utils.VectorUtils
-import com.google.mlkit.vision.face.Face
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -131,93 +130,102 @@ class GalleryService(private val context: Context) {
 
                 val bitmap = ImageUtils.getBitmapFromUri(context, uri)
                 if (bitmap != null) {
-                    val features = imageEncoder.getImageFeatures(bitmap)
-                    val text = ocrProcessor.recognizeText(bitmap)
-                    val faces: List<Face> = faceDetector.detectFaces(bitmap)
+                    val (features, text, faces) = withContext(Dispatchers.Default) {
+                        val featuresDeferred = async { imageEncoder.getImageFeatures(bitmap) }
+                        val textDeferred = async { ocrProcessor.recognizeText(bitmap) }
+                        val facesDeferred = async { faceDetector.detectFaces(bitmap) }
+                        Triple(
+                            featuresDeferred.await(),
+                            textDeferred.await(),
+                            facesDeferred.await()
+                        )
+                    }
 
                     mediaDao.insertAll(
                         listOf(MediaEntity(mediaId, timestamp, false, features, text))
                     )
 
                     // 1. Process Faces
-                    faces.forEach { face ->
-                        val croppedImage = faceDetector.alignFace(bitmap, face)
-                        val faceFeatures = faceEncoder.getFaceFeatures(croppedImage)
-                        val normalizedFaceFeatures = VectorUtils.normalize(faceFeatures)
+                    withContext(Dispatchers.Default) {
+                        faces.forEach { face ->
+                            val croppedImage = faceDetector.alignFace(bitmap, face)
+                            val faceFeatures = faceEncoder.getFaceFeatures(croppedImage)
+                            val normalizedFaceFeatures = VectorUtils.normalize(faceFeatures)
 
-                        val allPersons = personDao.getAllPersons()
-                        val bestMatch = allPersons.maxByOrNull {
-                            val avgVec = VectorUtils.normalize(
-                                VectorUtils.divide(it.embedding, it.counter.toFloat())
-                            )
-                            VectorUtils.dotProduct(normalizedFaceFeatures, avgVec)
-                        }
+                            val allPersons = personDao.getAllPersons()
+                            val bestMatch = allPersons.maxByOrNull {
+                                val avgVec = VectorUtils.normalize(
+                                    VectorUtils.divide(it.embedding, it.counter.toFloat())
+                                )
+                                VectorUtils.dotProduct(normalizedFaceFeatures, avgVec)
+                            }
 
-                        var personId: Long
-                        val thumbnail = ImageUtils.cropImage(bitmap, face.boundingBox)
-                        val thumbnailSize = thumbnail.width * thumbnail.height
-                        if (bestMatch == null || VectorUtils.dotProduct(
-                                normalizedFaceFeatures,
-                                VectorUtils.normalize(
-                                    VectorUtils.divide(
-                                        bestMatch.embedding,
-                                        bestMatch.counter.toFloat()
+                            var personId: Long
+                            val thumbnail = ImageUtils.cropImage(bitmap, face.boundingBox)
+                            val thumbnailSize = thumbnail.width * thumbnail.height
+                            if (bestMatch == null || VectorUtils.dotProduct(
+                                    normalizedFaceFeatures,
+                                    VectorUtils.normalize(
+                                        VectorUtils.divide(
+                                            bestMatch.embedding,
+                                            bestMatch.counter.toFloat()
+                                        )
                                     )
-                                )
-                            ) < FACE_MATCH_THRESHOLD
-                        ) {
-                            personId = (personDao.countPersons() + 1).toLong()
-                            val thumbnailPath = ImageUtils.createThumbnail(context, thumbnail)
-                            personDao.insertPerson(
-                                PersonEntity(
-                                    personId,
-                                    "#p$personId",
-                                    faceFeatures,
-                                    1,
-                                    thumbnailPath,
-                                    thumbnailSize
-                                )
-                            )
-                        } else {
-                            personId = bestMatch.id
-                            if (!personDao.crossRefExists(mediaId, personId)) {
-                                val newEmbedding =
-                                    VectorUtils.add(bestMatch.embedding, faceFeatures)
-                                personDao.updatePersonEmbedding(personId, newEmbedding)
-                                personDao.incrementPersonCounter(personId)
-                                if (thumbnailSize > bestMatch.thumbnailSize) {
-                                    ImageUtils.deleteThumbnail(bestMatch.thumbnailPath)
-                                    val thumbnailPath =
-                                        ImageUtils.createThumbnail(context, thumbnail)
-                                    personDao.updatePersonThumbnail(
+                                ) < FACE_MATCH_THRESHOLD
+                            ) {
+                                personId = (personDao.countPersons() + 1).toLong()
+                                val thumbnailPath = ImageUtils.createThumbnail(context, thumbnail)
+                                personDao.insertPerson(
+                                    PersonEntity(
                                         personId,
+                                        "#p$personId",
+                                        faceFeatures,
+                                        1,
                                         thumbnailPath,
                                         thumbnailSize
                                     )
+                                )
+                            } else {
+                                personId = bestMatch.id
+                                if (!personDao.crossRefExists(mediaId, personId)) {
+                                    val newEmbedding =
+                                        VectorUtils.add(bestMatch.embedding, faceFeatures)
+                                    personDao.updatePersonEmbedding(personId, newEmbedding)
+                                    personDao.incrementPersonCounter(personId)
+                                    if (thumbnailSize > bestMatch.thumbnailSize) {
+                                        ImageUtils.deleteThumbnail(bestMatch.thumbnailPath)
+                                        val thumbnailPath =
+                                            ImageUtils.createThumbnail(context, thumbnail)
+                                        personDao.updatePersonThumbnail(
+                                            personId,
+                                            thumbnailPath,
+                                            thumbnailSize
+                                        )
+                                    }
                                 }
                             }
-                        }
-                        personDao.insertCrossRef(
-                            MediaPersonCrossRef(
-                                mediaId,
-                                personId,
-                                faceFeatures
-                            )
-                        )
-                    }
-
-                    // 2. Process Categories (Auto-assignment logic)
-                    val allCategories = categoryDao.getAllCategories()
-                    allCategories.forEach { category ->
-                        val similarity = VectorUtils.dotProduct(features, category.embedding)
-                        if (similarity > CATEGORY_MATCH_THRESHOLD) {
-                            categoryDao.insertCrossRef(
-                                MediaCategoryCrossRef(
+                            personDao.insertCrossRef(
+                                MediaPersonCrossRef(
                                     mediaId,
-                                    category.id,
-                                    similarity
+                                    personId,
+                                    faceFeatures
                                 )
                             )
+                        }
+
+                        // 2. Process Categories (Auto-assignment logic)
+                        val allCategories = categoryDao.getAllCategories()
+                        allCategories.forEach { category ->
+                            val similarity = VectorUtils.dotProduct(features, category.embedding)
+                            if (similarity > CATEGORY_MATCH_THRESHOLD) {
+                                categoryDao.insertCrossRef(
+                                    MediaCategoryCrossRef(
+                                        mediaId,
+                                        category.id,
+                                        similarity
+                                    )
+                                )
+                            }
                         }
                     }
 
@@ -275,22 +283,27 @@ class GalleryService(private val context: Context) {
         }
 
     suspend fun createCategory(prompt: String) {
+        initJob.await()
+        val textFeatures =
+            withContext(Dispatchers.Default) { textEncoder.getTextFeatures("An image of $prompt") }
+
         withContext(Dispatchers.IO) {
-            initJob.await()
-            val textFeatures = textEncoder.getTextFeatures("An Image of $prompt")
             val categoryId =
                 categoryDao.insertCategory(CategoryEntity(name = prompt, embedding = textFeatures))
             val allImages = mediaDao.getAllMedia()
-            allImages.forEach { image ->
-                val similarity = VectorUtils.dotProduct(image.embedding, textFeatures)
-                if (similarity > CATEGORY_MATCH_THRESHOLD) {
-                    categoryDao.insertCrossRef(
-                        MediaCategoryCrossRef(
-                            image.mediaId,
-                            categoryId,
-                            similarity
+
+            withContext(Dispatchers.Default) {
+                allImages.forEach { image ->
+                    val similarity = VectorUtils.dotProduct(image.embedding, textFeatures)
+                    if (similarity > CATEGORY_MATCH_THRESHOLD) {
+                        categoryDao.insertCrossRef(
+                            MediaCategoryCrossRef(
+                                image.mediaId,
+                                categoryId,
+                                similarity
+                            )
                         )
-                    )
+                    }
                 }
             }
         }
@@ -302,7 +315,8 @@ class GalleryService(private val context: Context) {
             initJob.await()
 
             // Provide CLIP with the clean prompt where "@name" is replaced by "a person"
-            val textFeatures = textEncoder.getTextFeatures(cleanPrompt)
+            val textFeatures =
+                withContext(Dispatchers.Default) { textEncoder.getTextFeatures(cleanPrompt) }
 
             // Filter by names first if there are any
             val images = if (names.isEmpty()) {
@@ -312,10 +326,12 @@ class GalleryService(private val context: Context) {
             }
 
             // Sort the filtered images by their similarity to the modified text prompt
-            val sortedImages = images.map { entity ->
-                val similarity = VectorUtils.dotProduct(textFeatures, entity.embedding)
-                entity.mediaId to similarity
-            }.sortedByDescending { it.second }
+            val sortedImages = withContext(Dispatchers.Default) {
+                images.map { entity ->
+                    val similarity = VectorUtils.dotProduct(textFeatures, entity.embedding)
+                    entity.mediaId to similarity
+                }.sortedByDescending { it.second }
+            }
 
             sortedImages.map {
                 ContentUris.withAppendedId(

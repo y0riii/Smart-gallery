@@ -8,6 +8,8 @@ import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.graphics.scale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.max
@@ -79,21 +81,22 @@ class ImageUtils {
             return Bitmap.createBitmap(source, left, top, width, height)
         }
 
-        fun createThumbnail(context: Context, bitmap: Bitmap): String {
-            val resized = bitmap.scale(256, 256)
-            val fileName = "thumb_${System.currentTimeMillis()}.jpg"
-            val file = File(context.filesDir, fileName)
+        suspend fun createThumbnail(context: Context, bitmap: Bitmap): String =
+            withContext(Dispatchers.IO) {
+                val resized = bitmap.scale(256, 256)
+                val fileName = "thumb_${System.currentTimeMillis()}.jpg"
+                val file = File(context.filesDir, fileName)
 
-            FileOutputStream(file).use { out ->
-                resized.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                FileOutputStream(file).use { out ->
+                    resized.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                }
+
+                file.absolutePath
             }
 
-            return file.absolutePath
-        }
-
-        fun deleteThumbnail(path: String): Boolean {
+        suspend fun deleteThumbnail(path: String): Boolean = withContext(Dispatchers.IO) {
             val file = File(path)
-            return file.exists() && file.delete()
+            file.exists() && file.delete()
         }
     }
 }
