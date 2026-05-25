@@ -1,6 +1,6 @@
 package com.example.gallery.db.previews
 
-data class CategoryPreview (
+data class CategoryPreview(
     val id: Long,
     val name: String,
 )
