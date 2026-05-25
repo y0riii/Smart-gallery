@@ -71,7 +71,7 @@ class GalleryService(private val context: Context) {
             val deviceImageIds = deviceImages.map { it.first }.toSet()
 
             // 3. Fetch IDs currently in the database
-            val dbImageIds = mediaDao.getAllMedia().map { it.mediaId }.toSet()
+            val dbImageIds = mediaDao.getAllMediaIds().toSet()
 
             // 4. Calculate the differences (The Diff)
             val idsToDelete = dbImageIds - deviceImageIds // In DB, but missing from device

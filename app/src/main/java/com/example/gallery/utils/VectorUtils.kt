@@ -13,13 +13,22 @@ class VectorUtils {
         }
 
         fun normalize(vector: FloatArray): FloatArray {
-            val norm = sqrt(vector.sumOf { (it * it).toDouble() }).toFloat()
-            if (norm == 0.0f) return vector
-            return vector.map { it / norm }.toFloatArray()
+            var norm = 0.0f
+            for (v in vector) {
+                norm += v * v
+            }
+            norm = sqrt(norm)
+            if (norm == 0.0f) return vector.copyOf()
+
+            return divide(vector, norm)
         }
 
-        fun divide(vector: FloatArray, scaler: Float): FloatArray {
-            return vector.map { it / scaler }.toFloatArray()
+        fun divide(vector: FloatArray, scalar: Float): FloatArray {
+            val result = FloatArray(vector.size)
+            for (i in vector.indices) {
+                result[i] = vector[i] / scalar
+            }
+            return result
         }
 
         fun add(vecA: FloatArray, vecB: FloatArray): FloatArray {

@@ -25,6 +25,9 @@ interface MediaDao {
     @Query("SELECT * FROM media_items ORDER BY timestampMs DESC")
     suspend fun getAllMedia(): List<MediaEntity>
 
+    @Query("SELECT mediaId FROM media_items")
+    suspend fun getAllMediaIds(): List<Long>
+
     @Query("SELECT * FROM media_items WHERE mediaId = :id LIMIT 1")
     suspend fun getMediaById(id: Long): MediaEntity?
 
