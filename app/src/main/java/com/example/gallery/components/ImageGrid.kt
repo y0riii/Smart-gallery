@@ -17,12 +17,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
-import coil3.compose.AsyncImage
-import coil3.request.ImageRequest
 
 @Composable
 fun ImageGrid(
@@ -37,19 +34,17 @@ fun ImageGrid(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(4.dp)
     ) {
-        itemsIndexed(images, key = { index, uri -> "$index-$uri" }) { index, result ->
-            AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current)
-                    .data(result)
-                    .size(256)
-                    .build(),
-                contentDescription = "Image result",
+        itemsIndexed(images, key = { _, uri -> uri.toString() }) { index, result ->
+            ThumbnailImage(
+                uri = result,
+                contentDescription = null,
                 modifier = Modifier
                     .padding(4.dp)
                     .aspectRatio(1f)
                     .background(MaterialTheme.colorScheme.surfaceVariant)
                     .clickable { onImageClick(index) },
                 contentScale = ContentScale.Crop,
+                sizePx = 384
             )
         }
     }

@@ -29,7 +29,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
 import com.example.gallery.folders.FolderItem
 import com.example.gallery.viewModels.FoldersViewModel
 
@@ -89,13 +88,14 @@ fun FoldersScreen(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (selectedFolder.insideFolderThumbnail != null) {
-                        AsyncImage(
-                            model = selectedFolder.insideFolderThumbnail,
+                        ThumbnailImage(
+                            uri = selectedFolder.insideFolderThumbnail,
                             contentDescription = null,
                             modifier = Modifier
                                 .width(64.dp)
                                 .aspectRatio(1f),
-                            contentScale = ContentScale.Crop
+                            contentScale = ContentScale.Crop,
+                            sizePx = 128
                         )
 
                         Spacer(modifier = Modifier.width(12.dp))

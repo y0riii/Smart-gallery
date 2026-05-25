@@ -21,7 +21,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
 import com.example.gallery.folders.FolderItem
 
 @Composable
@@ -37,7 +36,7 @@ fun FolderTile(folder: FolderItem, onClick: () -> Unit) {
         )
     ) {
         Column {
-            // 2×2 thumbnail grid
+            // 2x2 thumbnail grid
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -91,11 +90,12 @@ fun FolderTile(folder: FolderItem, onClick: () -> Unit) {
 @Composable
 private fun ThumbCell(uri: Uri?, modifier: Modifier) {
     if (uri != null) {
-        AsyncImage(
-            model = uri,
+        ThumbnailImage(
+            uri = uri,
             contentDescription = null,
             modifier = modifier,
-            contentScale = ContentScale.Crop
+            contentScale = ContentScale.Crop,
+            sizePx = 256
         )
     } else {
         Box(modifier.fillMaxSize()) // empty placeholder
