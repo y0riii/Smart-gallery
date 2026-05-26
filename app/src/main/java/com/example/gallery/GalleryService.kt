@@ -27,6 +27,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 
 class GalleryService(private val context: Context) {
@@ -124,9 +125,7 @@ class GalleryService(private val context: Context) {
 
         imagesToProcess.forEach { (mediaId, timestamp) ->
             try {
-                val uri = mediaId.toMediaUri()
-
-                val bitmap = ImageUtils.getBitmapFromUri(context, uri)
+                val bitmap = ImageUtils.getBitmapFromUri(context, mediaId.toMediaUri())
                 if (bitmap != null) {
                     val (features, text, faces) = withContext(Dispatchers.Default) {
                         val featuresDeferred = async { imageEncoder.getImageFeatures(bitmap) }
@@ -319,11 +318,17 @@ class GalleryService(private val context: Context) {
             }
 
             // Sort the filtered images by their similarity to the modified text prompt
+            val cores = Runtime.getRuntime().availableProcessors()
+            val chunkSize = images.size / cores + 1
+
             val sortedImages = withContext(Dispatchers.Default) {
-                images.map { entity ->
-                    val similarity = VectorUtils.dotProduct(textFeatures, entity.embedding)
-                    entity.mediaId to similarity
-                }.sortedByDescending { it.second }
+                images.chunked(chunkSize).map { chunk ->
+                    async {
+                        chunk.map { entity ->
+                            entity.mediaId to VectorUtils.dotProduct(textFeatures, entity.embedding)
+                        }
+                    }
+                }.awaitAll().flatten().sortedByDescending { it.second }
             }
 
             sortedImages.map { it.first.toMediaUri() }
