@@ -20,6 +20,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
+import coil3.compose.AsyncImage
 
 @Composable
 fun ImageGrid(
@@ -35,8 +36,8 @@ fun ImageGrid(
         contentPadding = PaddingValues(4.dp)
     ) {
         itemsIndexed(images, key = { _, uri -> uri.toString() }) { index, result ->
-            ThumbnailImage(
-                uri = result,
+            AsyncImage(
+                model = result,
                 contentDescription = null,
                 modifier = Modifier
                     .padding(4.dp)
@@ -44,7 +45,6 @@ fun ImageGrid(
                     .background(MaterialTheme.colorScheme.surfaceVariant)
                     .clickable { onImageClick(index) },
                 contentScale = ContentScale.Crop,
-                sizePx = 384
             )
         }
     }
