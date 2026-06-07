@@ -22,6 +22,16 @@ class GalleryViewModel(
 
     var statusText by mutableStateOf("")
 
+<<<<<<< Updated upstream
+=======
+    var prompt by mutableStateOf(TextFieldValue(""))
+    var useClip by mutableStateOf(true)
+    var fromDate by mutableStateOf<Long?>(null)
+    var toDate by mutableStateOf<Long?>(null)
+    
+    var shouldScrollToTop by mutableStateOf(false)
+
+>>>>>>> Stashed changes
     val allNames = personDao.getAllNamesFlow().stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -39,6 +49,19 @@ class GalleryViewModel(
         viewModelScope.launch {
             isSearching = true
             statusText = "Searching..."
+<<<<<<< Updated upstream
+=======
+            
+            // Validate dates: if from > to, treat as empty
+            val finalFrom = if (fromDate != null && toDate != null && fromDate!! > toDate!!) null else fromDate
+            val finalTo = if (fromDate != null && toDate != null && fromDate!! > toDate!!) null else toDate
+            
+            // Sync UI state if they were invalid
+            if (fromDate != null && toDate != null && fromDate!! > toDate!!) {
+                fromDate = null
+                toDate = null
+            }
+>>>>>>> Stashed changes
 
             images = if (useClip)
                 service.search(prompt)
@@ -54,6 +77,21 @@ class GalleryViewModel(
         }
     }
 
+<<<<<<< Updated upstream
+=======
+    fun clearSearch() {
+        prompt = TextFieldValue("")
+        fromDate = null
+        toDate = null
+        useClip = true
+        shouldScrollToTop = true
+        viewModelScope.launch {
+            images = service.getAllDeviceImages()
+            statusText = "Showing all images."
+        }
+    }
+
+>>>>>>> Stashed changes
     override suspend fun onDeleteSuccess(uri: Uri) {
         // Refresh images list after deletion is confirmed
         images = service.getAllDeviceImages()

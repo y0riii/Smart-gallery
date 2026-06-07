@@ -42,14 +42,19 @@ class GalleryService(private val context: Context) {
     private val personDao = db.personDao()
     private val categoryDao = db.categoryDao()
 
-    private val textEncoder: ClipTextEncoder by lazy {
-        ClipTextEncoder(context)
+    private val textEncoder: ClipTextEncoder? by lazy {
+        try {
+            ClipTextEncoder(context)
+        } catch (e: Exception) {
+            Log.e("GalleryService", "Failed to init TextEncoder", e)
+            null
+        }
     }
 
     private var initJob: Deferred<Unit> = CoroutineScope(SupervisorJob() + Dispatchers.IO).async {
         textEncoder // triggers initialization immediately
+        Unit
     }
-
 
     private var ftsSupported: Boolean = false
 
@@ -116,10 +121,40 @@ class GalleryService(private val context: Context) {
     }
 
     private suspend fun processAndInsertImages(imagesToProcess: List<Pair<Long, Long>>) {
-        val imageEncoder = ClipImageEncoder(context)
-        val ocrProcessor = OcrProcessor()
-        val faceDetector = FaceDetectionProcessor()
-        val faceEncoder = FaceEncoder(context)
+        val imageEncoder = try {
+            ClipImageEncoder(context)
+        } catch (e: Exception) {
+            Log.e("GalleryService", "Failed to init ImageEncoder", e)
+            null
+        }
+        val ocrProcessor = try {
+            OcrProcessor()
+        } catch (e: Exception) {
+            Log.e("GalleryService", "Failed to init OcrProcessor", e)
+            null
+        }
+        val faceDetector = try {
+            FaceDetectionProcessor()
+        } catch (e: Exception) {
+            Log.e("GalleryService", "Failed to init FaceDetector", e)
+            null
+        }
+        val faceEncoder = try {
+            FaceEncoder(context)
+        } catch (e: Exception) {
+            Log.e("GalleryService", "Failed to init FaceEncoder", e)
+            null
+        }
+
+        if (imageEncoder == null || ocrProcessor == null || faceDetector == null || faceEncoder == null) {
+            Log.e("GalleryService", "Aborting indexing because processors failed to initialize.")
+            imageEncoder?.close()
+            ocrProcessor?.close()
+            faceDetector?.close()
+            faceEncoder?.close()
+            return
+        }
+
         val totalCount = imagesToProcess.size
         var counter = 0
 
@@ -276,8 +311,9 @@ class GalleryService(private val context: Context) {
 
     suspend fun createCategory(prompt: String) {
         initJob.await()
+        val encoder = textEncoder ?: return
         val textFeatures =
-            withContext(Dispatchers.Default) { textEncoder.getTextFeatures("An image of $prompt") }
+            withContext(Dispatchers.Default) { encoder.getTextFeatures("An image of $prompt") }
 
         withContext(Dispatchers.IO) {
             val categoryId =
@@ -301,10 +337,31 @@ class GalleryService(private val context: Context) {
         }
     }
 
+<<<<<<< Updated upstream
     suspend fun search(prompt: String): List<Uri> {
+=======
+    private fun filterByDate(
+        images: List<MediaEntity>,
+        fromDate: Long?,
+        toDate: Long?
+    ): List<MediaEntity> {
+        return if (fromDate == null && toDate == null) {
+            images
+        } else {
+            images.filter { entity ->
+                val afterFrom = fromDate == null || entity.timestampMs >= fromDate
+                val beforeTo = toDate == null || entity.timestampMs <= toDate
+                afterFrom && beforeTo
+            }
+        }
+    }
+
+    suspend fun search(prompt: String, fromDate: Long? = null, toDate: Long? = null): List<Uri> {
+>>>>>>> Stashed changes
         return withContext(Dispatchers.IO) {
             val (names, cleanPrompt) = findNamesInPrompt(prompt)
             initJob.await()
+            val encoder = textEncoder
 
             // Provide CLIP with the clean prompt where "@name" is replaced by "a person"
             val textFeatures =
@@ -317,9 +374,27 @@ class GalleryService(private val context: Context) {
                 personDao.getImagesByNames(names, names.size)
             }
 
+<<<<<<< Updated upstream
+=======
+            // Filter by dates
+            images = filterByDate(images, fromDate, toDate)
+
+            if (images.isEmpty()) return@withContext emptyList<Uri>()
+
+            // If prompt is blank or encoder missing, just sort by date
+            if ((cleanPrompt.isBlank() && names.isEmpty()) || encoder == null) {
+                return@withContext images.sortedByDescending { it.timestampMs }
+                    .map { it.mediaId.toMediaUri() }
+            }
+
+            // Provide CLIP with the clean prompt where "@name" is replaced by "a person"
+            val textFeatures =
+                withContext(Dispatchers.Default) { encoder.getTextFeatures(cleanPrompt) }
+
+>>>>>>> Stashed changes
             // Sort the filtered images by their similarity to the modified text prompt
             val cores = Runtime.getRuntime().availableProcessors()
-            val chunkSize = images.size / cores + 1
+            val chunkSize = (images.size / cores).coerceAtLeast(1)
 
             val sortedImages = withContext(Dispatchers.Default) {
                 images.chunked(chunkSize).map { chunk ->
@@ -335,7 +410,85 @@ class GalleryService(private val context: Context) {
         }
     }
 
+<<<<<<< Updated upstream
     suspend fun searchDocuments(text: String): List<Uri> {
+=======
+    suspend fun searchWithin(
+        mediaIds: List<Long>,
+        prompt: String?,
+        useClip: Boolean,
+        fromDate: Long?,
+        toDate: Long?
+    ): List<Uri> {
+        if (prompt.isNullOrBlank()) {
+            return withContext(Dispatchers.IO) {
+                val images = mediaDao.getMediaByIds(mediaIds)
+                filterByDate(images, fromDate, toDate)
+                    .sortedByDescending { it.timestampMs }
+                    .map { it.mediaId.toMediaUri() }
+            }
+        }
+
+        val (names, cleanPrompt) = findNamesInPrompt(prompt)
+
+        return withContext(Dispatchers.IO) {
+            // Filter by names first if there are any
+            val targetIds = if (names.isEmpty()) {
+                mediaIds
+            } else {
+                val personMediaIds = personDao.getMediaIdsByNames(names, names.size)
+                mediaIds.intersect(personMediaIds.toSet()).toList()
+            }
+
+            if (targetIds.isEmpty()) return@withContext emptyList<Uri>()
+
+            val images = mediaDao.getMediaByIds(targetIds)
+            var filtered = filterByDate(images, fromDate, toDate)
+
+            if (filtered.isEmpty()) return@withContext emptyList<Uri>()
+
+            if (useClip) {
+                initJob.await()
+                val encoder = textEncoder
+                    ?: return@withContext filtered.sortedByDescending { it.timestampMs }
+                        .map { it.mediaId.toMediaUri() }
+
+                // If cleanPrompt is blank but names were found, we just show filtered results sorted by date
+                if (cleanPrompt.isBlank() && names.isNotEmpty()) {
+                    return@withContext filtered.sortedByDescending { it.timestampMs }
+                        .map { it.mediaId.toMediaUri() }
+                }
+
+                val textFeatures =
+                    withContext(Dispatchers.Default) { encoder.getTextFeatures(cleanPrompt) }
+
+                val cores = Runtime.getRuntime().availableProcessors()
+                val chunkSize = (filtered.size / cores).coerceAtLeast(1)
+
+                val sorted = withContext(Dispatchers.Default) {
+                    filtered.chunked(chunkSize).map { chunk ->
+                        async {
+                            chunk.map { entity ->
+                                entity.mediaId to VectorUtils.dotProduct(
+                                    textFeatures,
+                                    entity.embedding
+                                )
+                            }
+                        }
+                    }.awaitAll().flatten().sortedByDescending { it.second }
+                }
+                sorted.map { it.first.toMediaUri() }
+            } else {
+                // OCR search within
+                filtered =
+                    filtered.filter { it.ocrText?.contains(cleanPrompt, ignoreCase = true) == true }
+                filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toMediaUri() }
+            }
+        }
+    }
+
+    suspend fun searchDocuments(text: String, fromDate: Long? = null, toDate: Long? = null): List<Uri> {
+>>>>>>> Stashed changes
         return withContext(Dispatchers.IO) {
             val results = if (ftsSupported) {
                 mediaDao.searchMediaFts(text)
@@ -397,6 +550,7 @@ class GalleryService(private val context: Context) {
     /**
      * Finalizes deletion in DB and performs deletion on older Android versions.
      */
+    @Transaction
     suspend fun finalizeDeleteImage(uri: Uri) {
         withContext(Dispatchers.IO) {
             val mediaId = try {

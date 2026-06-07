@@ -99,6 +99,17 @@ interface PersonDao {
     )
     suspend fun getImagesByNames(names: List<String>, count: Int): List<MediaEntity>
 
+    @Query(
+        """
+        SELECT j.mediaId FROM media_person_join AS j
+        JOIN person AS p ON j.personId = p.id
+        WHERE p.name IN (:names)
+        GROUP BY j.mediaId
+        HAVING COUNT(DISTINCT p.name) = :count
+    """
+    )
+    suspend fun getMediaIdsByNames(names: List<String>, count: Int): List<Long>
+
     @Query("SELECT COUNT(*) FROM person")
     suspend fun countPersons(): Int
 

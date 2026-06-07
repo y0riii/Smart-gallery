@@ -10,11 +10,12 @@ import androidx.compose.ui.Modifier
 import com.example.gallery.viewModels.PeopleViewModel
 
 @Composable
-fun PeopleFoldersScreen(peopleViewModel: PeopleViewModel) {
+fun PeopleFoldersScreen(peopleViewModel: PeopleViewModel, allNames: List<String>) {
     var showRenameDialog by remember { mutableStateOf(false) }
 
     FoldersScreen(
         viewModel = peopleViewModel,
+        allNames = allNames,
         modifier = Modifier.clickable {
             showRenameDialog = true
         }

@@ -3,11 +3,15 @@ package com.example.gallery.folders
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
+import com.example.gallery.GalleryService
 import com.example.gallery.utils.toMediaUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-class AlbumsFolderRepository(private val context: Context) : FolderSource {
+class AlbumsFolderRepository(
+    private val context: Context,
+    private val service: GalleryService
+) : FolderSource {
 
     override suspend fun getFolders(): List<FolderItem> = withContext(Dispatchers.IO) {
         val projection = arrayOf(
@@ -53,6 +57,7 @@ class AlbumsFolderRepository(private val context: Context) : FolderSource {
         }.sortedBy { it.name }
     }
 
+<<<<<<< Updated upstream
     override suspend fun getImages(bucketId: Long): List<Uri> =
         withContext(Dispatchers.IO) {
 
@@ -89,3 +94,40 @@ class AlbumsFolderRepository(private val context: Context) : FolderSource {
             images
         }
 }
+=======
+    override suspend fun getImages(
+        bucketId: Long,
+        prompt: String?,
+        useClip: Boolean,
+        fromDate: Long?,
+        toDate: Long?,
+        sortMode: SortMode
+    ): List<Uri> = withContext(Dispatchers.IO) {
+        val mediaIds = mutableListOf<Long>()
+        val projection = arrayOf(MediaStore.Images.Media._ID)
+        val selection = "${MediaStore.Images.Media.BUCKET_ID} = ?"
+        val selectionArgs = arrayOf(bucketId.toString())
+
+        context.contentResolver.query(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            projection,
+            selection,
+            selectionArgs,
+            null
+        )?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+            while (cursor.moveToNext()) {
+                mediaIds.add(cursor.getLong(idCol))
+            }
+        }
+
+        service.searchWithin(mediaIds, prompt, useClip, fromDate, toDate).let {
+            if (sortMode == SortMode.DATE_DESC && prompt.isNullOrBlank()) {
+                it
+            } else {
+                it
+            }
+        }
+    }
+}
+>>>>>>> Stashed changes

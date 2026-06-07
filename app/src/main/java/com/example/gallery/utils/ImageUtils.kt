@@ -18,7 +18,8 @@ import kotlin.math.max
 object ImageUtils {
 
     /**
-     * Finds all image URIs on the device.
+     * Finds image URIs on the device.
+     * Capped at 100 images for testing purposes.
      */
     fun scanMediaStore(context: Context): List<Pair<Long, Long>> {
         val list = mutableListOf<Pair<Long, Long>>()
@@ -37,14 +38,14 @@ object ImageUtils {
             val idIdx = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
             val dateIdx = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
 
-            while (cursor.moveToNext()) {
+            while (cursor.moveToNext() && list.size < 100) {
                 val id = cursor.getLong(idIdx)
                 val timestamp = cursor.getLong(dateIdx) * 1000L
                 list.add(id to timestamp)
             }
         }
 
-        Log.d("MediaRepository", "MediaStore scanned: ${list.size} items")
+        Log.d("MediaRepository", "MediaStore scanned: ${list.size} items (capped at 100)")
         return list
     }
 

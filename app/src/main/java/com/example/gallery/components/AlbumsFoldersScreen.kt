@@ -4,8 +4,9 @@ import androidx.compose.runtime.Composable
 import com.example.gallery.viewModels.AlbumsViewModel
 
 @Composable
-fun AlbumsFoldersScreen(albumsViewModel: AlbumsViewModel) {
+fun AlbumsFoldersScreen(albumsViewModel: AlbumsViewModel, allNames: List<String>) {
     FoldersScreen(
-        viewModel = albumsViewModel
+        viewModel = albumsViewModel,
+        allNames = allNames
     )
 }

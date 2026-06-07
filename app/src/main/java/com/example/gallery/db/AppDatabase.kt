@@ -24,7 +24,11 @@ import com.example.gallery.db.entities.PersonEntity
         CategoryEntity::class,
         MediaCategoryCrossRef::class
     ],
+<<<<<<< Updated upstream
     version = 11,
+=======
+    version = 13,
+>>>>>>> Stashed changes
     exportSchema = false
 )
 @TypeConverters(Converters::class)

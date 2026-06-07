@@ -31,6 +31,9 @@ interface MediaDao {
     @Query("SELECT * FROM media_items WHERE mediaId = :id LIMIT 1")
     suspend fun getMediaById(id: Long): MediaEntity?
 
+    @Query("SELECT * FROM media_items WHERE mediaId IN (:ids)")
+    suspend fun getMediaByIds(ids: List<Long>): List<MediaEntity>
+
     // ===== REGULAR FTS SEARCH =====
 
     private fun formatForFts(query: String): String {
