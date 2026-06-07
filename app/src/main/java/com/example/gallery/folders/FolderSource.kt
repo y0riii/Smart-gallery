@@ -11,6 +11,8 @@ interface FolderSource {
 
     suspend fun getImages(
         bucketId: Long,
+        prompt: String? = null,
+        useClip: Boolean = true,
         fromDate: Long? = null,
         toDate: Long? = null,
         sortMode: SortMode = SortMode.RELEVANCE

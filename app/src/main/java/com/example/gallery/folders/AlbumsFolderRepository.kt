@@ -3,11 +3,15 @@ package com.example.gallery.folders
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
+import com.example.gallery.GalleryService
 import com.example.gallery.utils.toMediaUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-class AlbumsFolderRepository(private val context: Context) : FolderSource {
+class AlbumsFolderRepository(
+    private val context: Context,
+    private val service: GalleryService
+) : FolderSource {
 
     override suspend fun getFolders(): List<FolderItem> = withContext(Dispatchers.IO) {
         val projection = arrayOf(
@@ -55,51 +59,36 @@ class AlbumsFolderRepository(private val context: Context) : FolderSource {
 
     override suspend fun getImages(
         bucketId: Long,
+        prompt: String?,
+        useClip: Boolean,
         fromDate: Long?,
         toDate: Long?,
         sortMode: SortMode
-    ): List<Uri> =
-        withContext(Dispatchers.IO) {
+    ): List<Uri> = withContext(Dispatchers.IO) {
+        val mediaIds = mutableListOf<Long>()
+        val projection = arrayOf(MediaStore.Images.Media._ID)
+        val selection = "${MediaStore.Images.Media.BUCKET_ID} = ?"
+        val selectionArgs = arrayOf(bucketId.toString())
 
-            val images = mutableListOf<Uri>()
-
-            val projection = arrayOf(
-                MediaStore.Images.Media._ID,
-                MediaStore.Images.Media.DATE_ADDED
-            )
-
-            var selection = "${MediaStore.Images.Media.BUCKET_ID} = ?"
-            val selectionArgs = mutableListOf(bucketId.toString())
-
-            if (fromDate != null) {
-                selection += " AND ${MediaStore.Images.Media.DATE_ADDED} >= ?"
-                selectionArgs.add((fromDate / 1000).toString()) // MediaStore uses seconds
+        context.contentResolver.query(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            projection,
+            selection,
+            selectionArgs,
+            null
+        )?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+            while (cursor.moveToNext()) {
+                mediaIds.add(cursor.getLong(idCol))
             }
-            if (toDate != null) {
-                selection += " AND ${MediaStore.Images.Media.DATE_ADDED} <= ?"
-                selectionArgs.add((toDate / 1000).toString())
-            }
-
-            // Albums are always sorted by date added. Relevance isn't applicable here in the same way as CLIP.
-            val sortOrder =
-                "${MediaStore.Images.Media.DATE_ADDED} DESC"
-
-            context.contentResolver.query(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                projection,
-                selection,
-                selectionArgs.toTypedArray(),
-                sortOrder
-            )?.use { cursor ->
-
-                val idCol =
-                    cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-
-                while (cursor.moveToNext()) {
-                    images.add(cursor.getLong(idCol).toMediaUri())
-                }
-            }
-
-            images
         }
+
+        service.searchWithin(mediaIds, prompt, useClip, fromDate, toDate).let {
+            if (sortMode == SortMode.DATE_DESC && prompt.isNullOrBlank()) {
+                it
+            } else {
+                it
+            }
+        }
+    }
 }

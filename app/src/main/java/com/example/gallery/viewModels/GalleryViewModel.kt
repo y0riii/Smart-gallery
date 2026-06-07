@@ -27,6 +27,8 @@ class GalleryViewModel(
     var useClip by mutableStateOf(true)
     var fromDate by mutableStateOf<Long?>(null)
     var toDate by mutableStateOf<Long?>(null)
+    
+    var shouldScrollToTop by mutableStateOf(false)
 
     val allNames = personDao.getAllNamesFlow().stateIn(
         scope = viewModelScope,
@@ -56,7 +58,7 @@ class GalleryViewModel(
             isSearching = true
             statusText = "Searching..."
             
-            // Final check on dates: if from > to, treat as empty
+            // Validate dates: if from > to, treat as empty
             val finalFrom = if (fromDate != null && toDate != null && fromDate!! > toDate!!) null else fromDate
             val finalTo = if (fromDate != null && toDate != null && fromDate!! > toDate!!) null else toDate
             
@@ -85,6 +87,7 @@ class GalleryViewModel(
         fromDate = null
         toDate = null
         useClip = true
+        shouldScrollToTop = true
         viewModelScope.launch {
             images = service.getAllDeviceImages()
             statusText = "Showing all images."

@@ -23,6 +23,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -63,15 +64,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private val peopleViewModel: PeopleViewModel by viewModels {
-        PeopleViewModelFactory(PersonFolderRepository(db.personDao()), galleryService)
+        PeopleViewModelFactory(PersonFolderRepository(db.personDao(), galleryService), galleryService)
     }
 
     private val categoryViewModel: CategoryViewModel by viewModels {
-        CategoryViewModelFactory(CategoryFolderRepository(db.categoryDao()), galleryService)
+        CategoryViewModelFactory(CategoryFolderRepository(db.categoryDao(), galleryService), galleryService)
     }
 
     private val albumsViewModel: AlbumsViewModel by viewModels {
-        AlbumsViewModelFactory(AlbumsFolderRepository(applicationContext), galleryService)
+        AlbumsViewModelFactory(AlbumsFolderRepository(applicationContext, galleryService), galleryService)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -133,6 +134,8 @@ fun GalleryApp(
     var currentTab by remember { mutableIntStateOf(0) }
 
     val permissionsToRequest = remember { getPermissionsToRequest() }
+
+    val allNames by galleryViewModel.allNames.collectAsState()
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -210,11 +213,11 @@ fun GalleryApp(
 
                 currentTab == 0 -> GalleryScreen(galleryViewModel)
 
-                currentTab == 1 -> PeopleFoldersScreen(peopleViewModel)
+                currentTab == 1 -> PeopleFoldersScreen(peopleViewModel, allNames)
 
-                currentTab == 2 -> CategoryFoldersScreen(categoryViewModel)
+                currentTab == 2 -> CategoryFoldersScreen(categoryViewModel, allNames)
 
-                currentTab == 3 -> AlbumsFoldersScreen(albumsViewModel)
+                currentTab == 3 -> AlbumsFoldersScreen(albumsViewModel, allNames)
             }
         }
     }
