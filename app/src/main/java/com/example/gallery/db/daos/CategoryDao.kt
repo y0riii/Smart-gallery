@@ -53,6 +53,17 @@ interface CategoryDao {
     )
     suspend fun getImagesByCategory(categoryId: Long): List<MediaEntity>
 
+    @Transaction
+    @Query(
+        """
+        SELECT m.* FROM media_items AS m
+        JOIN media_category_join AS j ON m.mediaId = j.mediaId
+        WHERE j.categoryId = :categoryId
+        ORDER BY m.timestampMs DESC
+    """
+    )
+    suspend fun getImagesByCategorySortedByDate(categoryId: Long): List<MediaEntity>
+
     @Query(
         """
         SELECT mediaId FROM media_category_join

@@ -55,11 +55,18 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
             statusText = viewModel.statusText,
             allNames = allNames,
             gridState = gridState,
-            onSearch = { prompt, useClip ->
+            viewModel = viewModel,
+            onSearch = {
                 coroutineScope.launch {
                     gridState.scrollToItem(0)
                 }
-                viewModel.search(prompt, useClip)
+                viewModel.search()
+            },
+            onClear = {
+                coroutineScope.launch {
+                    gridState.scrollToItem(0)
+                }
+                viewModel.clearSearch()
             },
             onImageClick = { index ->
                 viewModel.openFullScreen(index)
@@ -90,13 +97,24 @@ fun GalleryContent(
     statusText: String,
     allNames: List<String>,
     gridState: LazyGridState,
-    onSearch: (String, Boolean) -> Unit,
+    viewModel: GalleryViewModel,
+    onSearch: () -> Unit,
+    onClear: () -> Unit,
     onImageClick: (Int) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         SearchBar(
+            prompt = viewModel.prompt,
+            onPromptChange = { viewModel.prompt = it },
+            useClip = viewModel.useClip,
+            onUseClipChange = { viewModel.useClip = it },
+            fromDate = viewModel.fromDate,
+            onFromDateChange = { viewModel.fromDate = it },
+            toDate = viewModel.toDate,
+            onToDateChange = { viewModel.toDate = it },
             isSearching = isSearching,
             onSearch = onSearch,
+            onClear = onClear,
             allNames = allNames
         )
 
@@ -121,25 +139,5 @@ fun GalleryContent(
             modifier = Modifier.weight(1f),
             onImageClick = onImageClick
         )
-    }
-}
-
-@Preview(showBackground = true, name = "Gallery - Success State")
-@Composable
-fun GalleryScreenPreview() {
-    MaterialTheme {
-        Surface {
-            GalleryContent(
-                images = List(10) {
-                    "android.resource://com.example.gallery/drawable/ic_launcher_background".toUri()
-                },
-                isSearching = false,
-                statusText = "Showing results for \"placeholder images\"",
-                allNames = emptyList(),
-                gridState = rememberLazyGridState(),
-                onSearch = { _, _ -> },
-                onImageClick = {}
-            )
-        }
     }
 }

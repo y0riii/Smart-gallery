@@ -301,21 +301,43 @@ class GalleryService(private val context: Context) {
         }
     }
 
-    suspend fun search(prompt: String): List<Uri> {
+    private fun filterByDate(images: List<MediaEntity>, fromDate: Long?, toDate: Long?): List<MediaEntity> {
+        return if (fromDate == null && toDate == null) {
+            images
+        } else {
+            images.filter { entity ->
+                val afterFrom = fromDate == null || entity.timestampMs >= fromDate
+                val beforeTo = toDate == null || entity.timestampMs <= toDate
+                afterFrom && beforeTo
+            }
+        }
+    }
+
+    suspend fun search(prompt: String, fromDate: Long? = null, toDate: Long? = null): List<Uri> {
         return withContext(Dispatchers.IO) {
             val (names, cleanPrompt) = findNamesInPrompt(prompt)
             initJob.await()
 
-            // Provide CLIP with the clean prompt where "@name" is replaced by "a person"
-            val textFeatures =
-                withContext(Dispatchers.Default) { textEncoder.getTextFeatures(cleanPrompt) }
-
             // Filter by names first if there are any
-            val images = if (names.isEmpty()) {
+            var images = if (names.isEmpty()) {
                 mediaDao.getAllMedia()
             } else {
                 personDao.getImagesByNames(names, names.size)
             }
+
+            // Filter by dates
+            images = filterByDate(images, fromDate, toDate)
+
+            if (images.isEmpty()) return@withContext emptyList<Uri>()
+
+            // If prompt is blank, just sort by date
+            if (cleanPrompt.isBlank() && names.isEmpty()) {
+                return@withContext images.sortedByDescending { it.timestampMs }.map { it.mediaId.toMediaUri() }
+            }
+
+            // Provide CLIP with the clean prompt where "@name" is replaced by "a person"
+            val textFeatures =
+                withContext(Dispatchers.Default) { textEncoder.getTextFeatures(cleanPrompt) }
 
             // Sort the filtered images by their similarity to the modified text prompt
             val cores = Runtime.getRuntime().availableProcessors()
@@ -335,13 +357,16 @@ class GalleryService(private val context: Context) {
         }
     }
 
-    suspend fun searchDocuments(text: String): List<Uri> {
+    suspend fun searchDocuments(text: String, fromDate: Long? = null, toDate: Long? = null): List<Uri> {
         return withContext(Dispatchers.IO) {
-            val results = if (ftsSupported) {
+            var results = if (ftsSupported) {
                 mediaDao.searchMediaFts(text)
             } else {
                 mediaDao.searchMediaSimple(text)
             }
+
+            // Filter by dates
+            results = filterByDate(results, fromDate, toDate)
 
             results.map { it.mediaId.toMediaUri() }
         }

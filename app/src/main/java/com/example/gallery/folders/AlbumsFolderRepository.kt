@@ -53,20 +53,34 @@ class AlbumsFolderRepository(private val context: Context) : FolderSource {
         }.sortedBy { it.name }
     }
 
-    override suspend fun getImages(bucketId: Long): List<Uri> =
+    override suspend fun getImages(
+        bucketId: Long,
+        fromDate: Long?,
+        toDate: Long?,
+        sortMode: SortMode
+    ): List<Uri> =
         withContext(Dispatchers.IO) {
 
             val images = mutableListOf<Uri>()
 
             val projection = arrayOf(
-                MediaStore.Images.Media._ID
+                MediaStore.Images.Media._ID,
+                MediaStore.Images.Media.DATE_ADDED
             )
 
-            val selection =
-                "${MediaStore.Images.Media.BUCKET_ID} = ?"
+            var selection = "${MediaStore.Images.Media.BUCKET_ID} = ?"
+            val selectionArgs = mutableListOf(bucketId.toString())
 
-            val selectionArgs = arrayOf(bucketId.toString())
+            if (fromDate != null) {
+                selection += " AND ${MediaStore.Images.Media.DATE_ADDED} >= ?"
+                selectionArgs.add((fromDate / 1000).toString()) // MediaStore uses seconds
+            }
+            if (toDate != null) {
+                selection += " AND ${MediaStore.Images.Media.DATE_ADDED} <= ?"
+                selectionArgs.add((toDate / 1000).toString())
+            }
 
+            // Albums are always sorted by date added. Relevance isn't applicable here in the same way as CLIP.
             val sortOrder =
                 "${MediaStore.Images.Media.DATE_ADDED} DESC"
 
@@ -74,7 +88,7 @@ class AlbumsFolderRepository(private val context: Context) : FolderSource {
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                 projection,
                 selection,
-                selectionArgs,
+                selectionArgs.toTypedArray(),
                 sortOrder
             )?.use { cursor ->
 

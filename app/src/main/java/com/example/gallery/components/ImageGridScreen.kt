@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -14,10 +15,9 @@ fun ImageGridScreen(
     onDelete: (Uri) -> Unit,
     modifier: Modifier = Modifier,
     fullScreenIndex: Int?,
-    onIndexChanged: (Int?) -> Unit
+    onIndexChanged: (Int?) -> Unit,
+    gridState: LazyGridState = rememberLazyGridState()
 ) {
-    val gridState = rememberLazyGridState()
-
     Box(modifier = modifier.fillMaxSize()) {
 
         if (fullScreenIndex == null) {

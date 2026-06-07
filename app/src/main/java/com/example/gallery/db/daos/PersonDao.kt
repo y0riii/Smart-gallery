@@ -89,6 +89,17 @@ interface PersonDao {
     @Transaction
     @Query(
         """
+        SELECT m.* FROM media_items AS m
+        JOIN media_person_join AS j ON m.mediaId = j.mediaId
+        WHERE j.personId = :personId
+        ORDER BY m.timestampMs DESC
+    """
+    )
+    suspend fun getImagesByPersonIdFull(personId: Long): List<MediaEntity>
+
+    @Transaction
+    @Query(
+        """
     SELECT m.* FROM media_items AS m
     JOIN media_person_join AS j ON m.mediaId = j.mediaId
     JOIN person AS f ON j.personId = f.id
