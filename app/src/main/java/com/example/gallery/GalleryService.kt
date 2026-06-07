@@ -30,6 +30,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 
+// start of service
+
 class GalleryService(private val context: Context) {
 
     companion object {
