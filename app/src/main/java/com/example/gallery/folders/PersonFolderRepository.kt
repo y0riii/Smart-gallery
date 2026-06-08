@@ -3,6 +3,7 @@ package com.example.gallery.folders
 import android.net.Uri
 import androidx.core.net.toUri
 import com.example.gallery.GalleryService
+import com.example.gallery.SortMode
 import com.example.gallery.db.daos.PersonDao
 import com.example.gallery.utils.toMediaUri
 import kotlinx.coroutines.Dispatchers
@@ -43,13 +44,7 @@ class PersonFolderRepository(
         sortMode: SortMode
     ): List<Uri> = withContext(Dispatchers.IO) {
         val mediaIds = personDao.getImagesIdsByPersonId(bucketId)
-        service.searchWithin(mediaIds, prompt, useClip, fromDate, toDate).let {
-            if (sortMode == SortMode.DATE_DESC && prompt.isNullOrBlank()) {
-                it
-            } else {
-                it
-            }
-        }
+        service.searchWithin(mediaIds, prompt, useClip, fromDate, toDate, sortMode)
     }
 
     suspend fun renameFolder(bucketId: Long, name: String) = withContext(Dispatchers.IO) {

@@ -51,7 +51,8 @@ fun SearchBar(
     isSearching: Boolean,
     onSearch: () -> Unit,
     onClear: () -> Unit,
-    allNames: List<String>
+    allNames: List<String>,
+    showDates: Boolean = true
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
@@ -78,11 +79,12 @@ fun SearchBar(
             )
             Spacer(modifier = Modifier.width(8.dp))
 
-            TextButton(onClick = onClear) {
-                Text("Clear")
+            if (prompt.text.isNotEmpty() || fromDate != null || toDate != null) {
+                TextButton(onClick = onClear) {
+                    Text("Clear")
+                }
+                Spacer(modifier = Modifier.width(4.dp))
             }
-
-            Spacer(modifier = Modifier.width(4.dp))
 
             Button(
                 enabled = !isSearching,
@@ -95,56 +97,58 @@ fun SearchBar(
             }
         }
 
-        if (isFocused || fromDate != null || toDate != null) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(modifier = Modifier.weight(1f)) {
-                    OutlinedTextField(
-                        value = fromDate?.let { sdf.format(Date(it)) } ?: "",
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("From") },
-                        modifier = Modifier.fillMaxWidth(),
-                        trailingIcon = {
-                            IconButton(onClick = { showFromPicker = true }) {
-                                Icon(Icons.Default.DateRange, null)
-                            }
-                        },
-                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                            disabledTextColor = MaterialTheme.colorScheme.onSurface,
-                            disabledBorderColor = MaterialTheme.colorScheme.outline,
-                            disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            disabledTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+        if (isFocused || fromDate != null || toDate != null || useClip) {
+            if (showDates) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        OutlinedTextField(
+                            value = fromDate?.let { sdf.format(Date(it)) } ?: "",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("From") },
+                            modifier = Modifier.fillMaxWidth(),
+                            trailingIcon = {
+                                IconButton(onClick = { showFromPicker = true }) {
+                                    Icon(Icons.Default.DateRange, null)
+                                }
+                            },
+                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                disabledBorderColor = MaterialTheme.colorScheme.outline,
+                                disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                disabledTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         )
-                    )
-                    Box(Modifier.matchParentSize().clickable { showFromPicker = true })
-                }
+                        Box(Modifier.matchParentSize().clickable { showFromPicker = true })
+                    }
 
-                Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
 
-                Box(modifier = Modifier.weight(1f)) {
-                    OutlinedTextField(
-                        value = toDate?.let { sdf.format(Date(it)) } ?: "",
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("To") },
-                        modifier = Modifier.fillMaxWidth(),
-                        trailingIcon = {
-                            IconButton(onClick = { showToPicker = true }) {
-                                Icon(Icons.Default.DateRange, null)
-                            }
-                        },
-                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                            disabledTextColor = MaterialTheme.colorScheme.onSurface,
-                            disabledBorderColor = MaterialTheme.colorScheme.outline,
-                            disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            disabledTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    Box(modifier = Modifier.weight(1f)) {
+                        OutlinedTextField(
+                            value = toDate?.let { sdf.format(Date(it)) } ?: "",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("To") },
+                            modifier = Modifier.fillMaxWidth(),
+                            trailingIcon = {
+                                IconButton(onClick = { showToPicker = true }) {
+                                    Icon(Icons.Default.DateRange, null)
+                                }
+                            },
+                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                disabledBorderColor = MaterialTheme.colorScheme.outline,
+                                disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                disabledTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         )
-                    )
-                    Box(Modifier.matchParentSize().clickable { showToPicker = true })
+                        Box(Modifier.matchParentSize().clickable { showToPicker = true })
+                    }
                 }
             }
             

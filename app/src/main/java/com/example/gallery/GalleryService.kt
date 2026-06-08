@@ -337,7 +337,7 @@ class GalleryService(private val context: Context) {
         }
     }
 
-    private fun filterByDate(
+    fun filterByDate(
         images: List<MediaEntity>,
         fromDate: Long?,
         toDate: Long?
@@ -404,14 +404,23 @@ class GalleryService(private val context: Context) {
         prompt: String?,
         useClip: Boolean,
         fromDate: Long?,
-        toDate: Long?
+        toDate: Long?,
+        sortMode: SortMode = SortMode.RELEVANCE
     ): List<Uri> {
         if (prompt.isNullOrBlank()) {
             return withContext(Dispatchers.IO) {
                 val images = mediaDao.getMediaByIds(mediaIds)
-                filterByDate(images, fromDate, toDate)
-                    .sortedByDescending { it.timestampMs }
-                    .map { it.mediaId.toMediaUri() }
+                val filtered = filterByDate(images, fromDate, toDate)
+                
+                if (sortMode == SortMode.DATE_DESC) {
+                    filtered.sortedByDescending { it.timestampMs }
+                        .map { it.mediaId.toMediaUri() }
+                } else {
+                    // Maintain original order of mediaIds (important for Category similarity sort)
+                    val idToIndex = mediaIds.withIndex().associate { it.value to it.index }
+                    filtered.sortedBy { idToIndex[it.mediaId] ?: Int.MAX_VALUE }
+                        .map { it.mediaId.toMediaUri() }
+                }
             }
         }
 
@@ -455,20 +464,31 @@ class GalleryService(private val context: Context) {
                     filtered.chunked(chunkSize).map { chunk ->
                         async {
                             chunk.map { entity ->
-                                entity.mediaId to VectorUtils.dotProduct(
+                                entity to VectorUtils.dotProduct(
                                     textFeatures,
                                     entity.embedding
                                 )
                             }
                         }
-                    }.awaitAll().flatten().sortedByDescending { it.second }
+                    }.awaitAll().flatten()
                 }
-                sorted.map { it.first.toMediaUri() }
+                
+                if (sortMode == SortMode.DATE_DESC) {
+                    sorted.sortedByDescending { it.first.timestampMs }.map { it.first.mediaId.toMediaUri() }
+                } else {
+                    sorted.sortedByDescending { it.second }.map { it.first.mediaId.toMediaUri() }
+                }
             } else {
                 // OCR search within
                 filtered =
                     filtered.filter { it.ocrText?.contains(cleanPrompt, ignoreCase = true) == true }
-                filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toMediaUri() }
+                
+                if (sortMode == SortMode.DATE_DESC) {
+                    filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toMediaUri() }
+                } else {
+                    // For OCR without a prompt (though we handled prompt null above), or just default to date
+                    filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toMediaUri() }
+                }
             }
         }
     }

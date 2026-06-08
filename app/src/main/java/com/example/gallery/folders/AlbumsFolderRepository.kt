@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
 import com.example.gallery.GalleryService
+import com.example.gallery.SortMode
 import com.example.gallery.utils.toMediaUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -69,13 +70,14 @@ class AlbumsFolderRepository(
         val projection = arrayOf(MediaStore.Images.Media._ID)
         val selection = "${MediaStore.Images.Media.BUCKET_ID} = ?"
         val selectionArgs = arrayOf(bucketId.toString())
+        val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
 
         context.contentResolver.query(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
             projection,
             selection,
             selectionArgs,
-            null
+            sortOrder
         )?.use { cursor ->
             val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
             while (cursor.moveToNext()) {
@@ -83,12 +85,6 @@ class AlbumsFolderRepository(
             }
         }
 
-        service.searchWithin(mediaIds, prompt, useClip, fromDate, toDate).let {
-            if (sortMode == SortMode.DATE_DESC && prompt.isNullOrBlank()) {
-                it
-            } else {
-                it
-            }
-        }
+        service.searchWithin(mediaIds, prompt, useClip, fromDate, toDate, sortMode)
     }
 }

@@ -80,8 +80,10 @@ interface PersonDao {
 
     @Query(
         """
-        SELECT mediaId FROM media_person_join
-        WHERE personId = :personId
+        SELECT j.mediaId FROM media_person_join AS j
+        JOIN media_items AS m ON j.mediaId = m.mediaId
+        WHERE j.personId = :personId
+        ORDER BY m.timestampMs DESC
     """
     )
     suspend fun getImagesIdsByPersonId(personId: Long): List<Long>

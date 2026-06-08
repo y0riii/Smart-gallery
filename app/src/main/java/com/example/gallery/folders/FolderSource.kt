@@ -1,10 +1,7 @@
 package com.example.gallery.folders
 
 import android.net.Uri
-
-enum class SortMode {
-    RELEVANCE, DATE_DESC
-}
+import com.example.gallery.SortMode
 
 interface FolderSource {
     suspend fun getFolders(): List<FolderItem>

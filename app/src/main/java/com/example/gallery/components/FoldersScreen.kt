@@ -26,7 +26,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
-import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -48,10 +47,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.example.gallery.folders.FolderItem
-import com.example.gallery.folders.SortMode
+import com.example.gallery.SortMode
 import com.example.gallery.viewModels.FoldersViewModel
-import kotlinx.coroutines.launch
-import java.util.Date
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,6 +56,8 @@ fun FoldersScreen(
     viewModel: FoldersViewModel,
     allNames: List<String>,
     modifier: Modifier = Modifier,
+    canSort: Boolean = false,
+    showDates: Boolean = true,
     folderGridHeader: @Composable ColumnScope.() -> Unit = {},
     selectedFolderActions: @Composable RowScope.(FolderItem) -> Unit = {}
 ) {
@@ -148,25 +147,27 @@ fun FoldersScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     selectedFolderActions(selectedFolder)
                     
-                    Box {
-                        IconButton(onClick = { showSortMenu = true }) {
-                            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort")
-                        }
-                        DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
-                            DropdownMenuItem(
-                                text = { Text("Sort by relevance") },
-                                onClick = {
-                                    viewModel.onSortModeChanged(SortMode.RELEVANCE)
-                                    showSortMenu = false
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Sort by date descending") },
-                                onClick = {
-                                    viewModel.onSortModeChanged(SortMode.DATE_DESC)
-                                    showSortMenu = false
-                                }
-                            )
+                    if (canSort) {
+                        Box {
+                            IconButton(onClick = { showSortMenu = true }) {
+                                Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort")
+                            }
+                            DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("Sort by relevance") },
+                                    onClick = {
+                                        viewModel.onSortModeChanged(SortMode.RELEVANCE)
+                                        showSortMenu = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Sort by date descending") },
+                                    onClick = {
+                                        viewModel.onSortModeChanged(SortMode.DATE_DESC)
+                                        showSortMenu = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -187,7 +188,8 @@ fun FoldersScreen(
                     viewModel.applyFilters() 
                 },
                 onClear = { viewModel.clearSearch() },
-                allNames = allNames
+                allNames = allNames,
+                showDates = showDates
             )
 
             Spacer(modifier = Modifier.height(4.dp))

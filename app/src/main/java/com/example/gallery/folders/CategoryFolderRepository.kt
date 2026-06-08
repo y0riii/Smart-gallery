@@ -4,6 +4,7 @@ import android.net.Uri
 import com.example.gallery.GalleryService
 import com.example.gallery.db.daos.CategoryDao
 import com.example.gallery.utils.toMediaUri
+import com.example.gallery.SortMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -37,13 +38,7 @@ class CategoryFolderRepository(
         sortMode: SortMode
     ): List<Uri> = withContext(Dispatchers.IO) {
         val mediaIds = categoryDao.getImagesIdsByCategory(bucketId)
-        service.searchWithin(mediaIds, prompt, useClip, fromDate, toDate).let {
-            if (sortMode == SortMode.DATE_DESC && prompt.isNullOrBlank()) {
-                it
-            } else {
-                it
-            }
-        }
+        service.searchWithin(mediaIds, prompt, useClip, fromDate, toDate, sortMode)
     }
 
     suspend fun deleteCategory(bucketId: Long) = withContext(Dispatchers.IO) {

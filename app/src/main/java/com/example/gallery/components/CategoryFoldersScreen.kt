@@ -22,6 +22,7 @@ fun CategoryFoldersScreen(categoryViewModel: CategoryViewModel, allNames: List<S
     FoldersScreen(
         viewModel = categoryViewModel,
         allNames = allNames,
+        canSort = true,
         folderGridHeader = {
             CreateButton { category -> categoryViewModel.createCategory(category) }
         },

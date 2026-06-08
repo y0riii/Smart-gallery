@@ -7,9 +7,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.viewModelScope
 import com.example.gallery.GalleryService
+import com.example.gallery.SortMode
 import com.example.gallery.folders.FolderItem
 import com.example.gallery.folders.FolderSource
-import com.example.gallery.folders.SortMode
 import kotlinx.coroutines.launch
 
 abstract class FoldersViewModel(
