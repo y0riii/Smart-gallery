@@ -9,7 +9,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.exclude
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material.icons.filled.Home
@@ -165,9 +169,19 @@ fun GalleryApp(
         else -> false
     }
 
+    val isSelecting = when {
+        !hasPermission -> galleryViewModel.isSelecting
+        currentTab == 0 -> galleryViewModel.isSelecting
+        currentTab == 1 -> peopleViewModel.isSelecting
+        currentTab == 2 -> categoryViewModel.isSelecting
+        currentTab == 3 -> albumsViewModel.isSelecting
+        else -> false
+    }
+
     Scaffold(
+        contentWindowInsets = ScaffoldDefaults.contentWindowInsets.exclude(WindowInsets.navigationBars),
         bottomBar = {
-            if (!isFullScreen) {
+            if (!isFullScreen && !isSelecting) {
                 NavigationBar {
                     NavigationBarItem(
                         selected = currentTab == 0,
