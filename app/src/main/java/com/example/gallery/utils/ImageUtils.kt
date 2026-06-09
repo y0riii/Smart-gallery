@@ -38,7 +38,7 @@ object ImageUtils {
             val idIdx = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
             val dateIdx = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
 
-            while (cursor.moveToNext() && list.size < 100) {
+            while (cursor.moveToNext()) {
                 val id = cursor.getLong(idIdx)
                 val timestamp = cursor.getLong(dateIdx) * 1000L
                 list.add(id to timestamp)

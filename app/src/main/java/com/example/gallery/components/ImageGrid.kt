@@ -13,6 +13,10 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateContentSize
+import com.example.gallery.ui.theme.AppConfig
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -62,9 +66,20 @@ fun ImageGrid(
     // Accumulates scale delta between column-count snaps (Feature 2)
     var zoomAccumulator by remember { mutableStateOf(1f) }
 
+    val animatedCellPadding by animateDpAsState(
+        targetValue = when {
+            columnCount <= 2 -> 3.dp
+            columnCount <= 3 -> 2.dp
+            else -> 1.dp
+        },
+        animationSpec = tween(AppConfig.GridResizeDuration, easing = AppConfig.StandardEasing),
+        label = "cellPadding"
+    )
+
     Box(
         modifier = modifier
             .fillMaxSize()
+            .animateContentSize(tween(AppConfig.GridResizeDuration))
             // ── Feature 2: pinch gesture detection ───────────────────────────
             // Runs alongside the grid's own scroll gesture.
             // Only consumes events when 2+ fingers are detected so 1-finger
@@ -117,7 +132,7 @@ fun ImageGrid(
                 // Each cell is a Box so we can layer overlay elements on top of the image
                 Box(
                     modifier = Modifier
-                        .padding(2.dp) // Uniform 2dp gap between cells
+                        .padding(animatedCellPadding)
                         .aspectRatio(1f) // Square cell — image always fills correctly
                 ) {
                     // ── Image ─────────────────────────────────────────────────
@@ -160,7 +175,7 @@ fun ImageGrid(
                                 modifier = Modifier
                                     .align(Alignment.TopStart)
                                     .padding(4.dp)
-                                    .size(22.dp)
+                                    .size(AppConfig.SelectionIconSize)
                             )
                         } else {
                             // Empty circle in the top-left corner for unselected images
@@ -171,7 +186,7 @@ fun ImageGrid(
                                 modifier = Modifier
                                     .align(Alignment.TopStart)
                                     .padding(4.dp)
-                                    .size(22.dp)
+                                    .size(AppConfig.SelectionIconSize)
                             )
                         }
                     }

@@ -25,6 +25,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import com.example.gallery.ui.theme.AppConfig
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -87,6 +94,11 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
             val showPreviewButton = viewModel.isSelecting && columnCount < GALLERY_PREVIEW_HIDE_THRESHOLD
 
             Column(modifier = Modifier.fillMaxSize()) {
+                Text(
+                    text = "Gallery",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(horizontal = 16.dp).padding(top = 16.dp, bottom = 4.dp)
+                )
                 SearchBar(
                     prompt = viewModel.prompt,
                     onPromptChange = { viewModel.prompt = it },
@@ -109,16 +121,27 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
                 )
 
                 if (viewModel.isSearching || viewModel.statusText.isNotEmpty()) {
-                    Box(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp),
-                        contentAlignment = Alignment.Center
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         if (viewModel.isSearching) {
                             CircularProgressIndicator()
                         } else {
-                            Text(viewModel.statusText, style = MaterialTheme.typography.bodySmall)
+                            AnimatedVisibility(
+                                visible = viewModel.statusText.isNotEmpty(),
+                                enter = fadeIn(tween(AppConfig.StatusTextDuration)),
+                                exit = fadeOut(tween(AppConfig.StatusTextDuration))
+                            ) {
+                                Text(
+                                    text = viewModel.statusText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(vertical = 4.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -149,9 +172,20 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
             }
 
             // Feature 1: selection action bar
-            if (viewModel.isSelecting) {
+            AnimatedVisibility(
+                visible = viewModel.isSelecting && fullScreenIndex == null,
+                enter = slideInVertically(
+                    initialOffsetY = { it },
+                    animationSpec = tween(AppConfig.SelectionBarDuration, easing = AppConfig.EmphasizedEasing)
+                ) + fadeIn(tween(AppConfig.SelectionBarDuration)),
+                exit = slideOutVertically(
+                    targetOffsetY = { it },
+                    animationSpec = tween(AppConfig.SelectionBarDuration)
+                ) + fadeOut(tween(AppConfig.SelectionBarDuration)),
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
                 BottomAppBar(
-                    modifier = Modifier.align(Alignment.BottomCenter)
+                    containerColor = MaterialTheme.colorScheme.surface
                 ) {
                     Text(
                         text = "${viewModel.selectedUris.size} selected",
@@ -161,15 +195,15 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
                             .padding(start = 16.dp)
                     )
                     IconButton(onClick = { viewModel.shareSelectedImages(context) }) {
-                        Icon(Icons.Default.Share, contentDescription = "Share selected")
+                        Icon(Icons.Default.Share, contentDescription = "Share selected", tint = MaterialTheme.colorScheme.primary)
                     }
                     Spacer(modifier = Modifier.width(4.dp))
                     IconButton(onClick = { showDeleteConfirmDialog = true }) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete selected")
+                        Icon(Icons.Default.Delete, contentDescription = "Delete selected", tint = MaterialTheme.colorScheme.error)
                     }
                     Spacer(modifier = Modifier.width(4.dp))
                     TextButton(onClick = { viewModel.clearSelection() }) {
-                        Text("Cancel")
+                        Text("Cancel", color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }

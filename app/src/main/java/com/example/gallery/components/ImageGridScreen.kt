@@ -23,6 +23,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import com.example.gallery.ui.theme.AppConfig
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -119,9 +126,20 @@ fun ImageGridScreen(
         }
 
         // ── Feature 1: selection action bar shown at the bottom ──────────────
-        if (isSelecting && fullScreenIndex == null) {
+        AnimatedVisibility(
+            visible = isSelecting && fullScreenIndex == null,
+            enter = slideInVertically(
+                initialOffsetY = { it },
+                animationSpec = tween(AppConfig.SelectionBarDuration, easing = AppConfig.EmphasizedEasing)
+            ) + fadeIn(tween(AppConfig.SelectionBarDuration)),
+            exit = slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = tween(AppConfig.SelectionBarDuration)
+            ) + fadeOut(tween(AppConfig.SelectionBarDuration)),
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
             BottomAppBar(
-                modifier = Modifier.align(Alignment.BottomCenter)
+                containerColor = MaterialTheme.colorScheme.surface
             ) {
                 // Number of selected images
                 Text(
@@ -135,21 +153,21 @@ fun ImageGridScreen(
                 // Share selected images
                 // Context is available here via LocalContext for the share intent
                 IconButton(onClick = onShareSelected) {
-                    Icon(Icons.Default.Share, contentDescription = "Share selected")
+                    Icon(Icons.Default.Share, contentDescription = "Share selected", tint = MaterialTheme.colorScheme.primary)
                 }
 
                 Spacer(modifier = Modifier.width(4.dp))
 
                 // Delete selected images (shows confirmation dialog first)
                 IconButton(onClick = { showDeleteConfirmDialog = true }) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete selected")
+                    Icon(Icons.Default.Delete, contentDescription = "Delete selected", tint = MaterialTheme.colorScheme.error)
                 }
 
                 Spacer(modifier = Modifier.width(4.dp))
 
                 // Cancel selection mode
                 TextButton(onClick = onCancelSelection) {
-                    Text("Cancel")
+                    Text("Cancel", color = MaterialTheme.colorScheme.primary)
                 }
             }
         }

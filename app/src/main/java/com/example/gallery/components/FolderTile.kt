@@ -21,28 +21,41 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.shape.RoundedCornerShape
 import coil3.compose.AsyncImage
 import com.example.gallery.folders.FolderItem
+import com.example.gallery.ui.theme.AppConfig
 
 @Composable
-fun FolderTile(folder: FolderItem, onClick: () -> Unit) {
+fun FolderTile(folder: FolderItem, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = MaterialTheme.shapes.medium,
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(
-            0.5.dp, MaterialTheme.colorScheme.outlineVariant
-        )
+        shape = RoundedCornerShape(AppConfig.FolderTileCornerRadius),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = AppConfig.FolderTileElevation,
+            pressedElevation = AppConfig.FolderTileElevationPressed
+        ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column {
             // 2x2 thumbnail grid
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
+            Box(
+                Modifier.clip(
+                    RoundedCornerShape(
+                        topStart = AppConfig.FolderTileCornerRadius,
+                        topEnd = AppConfig.FolderTileCornerRadius
+                    )
+                )
             ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                ) {
                 val thumbs = folder.thumbnailUris
                 Column(Modifier.weight(1f)) {
                     ThumbCell(
@@ -70,11 +83,13 @@ fun FolderTile(folder: FolderItem, onClick: () -> Unit) {
                     )
                 }
             }
+            }
             // Name + count
-            Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+            Column(Modifier.padding(horizontal = AppConfig.FolderTileInnerPadding, vertical = 10.dp)) {
                 Text(
                     text = folder.name,
                     style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

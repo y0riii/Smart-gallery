@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -45,6 +46,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
+import com.example.gallery.ui.theme.AppConfig
 import coil3.compose.AsyncImage
 import com.example.gallery.folders.FolderItem
 import com.example.gallery.SortMode
@@ -88,49 +100,76 @@ fun FoldersScreen(
         }
     }
 
-    if (selectedFolder == null) {
-        if (viewModel.isLoading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+    AnimatedContent(
+        targetState = selectedFolder,
+        transitionSpec = {
+            if (targetState != null) {
+                slideInHorizontally(
+                    initialOffsetX = { it / 4 },
+                    animationSpec = tween(AppConfig.ScreenEnterDuration, easing = AppConfig.EmphasizedEasing)
+                ) + fadeIn(tween(AppConfig.ScreenEnterDuration)) togetherWith fadeOut(tween(AppConfig.ScreenEnterDuration))
+            } else {
+                fadeIn(tween(AppConfig.ScreenEnterDuration)) togetherWith slideOutHorizontally(
+                    targetOffsetX = { it },
+                    animationSpec = tween(AppConfig.ScreenExitDuration, easing = AppConfig.EmphasizedEasing)
+                ) + fadeOut(tween(AppConfig.ScreenExitDuration))
             }
-        } else {
+        },
+        label = "FolderNavigation"
+    ) { currentFolder ->
+        if (currentFolder == null) {
             Column(modifier = Modifier.fillMaxSize()) {
                 folderGridHeader()
 
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(viewModel.folders, key = { it.bucketId }) { folder ->
-                        FolderTile(
-                            folder = folder,
-                            onClick = { viewModel.loadFolder(folder.bucketId) }
-                        )
+                if (viewModel.isLoading) {
+                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                } else if (viewModel.folders.isEmpty()) {
+                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.PhotoAlbum, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.height(12.dp))
+                            Text("No items yet", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        contentPadding = PaddingValues(AppConfig.FolderGridPadding),
+                        verticalArrangement = Arrangement.spacedBy(AppConfig.FolderGridSpacing),
+                        horizontalArrangement = Arrangement.spacedBy(AppConfig.FolderGridSpacing)
+                    ) {
+                        items(viewModel.folders, key = { it.bucketId }) { folder ->
+                            FolderTile(
+                                folder = folder,
+                                onClick = { viewModel.loadFolder(folder.bucketId) },
+                                modifier = Modifier.animateItem()
+                            )
+                        }
                     }
                 }
             }
-        }
-    } else {
-        Column(modifier = Modifier.fillMaxSize()) {
+        } else {
+            Column(modifier = Modifier.fillMaxSize()) {
             // Folder Header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                    if (selectedFolder.insideFolderThumbnail != null) {
+                    if (currentFolder.insideFolderThumbnail != null) {
                         AsyncImage(
-                            model = selectedFolder.insideFolderThumbnail,
+                            model = currentFolder.insideFolderThumbnail,
                             contentDescription = null,
                             modifier = Modifier
-                                .width(40.dp)
-                                .aspectRatio(1f),
+                                .width(AppConfig.FolderThumbnailSize)
+                                .aspectRatio(1f)
+                                .clip(RoundedCornerShape(8.dp)),
                             contentScale = ContentScale.Crop,
                         )
 
@@ -138,14 +177,14 @@ fun FoldersScreen(
                     }
 
                     Text(
-                        text = selectedFolder.name,
+                        text = currentFolder.name,
                         style = MaterialTheme.typography.titleMedium,
                         modifier = modifier
                     )
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    selectedFolderActions(selectedFolder)
+                    selectedFolderActions(currentFolder)
                     
                     if (canSort) {
                         Box {
@@ -228,6 +267,7 @@ fun FoldersScreen(
         }
 
         BackHandler { viewModel.clearSelectedFolder() }
+    }
     }
 
     fullScreenIndex?.let { index ->

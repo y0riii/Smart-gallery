@@ -16,6 +16,9 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -303,10 +306,11 @@ fun FullScreenImage(
                     .fillMaxWidth()
                     .background(
                         Brush.verticalGradient(
-                            colors = listOf(Color.Black.copy(alpha = 0.8f), Color.Transparent)
+                            colors = listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)
                         )
                     )
-                    .padding(top = 40.dp, bottom = 24.dp, start = 8.dp, end = 8.dp),
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(bottom = 16.dp, start = 8.dp, end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onClose) {

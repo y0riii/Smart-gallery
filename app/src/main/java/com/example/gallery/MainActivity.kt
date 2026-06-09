@@ -25,6 +25,15 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.Color
+import com.example.gallery.ui.theme.GalleryTheme
+import com.example.gallery.ui.theme.AppConfig
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -83,7 +92,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         scheduleBackgroundIndexing()
         setContent {
-            MaterialTheme {
+            GalleryTheme {
                 GalleryApp(galleryViewModel, peopleViewModel, categoryViewModel, albumsViewModel)
             }
         }
@@ -182,18 +191,27 @@ fun GalleryApp(
         contentWindowInsets = ScaffoldDefaults.contentWindowInsets.exclude(WindowInsets.navigationBars),
         bottomBar = {
             if (!isFullScreen && !isSelecting) {
-                NavigationBar {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                    val navColors = NavigationBarItemDefaults.colors(
+                        indicatorColor = Color.Transparent,
+                        selectedIconColor = MaterialTheme.colorScheme.primary,
+                        selectedTextColor = MaterialTheme.colorScheme.primary,
+                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     NavigationBarItem(
                         selected = currentTab == 0,
                         onClick = { currentTab = 0 },
                         icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
-                        label = { Text("Home") }
+                        label = { Text("Home") },
+                        colors = navColors
                     )
                     NavigationBarItem(
                         selected = currentTab == 1,
                         onClick = { currentTab = 1 },
                         icon = { Icon(Icons.Default.People, contentDescription = "People") },
-                        label = { Text("People") }
+                        label = { Text("People") },
+                        colors = navColors
                     )
                     NavigationBarItem(
                         selected = currentTab == 2,
@@ -204,7 +222,8 @@ fun GalleryApp(
                                 contentDescription = "Tags"
                             )
                         },
-                        label = { Text("Tags") }
+                        label = { Text("Tags") },
+                        colors = navColors
                     )
                     NavigationBarItem(
                         selected = currentTab == 3,
@@ -215,23 +234,32 @@ fun GalleryApp(
                                 contentDescription = "Albums"
                             )
                         },
-                        label = { Text("Albums") }
+                        label = { Text("Albums") },
+                        colors = navColors
                     )
                 }
             }
         }
     ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding)) {
-            when {
-                !hasPermission -> GalleryScreen(galleryViewModel)
-
-                currentTab == 0 -> GalleryScreen(galleryViewModel)
-
-                currentTab == 1 -> PeopleFoldersScreen(peopleViewModel, allNames)
-
-                currentTab == 2 -> CategoryFoldersScreen(categoryViewModel, allNames)
-
-                currentTab == 3 -> AlbumsFoldersScreen(albumsViewModel, allNames)
+            if (!hasPermission) {
+                GalleryScreen(galleryViewModel)
+            } else {
+                AnimatedContent(
+                    targetState = currentTab,
+                    transitionSpec = {
+                        fadeIn(tween(AppConfig.TabTransitionDuration, easing = AppConfig.StandardEasing)) togetherWith
+                        fadeOut(tween(AppConfig.TabTransitionDuration, easing = AppConfig.StandardEasing))
+                    },
+                    label = "TabTransition"
+                ) { tab ->
+                    when (tab) {
+                        0 -> GalleryScreen(galleryViewModel)
+                        1 -> PeopleFoldersScreen(peopleViewModel, allNames)
+                        2 -> CategoryFoldersScreen(categoryViewModel, allNames)
+                        3 -> AlbumsFoldersScreen(albumsViewModel, allNames)
+                    }
+                }
             }
         }
     }
