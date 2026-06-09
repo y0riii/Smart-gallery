@@ -5,7 +5,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.example.gallery.folders.FolderItem
@@ -64,7 +64,7 @@ fun FoldersScreen(
     val selectedFolder = viewModel.selectedFolder
     val fullScreenIndex = viewModel.fullScreenIndex
     val gridState = rememberLazyGridState()
-    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     var showSortMenu by remember { mutableStateOf(false) }
 
@@ -207,7 +207,16 @@ fun FoldersScreen(
                         }
                     },
                     gridState = gridState,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    // Feature 1: wire selection state from DeletableViewModel base class
+                    selectedUris = viewModel.selectedUris,
+                    isSelecting = viewModel.isSelecting,
+                    onLongPress = { uri -> viewModel.startSelection(uri) },
+                    onToggleSelect = { uri -> viewModel.toggleSelection(uri) },
+                    onCancelSelection = { viewModel.clearSelection() },
+                    onDeleteSelected = { viewModel.deleteSelectedImages() },
+                    // Feature 1: share — pass context available in this composable scope
+                    onShareSelected = { viewModel.shareSelectedImages(context) }
                 )
                 
                 if (viewModel.isLoading) {

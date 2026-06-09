@@ -556,6 +556,28 @@ class GalleryService(private val context: Context) {
     }
 
     /**
+     * Prepares a bulk deletion intent for multiple URIs at once.
+     * On Android R+, this shows a single system confirmation dialog for all images.
+     */
+    suspend fun prepareDeleteImages(uris: List<Uri>): PendingIntent? {
+        return withContext(Dispatchers.IO) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                MediaStore.createDeleteRequest(context.contentResolver, uris)
+            } else {
+                null
+            }
+        }
+    }
+
+    /**
+     * Finalizes bulk deletion in the DB (and on-device for pre-R Android)
+     * by calling finalizeDeleteImage for each URI in the list.
+     */
+    suspend fun finalizeDeleteImages(uris: List<Uri>) {
+        uris.forEach { finalizeDeleteImage(it) }
+    }
+
+    /**
      * Finalizes deletion in DB and performs deletion on older Android versions.
      */
     @Transaction

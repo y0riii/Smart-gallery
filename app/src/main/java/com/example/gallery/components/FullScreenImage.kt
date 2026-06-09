@@ -33,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -63,16 +64,18 @@ fun FullScreenImage(
     images: List<Uri>,
     initialIndex: Int,
     onClose: () -> Unit,
-    onDelete: (Uri) -> Unit
+    onDelete: (Uri) -> Unit,
+    // Feature 3: when true, Share and Delete buttons are hidden (read-only preview)
+    isPreviewMode: Boolean = false,
 ) {
-    val pagerState = rememberPagerState(initialPage = initialIndex, pageCount = { images.size })
+    val pagerState = rememberPagerState(initialPage = initialIndex) { images.size }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val view = LocalView.current
     val window = remember(view) { (view.context as? Activity)?.window }
 
     // Track state for controls and gestures
-    var isCurrentPageZoomed by remember { mutableStateOf(false) }
+    var isCurrentPageZoomed by remember { mutableStateOf(value = false) }
     var isDraggingDownGlobal by remember { mutableStateOf(false) }
     var showControls by remember { mutableStateOf(true) }
 
@@ -116,7 +119,7 @@ fun FullScreenImage(
             val scale = remember { Animatable(1f) }
             val offset = remember { Animatable(Offset.Zero, Offset.VectorConverter) }
             val dismissOffset = remember { Animatable(0f) }
-            var imageAspectRatio by remember { mutableStateOf(1f) }
+            var imageAspectRatio by remember { mutableFloatStateOf(1f) }
 
             LaunchedEffect(scale.value) {
                 if (pagerState.currentPage == pageIndex) {
@@ -141,7 +144,7 @@ fun FullScreenImage(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .pointerInput(Unit) {
+                        .pointerInput(boxWidth, boxHeight) {
                             var lastTapTime = 0L
                             awaitEachGesture {
                                 awaitFirstDown(requireUnconsumed = false)
@@ -169,7 +172,7 @@ fun FullScreenImage(
                                     val zoomChange = event.calculateZoom()
                                     val panChange = event.calculatePan()
 
-                                    if (abs(panChange.x) > 2f || abs(panChange.y) > 2f || zoomChange != 1f) {
+                                    if ((abs(panChange.x) > 2f) || (abs(panChange.y) > 2f) || (zoomChange != 1f)) {
                                         hasMovedSignificant = true
                                     }
 
@@ -312,24 +315,27 @@ fun FullScreenImage(
 
                 Box(modifier = Modifier.weight(1f))
 
-                IconButton(onClick = {
-                    val currentUri = images[pagerState.currentPage]
-                    val shareIntent = Intent().apply {
-                        action = Intent.ACTION_SEND
-                        putExtra(Intent.EXTRA_STREAM, currentUri)
-                        type = "image/*"
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                // Feature 3: Share and Delete are hidden in preview mode
+                if (!isPreviewMode) {
+                    IconButton(onClick = {
+                        val currentUri = images[pagerState.currentPage]
+                        val shareIntent = Intent().apply {
+                            action = Intent.ACTION_SEND
+                            putExtra(Intent.EXTRA_STREAM, currentUri)
+                            type = "image/*"
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(Intent.createChooser(shareIntent, "Share Image"))
+                    }) {
+                        Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White)
                     }
-                    context.startActivity(Intent.createChooser(shareIntent, "Share Image"))
-                }) {
-                    Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White)
-                }
 
-                IconButton(onClick = {
-                    val currentUri = images[pagerState.currentPage]
-                    onDelete(currentUri)
-                }) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.White)
+                    IconButton(onClick = {
+                        val currentUri = images[pagerState.currentPage]
+                        onDelete(currentUri)
+                    }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.White)
+                    }
                 }
             }
         }
