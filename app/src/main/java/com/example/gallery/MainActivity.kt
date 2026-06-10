@@ -9,7 +9,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.exclude
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material.icons.filled.Home
@@ -21,6 +25,15 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.Color
+import com.example.gallery.ui.theme.GalleryTheme
+import com.example.gallery.ui.theme.AppConfig
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -39,8 +52,10 @@ import com.example.gallery.components.CategoryFoldersScreen
 import com.example.gallery.components.GalleryScreen
 import com.example.gallery.components.PeopleFoldersScreen
 import com.example.gallery.db.AppDatabase
-import com.example.gallery.db.GalleryIndexerWorker
+import com.example.gallery.db.GalleryPeriodicTriggerWorker
 import com.example.gallery.folders.AlbumsFolderRepository
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
 import com.example.gallery.folders.CategoryFolderRepository
 import com.example.gallery.folders.PersonFolderRepository
 import com.example.gallery.viewModels.AlbumsViewModel
@@ -79,9 +94,22 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         scheduleBackgroundIndexing()
         setContent {
-            MaterialTheme {
+            GalleryTheme {
                 GalleryApp(galleryViewModel, peopleViewModel, categoryViewModel, albumsViewModel)
             }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (hasAnyPermission(this)) {
+            galleryService.startIndexingWorkManager()
+        }
+    }
+
+    private fun hasAnyPermission(context: android.content.Context): Boolean {
+        return getPermissionsToRequest().any { permission ->
+            ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
         }
     }
 
@@ -90,13 +118,13 @@ class MainActivity : ComponentActivity() {
             .setRequiresBatteryNotLow(true)
             .build()
 
-        val indexingRequest = PeriodicWorkRequestBuilder<GalleryIndexerWorker>(12, TimeUnit.HOURS)
+        val indexingRequest = PeriodicWorkRequestBuilder<GalleryPeriodicTriggerWorker>(12, TimeUnit.HOURS)
             .setConstraints(constraints)
             .build()
 
         WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
             "GalleryIndexing",
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             indexingRequest
         )
     }
@@ -165,21 +193,40 @@ fun GalleryApp(
         else -> false
     }
 
+    val isSelecting = when {
+        !hasPermission -> galleryViewModel.isSelecting
+        currentTab == 0 -> galleryViewModel.isSelecting
+        currentTab == 1 -> peopleViewModel.isSelecting
+        currentTab == 2 -> categoryViewModel.isSelecting
+        currentTab == 3 -> albumsViewModel.isSelecting
+        else -> false
+    }
+
     Scaffold(
+        contentWindowInsets = ScaffoldDefaults.contentWindowInsets.exclude(WindowInsets.navigationBars),
         bottomBar = {
-            if (!isFullScreen) {
-                NavigationBar {
+            if (!isFullScreen && !isSelecting) {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                    val navColors = NavigationBarItemDefaults.colors(
+                        indicatorColor = Color.Transparent,
+                        selectedIconColor = MaterialTheme.colorScheme.primary,
+                        selectedTextColor = MaterialTheme.colorScheme.primary,
+                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     NavigationBarItem(
                         selected = currentTab == 0,
                         onClick = { currentTab = 0 },
                         icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
-                        label = { Text("Home") }
+                        label = { Text("Home") },
+                        colors = navColors
                     )
                     NavigationBarItem(
                         selected = currentTab == 1,
                         onClick = { currentTab = 1 },
                         icon = { Icon(Icons.Default.People, contentDescription = "People") },
-                        label = { Text("People") }
+                        label = { Text("People") },
+                        colors = navColors
                     )
                     NavigationBarItem(
                         selected = currentTab == 2,
@@ -190,7 +237,8 @@ fun GalleryApp(
                                 contentDescription = "Tags"
                             )
                         },
-                        label = { Text("Tags") }
+                        label = { Text("Tags") },
+                        colors = navColors
                     )
                     NavigationBarItem(
                         selected = currentTab == 3,
@@ -201,23 +249,32 @@ fun GalleryApp(
                                 contentDescription = "Albums"
                             )
                         },
-                        label = { Text("Albums") }
+                        label = { Text("Albums") },
+                        colors = navColors
                     )
                 }
             }
         }
     ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding)) {
-            when {
-                !hasPermission -> GalleryScreen(galleryViewModel)
-
-                currentTab == 0 -> GalleryScreen(galleryViewModel)
-
-                currentTab == 1 -> PeopleFoldersScreen(peopleViewModel, allNames)
-
-                currentTab == 2 -> CategoryFoldersScreen(categoryViewModel, allNames)
-
-                currentTab == 3 -> AlbumsFoldersScreen(albumsViewModel, allNames)
+            if (!hasPermission) {
+                GalleryScreen(galleryViewModel)
+            } else {
+                AnimatedContent(
+                    targetState = currentTab,
+                    transitionSpec = {
+                        fadeIn(tween(AppConfig.TabTransitionDuration, easing = AppConfig.StandardEasing)) togetherWith
+                        fadeOut(tween(AppConfig.TabTransitionDuration, easing = AppConfig.StandardEasing))
+                    },
+                    label = "TabTransition"
+                ) { tab ->
+                    when (tab) {
+                        0 -> GalleryScreen(galleryViewModel)
+                        1 -> PeopleFoldersScreen(peopleViewModel, allNames)
+                        2 -> CategoryFoldersScreen(categoryViewModel, allNames)
+                        3 -> AlbumsFoldersScreen(albumsViewModel, allNames)
+                    }
+                }
             }
         }
     }

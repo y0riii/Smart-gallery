@@ -9,6 +9,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.example.gallery.viewModels.PeopleViewModel
 
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.ui.unit.dp
+
 @Composable
 fun PeopleFoldersScreen(peopleViewModel: PeopleViewModel, allNames: List<String>) {
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -18,6 +23,13 @@ fun PeopleFoldersScreen(peopleViewModel: PeopleViewModel, allNames: List<String>
         allNames = allNames,
         modifier = Modifier.clickable {
             showRenameDialog = true
+        },
+        folderGridHeader = {
+            Text(
+                text = "People",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(horizontal = 16.dp).padding(top = 16.dp, bottom = 4.dp)
+            )
         }
     )
 

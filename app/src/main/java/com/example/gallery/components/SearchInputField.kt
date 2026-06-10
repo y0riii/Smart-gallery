@@ -4,8 +4,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
+import com.example.gallery.ui.theme.AppConfig
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -95,7 +99,7 @@ fun highlightMentions(text: String, allNames: List<String>) = buildAnnotatedStri
     matches.forEach {
         addStyle(
             style = SpanStyle(
-                background = Color(0xFF00AAFF),
+                background = AppConfig.MentionHighlight,
                 color = Color.White
             ),
             start = it.start,
@@ -127,7 +131,7 @@ fun SearchInputField(
     }
 
     Box(modifier = modifier) {
-        OutlinedTextField(
+        TextField(
             value = prompt,
             onValueChange = {
                 onValueChange(it)
@@ -144,7 +148,15 @@ fun SearchInputField(
             visualTransformation = mentionTransformation,
             modifier = Modifier
                 .fillMaxWidth()
-                .onFocusChanged { onFocusChanged(it.isFocused) }
+                .onFocusChanged { onFocusChanged(it.isFocused) },
+            shape = RoundedCornerShape(AppConfig.SearchFieldCornerRadius),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                disabledIndicatorColor = Color.Transparent
+            )
         )
         DropdownMenu(
             expanded = suggestions.isNotEmpty(),

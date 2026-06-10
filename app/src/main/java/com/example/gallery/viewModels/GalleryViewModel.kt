@@ -39,7 +39,7 @@ class GalleryViewModel(
     fun onPermissionGranted() {
         viewModelScope.launch {
             images = service.getAllDeviceImages()
-            service.indexImagesBackground()
+            service.startIndexingWorkManager()
         }
     }
 
@@ -79,6 +79,8 @@ class GalleryViewModel(
                 "Showing OCR document search results"
 
             isSearching = false
+            // Set flag last so LaunchedEffect fires after all state is settled
+            shouldScrollToTop = true
         }
     }
 
@@ -87,10 +89,11 @@ class GalleryViewModel(
         fromDate = null
         toDate = null
         useClip = true
-        shouldScrollToTop = true
         viewModelScope.launch {
             images = service.getAllDeviceImages()
             statusText = "Showing all images."
+            // Set flag last so LaunchedEffect fires after images list is ready
+            shouldScrollToTop = true
         }
     }
 

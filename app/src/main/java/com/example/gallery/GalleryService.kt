@@ -22,6 +22,10 @@ import com.example.gallery.ml.text.ClipTextEncoder
 import com.example.gallery.utils.ImageUtils
 import com.example.gallery.utils.VectorUtils
 import com.example.gallery.utils.toMediaUri
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import com.example.gallery.db.GalleryIndexerWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +35,15 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 
 class GalleryService(private val context: Context) {
+
+    fun startIndexingWorkManager() {
+        val oneTimeRequest = OneTimeWorkRequestBuilder<GalleryIndexerWorker>().build()
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "GalleryIndexing_OneTime",
+            ExistingWorkPolicy.KEEP,
+            oneTimeRequest
+        )
+    }
 
     companion object {
         private const val FACE_MATCH_THRESHOLD = 0.45f
@@ -553,6 +566,28 @@ class GalleryService(private val context: Context) {
                 null
             }
         }
+    }
+
+    /**
+     * Prepares a bulk deletion intent for multiple URIs at once.
+     * On Android R+, this shows a single system confirmation dialog for all images.
+     */
+    suspend fun prepareDeleteImages(uris: List<Uri>): PendingIntent? {
+        return withContext(Dispatchers.IO) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                MediaStore.createDeleteRequest(context.contentResolver, uris)
+            } else {
+                null
+            }
+        }
+    }
+
+    /**
+     * Finalizes bulk deletion in the DB (and on-device for pre-R Android)
+     * by calling finalizeDeleteImage for each URI in the list.
+     */
+    suspend fun finalizeDeleteImages(uris: List<Uri>) {
+        uris.forEach { finalizeDeleteImage(it) }
     }
 
     /**

@@ -31,10 +31,17 @@ abstract class FoldersViewModel(
 
     var shouldScrollToTop by mutableStateOf(false)
 
+    private var imagesCollectionJob: kotlinx.coroutines.Job? = null
+
     init {
         viewModelScope.launch {
-            folders = folderSource.getFolders()
-            isLoading = false
+            folderSource.getFoldersFlow().collect { list ->
+                folders = list
+                selectedFolder?.let { current ->
+                    selectedFolder = list.find { it.bucketId == current.bucketId }
+                }
+                isLoading = false
+            }
         }
     }
 
@@ -51,18 +58,21 @@ abstract class FoldersViewModel(
 
     fun applyFilters() {
         val folder = selectedFolder ?: return
-        viewModelScope.launch {
+        imagesCollectionJob?.cancel()
+        imagesCollectionJob = viewModelScope.launch {
             isLoading = true
-            images = folderSource.getImages(
+            folderSource.getImagesFlow(
                 bucketId = folder.bucketId,
                 prompt = prompt.text.takeIf { it.isNotBlank() },
                 useClip = useClip,
                 fromDate = fromDate,
                 toDate = toDate,
                 sortMode = sortMode
-            )
-            isLoading = false
-            // The UI will observe images change and scroll to top if shouldScrollToTop is true
+            ).collect { list ->
+                images = list
+                isLoading = false
+                shouldScrollToTop = true
+            }
         }
     }
 
@@ -74,7 +84,6 @@ abstract class FoldersViewModel(
             fromDate = from
             toDate = to
         }
-        applyFilters()
     }
 
     fun onSortModeChanged(mode: SortMode) {
@@ -83,6 +92,7 @@ abstract class FoldersViewModel(
     }
 
     fun clearSelectedFolder() {
+        imagesCollectionJob?.cancel()
         images = emptyList()
         selectedFolder = null
         prompt = TextFieldValue("")
@@ -102,6 +112,5 @@ abstract class FoldersViewModel(
 
     override suspend fun onDeleteSuccess(uri: Uri) {
         applyFilters()
-        folders = folderSource.getFolders()
     }
 }

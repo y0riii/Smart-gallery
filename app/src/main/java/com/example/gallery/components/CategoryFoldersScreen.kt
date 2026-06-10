@@ -15,6 +15,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.gallery.viewModels.CategoryViewModel
 
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.Alignment
+
 @Composable
 fun CategoryFoldersScreen(categoryViewModel: CategoryViewModel, allNames: List<String>) {
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -24,7 +29,17 @@ fun CategoryFoldersScreen(categoryViewModel: CategoryViewModel, allNames: List<S
         allNames = allNames,
         canSort = true,
         folderGridHeader = {
-            CreateButton { category -> categoryViewModel.createCategory(category) }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 16.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Tags",
+                    style = MaterialTheme.typography.titleLarge
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                CreateButton { category -> categoryViewModel.createCategory(category) }
+            }
         },
         selectedFolderActions = {
             Text(

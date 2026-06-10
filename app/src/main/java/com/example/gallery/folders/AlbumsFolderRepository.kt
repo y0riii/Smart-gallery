@@ -8,13 +8,35 @@ import com.example.gallery.SortMode
 import com.example.gallery.utils.toMediaUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 
 class AlbumsFolderRepository(
     private val context: Context,
     private val service: GalleryService
 ) : FolderSource {
 
-    override suspend fun getFolders(): List<FolderItem> = withContext(Dispatchers.IO) {
+    override fun getFoldersFlow(): Flow<List<FolderItem>> {
+        return flow {
+            emit(getFolders())
+        }.flowOn(Dispatchers.IO)
+    }
+
+    override fun getImagesFlow(
+        bucketId: Long,
+        prompt: String?,
+        useClip: Boolean,
+        fromDate: Long?,
+        toDate: Long?,
+        sortMode: SortMode
+    ): Flow<List<Uri>> {
+        return flow {
+            emit(getImages(bucketId, prompt, useClip, fromDate, toDate, sortMode))
+        }.flowOn(Dispatchers.IO)
+    }
+
+    private suspend fun getFolders(): List<FolderItem> = withContext(Dispatchers.IO) {
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.BUCKET_ID,
@@ -58,7 +80,7 @@ class AlbumsFolderRepository(
         }.sortedBy { it.name }
     }
 
-    override suspend fun getImages(
+    private suspend fun getImages(
         bucketId: Long,
         prompt: String?,
         useClip: Boolean,
