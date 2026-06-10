@@ -179,6 +179,9 @@ fun GalleryApp(
         if (hasPermission) {
             galleryViewModel.statusText = "Showing all images."
             galleryViewModel.onPermissionGranted()
+            peopleViewModel.onPermissionGranted()
+            categoryViewModel.onPermissionGranted()
+            albumsViewModel.onPermissionGranted()
         } else {
             galleryViewModel.statusText = "Permission denied."
         }

@@ -27,7 +27,7 @@ class ClipTextEncoder(context: Context) {
     }
 
     fun getTextFeatures(text: String): FloatArray {
-        val tokens = tokenizer.tokenize(text)
+        val tokens = tokenizer.tokenize(text, truncate = true)
 
         val inputTensor = OnnxTensor.createTensor(env, tokens, longArrayOf(1, 77))
 

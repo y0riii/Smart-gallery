@@ -31,10 +31,17 @@ abstract class FoldersViewModel(
 
     var shouldScrollToTop by mutableStateOf(false)
 
+    private var foldersJob: kotlinx.coroutines.Job? = null
     private var imagesCollectionJob: kotlinx.coroutines.Job? = null
 
     init {
-        viewModelScope.launch {
+        startCollectingFolders()
+    }
+
+    fun startCollectingFolders() {
+        foldersJob?.cancel()
+        foldersJob = viewModelScope.launch {
+            isLoading = true
             folderSource.getFoldersFlow().collect { list ->
                 folders = list
                 selectedFolder?.let { current ->
@@ -43,6 +50,10 @@ abstract class FoldersViewModel(
                 isLoading = false
             }
         }
+    }
+
+    fun onPermissionGranted() {
+        startCollectingFolders()
     }
 
     fun loadFolder(bucketId: Long) {

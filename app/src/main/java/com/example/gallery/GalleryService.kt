@@ -360,7 +360,7 @@ class GalleryService(private val context: Context) {
         } else {
             images.filter { entity ->
                 val afterFrom = fromDate == null || entity.timestampMs >= fromDate
-                val beforeTo = toDate == null || entity.timestampMs <= toDate
+                val beforeTo = toDate == null || entity.timestampMs <= (toDate + 86400000 - 1)
                 afterFrom && beforeTo
             }
         }
@@ -369,6 +369,11 @@ class GalleryService(private val context: Context) {
     suspend fun search(prompt: String, fromDate: Long? = null, toDate: Long? = null): List<Uri> {
         return withContext(Dispatchers.IO) {
             val (names, cleanPrompt) = findNamesInPrompt(prompt)
+            
+            if (cleanPrompt.isBlank() && names.isEmpty()) {
+                return@withContext getDeviceImagesWithDateFilter(fromDate, toDate)
+            }
+            
             initJob.await()
             val encoder = textEncoder
 
@@ -615,4 +620,41 @@ class GalleryService(private val context: Context) {
             }
         }
     }
+
+    suspend fun getDeviceImagesWithDateFilter(fromDate: Long?, toDate: Long?): List<Uri> =
+        withContext(Dispatchers.IO) {
+            val list = mutableListOf<Uri>()
+            var selection: String? = null
+            var selectionArgs: Array<String>? = null
+
+            if (fromDate != null || toDate != null) {
+                val clauses = mutableListOf<String>()
+                val args = mutableListOf<String>()
+                if (fromDate != null) {
+                    clauses.add("${MediaStore.Images.Media.DATE_ADDED} >= ?")
+                    args.add((fromDate / 1000).toString())
+                }
+                if (toDate != null) {
+                    clauses.add("${MediaStore.Images.Media.DATE_ADDED} <= ?")
+                    val adjustedToDate = toDate + 86400000 - 1
+                    args.add((adjustedToDate / 1000).toString())
+                }
+                selection = clauses.joinToString(" AND ")
+                selectionArgs = args.toTypedArray()
+            }
+
+            val projection = arrayOf(MediaStore.Images.Media._ID)
+            val sort = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+
+            context.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection, selection, selectionArgs, sort
+            )?.use { cursor ->
+                val idIdx = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                while (cursor.moveToNext()) {
+                    list.add(cursor.getLong(idIdx).toMediaUri())
+                }
+            }
+            list
+        }
 }

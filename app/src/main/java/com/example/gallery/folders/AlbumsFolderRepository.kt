@@ -1,16 +1,21 @@
 package com.example.gallery.folders
 
 import android.content.Context
+import android.database.ContentObserver
 import android.net.Uri
 import android.provider.MediaStore
 import com.example.gallery.GalleryService
 import com.example.gallery.SortMode
 import com.example.gallery.utils.toMediaUri
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class AlbumsFolderRepository(
     private val context: Context,
@@ -18,8 +23,30 @@ class AlbumsFolderRepository(
 ) : FolderSource {
 
     override fun getFoldersFlow(): Flow<List<FolderItem>> {
-        return flow {
-            emit(getFolders())
+        return callbackFlow {
+            val scope = CoroutineScope(Dispatchers.IO)
+            fun load() {
+                scope.launch {
+                    trySend(getFolders())
+                }
+            }
+            load()
+
+            val observer = object : ContentObserver(null) {
+                override fun onChange(selfChange: Boolean) {
+                    load()
+                }
+            }
+            context.contentResolver.registerContentObserver(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                true,
+                observer
+            )
+
+            awaitClose {
+                context.contentResolver.unregisterContentObserver(observer)
+                scope.cancel()
+            }
         }.flowOn(Dispatchers.IO)
     }
 
@@ -31,8 +58,30 @@ class AlbumsFolderRepository(
         toDate: Long?,
         sortMode: SortMode
     ): Flow<List<Uri>> {
-        return flow {
-            emit(getImages(bucketId, prompt, useClip, fromDate, toDate, sortMode))
+        return callbackFlow {
+            val scope = CoroutineScope(Dispatchers.IO)
+            fun load() {
+                scope.launch {
+                    trySend(getImages(bucketId, prompt, useClip, fromDate, toDate, sortMode))
+                }
+            }
+            load()
+
+            val observer = object : ContentObserver(null) {
+                override fun onChange(selfChange: Boolean) {
+                    load()
+                }
+            }
+            context.contentResolver.registerContentObserver(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                true,
+                observer
+            )
+
+            awaitClose {
+                context.contentResolver.unregisterContentObserver(observer)
+                scope.cancel()
+            }
         }.flowOn(Dispatchers.IO)
     }
 
@@ -88,6 +137,40 @@ class AlbumsFolderRepository(
         toDate: Long?,
         sortMode: SortMode
     ): List<Uri> = withContext(Dispatchers.IO) {
+        if (prompt.isNullOrBlank() && sortMode != SortMode.RELEVANCE) {
+            val uris = mutableListOf<Uri>()
+            val projection = arrayOf(MediaStore.Images.Media._ID)
+            val selectionClauses = mutableListOf("${MediaStore.Images.Media.BUCKET_ID} = ?")
+            val selectionArgs = mutableListOf(bucketId.toString())
+
+            if (fromDate != null) {
+                selectionClauses.add("${MediaStore.Images.Media.DATE_ADDED} >= ?")
+                selectionArgs.add((fromDate / 1000).toString())
+            }
+            if (toDate != null) {
+                selectionClauses.add("${MediaStore.Images.Media.DATE_ADDED} <= ?")
+                val endOfDay = toDate + 86400000 - 1
+                selectionArgs.add((endOfDay / 1000).toString())
+            }
+
+            val selection = selectionClauses.joinToString(" AND ")
+            val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+
+            context.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs.toTypedArray(),
+                sortOrder
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                while (cursor.moveToNext()) {
+                    uris.add(cursor.getLong(idCol).toMediaUri())
+                }
+            }
+            return@withContext uris
+        }
+
         val mediaIds = mutableListOf<Long>()
         val projection = arrayOf(MediaStore.Images.Media._ID)
         val selection = "${MediaStore.Images.Media.BUCKET_ID} = ?"
