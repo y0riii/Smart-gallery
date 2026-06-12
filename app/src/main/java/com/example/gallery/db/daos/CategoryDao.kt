@@ -10,6 +10,8 @@ import com.example.gallery.db.entities.CategoryEntity
 import com.example.gallery.db.entities.MediaCategoryCrossRef
 import com.example.gallery.db.entities.MediaEntity
 import com.example.gallery.db.previews.CategoryPreview
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 
 @Dao
 interface CategoryDao {
@@ -52,6 +54,17 @@ interface CategoryDao {
     """
     )
     suspend fun getImagesByCategory(categoryId: Long): List<MediaEntity>
+
+    @Transaction
+    @Query(
+        """
+        SELECT m.* FROM media_items AS m
+        JOIN media_category_join AS j ON m.mediaId = j.mediaId
+        WHERE j.categoryId = :categoryId
+        ORDER BY m.timestampMs DESC
+    """
+    )
+    suspend fun getImagesByCategorySortedByDate(categoryId: Long): List<MediaEntity>
 
     @Query(
         """
@@ -99,6 +112,49 @@ interface CategoryDao {
 
         return categories.map { category ->
             category to mediaMap[category.id].orEmpty()
+        }
+    }
+
+    @Query(
+        """
+        SELECT
+            id,
+            name
+        FROM category
+        """
+    )
+    fun getCategoryPreviewsFlow(): Flow<List<CategoryPreview>>
+
+    @Query(
+        """
+        SELECT
+            *
+        FROM media_category_join
+        """
+    )
+    fun getCategoryMediaRefsFlow(): Flow<List<MediaCategoryCrossRef>>
+
+    @Query(
+        """
+        SELECT mediaId FROM media_category_join
+        WHERE categoryId = :categoryId
+        ORDER BY similarity DESC
+        """
+    )
+    fun getImagesIdsByCategoryFlow(categoryId: Long): Flow<List<Long>>
+
+    fun getCategoriesWithMediaIdsFlow(): Flow<List<Pair<CategoryPreview, List<Long>>>> {
+        return combine(
+            getCategoryPreviewsFlow(),
+            getCategoryMediaRefsFlow()
+        ) { categories, refs ->
+            val mediaMap = refs.groupBy(
+                keySelector = { it.categoryId },
+                valueTransform = { it.mediaId }
+            )
+            categories.map { category ->
+                category to mediaMap[category.id].orEmpty()
+            }
         }
     }
 }

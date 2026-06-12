@@ -11,11 +11,7 @@ class PeopleViewModel(
 ) : FoldersViewModel(personFolderRepository, service) {
     fun renameFolder(bucketId: Long, name: String) {
         viewModelScope.launch {
-            isLoading = true
             personFolderRepository.renameFolder(bucketId, name)
-            folders = personFolderRepository.getFolders()
-            selectedFolder = folders.find { it.bucketId == bucketId }
-            isLoading = false
         }
     }
 }

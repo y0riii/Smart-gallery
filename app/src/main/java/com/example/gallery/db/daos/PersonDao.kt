@@ -12,6 +12,7 @@ import com.example.gallery.db.entities.PersonEntity
 import com.example.gallery.db.previews.PersonMediaRef
 import com.example.gallery.db.previews.PersonPreview
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 
 @Dao
 interface PersonDao {
@@ -38,6 +39,27 @@ interface PersonDao {
     """
     )
     fun getAllNamesFlow(): Flow<List<String>>
+
+    /**
+     * Feature 4: returns person names sorted identically to PersonFolderRepository.sortedPeople():
+     * named people (not matching #p\d+) come first in A-Z order,
+     * placeholder people (#p1, #p2…) come last sorted numerically by their number.
+     *
+     * CASE WHEN bucket: 0 = real name, 1 = placeholder.
+     * CAST(SUBSTR(name,3) AS INTEGER) extracts the numeric part of '#p<n>' for numeric ordering.
+     */
+    @Query(
+        """
+        SELECT name FROM person
+        ORDER BY
+            CASE WHEN name GLOB '#p[0-9]*' THEN 1 ELSE 0 END ASC,
+            CASE WHEN name GLOB '#p[0-9]*'
+                 THEN CAST(SUBSTR(name, 3) AS INTEGER)
+                 ELSE LOWER(name)
+            END ASC
+    """
+    )
+    fun getAllNamesSortedFlow(): Flow<List<String>>
 
     @Query("UPDATE person SET embedding = :newEmbedding WHERE id = :personId")
     suspend fun updatePersonEmbeddingRaw(personId: Long, newEmbedding: ByteArray)
@@ -80,11 +102,24 @@ interface PersonDao {
 
     @Query(
         """
-        SELECT mediaId FROM media_person_join
-        WHERE personId = :personId
+        SELECT j.mediaId FROM media_person_join AS j
+        JOIN media_items AS m ON j.mediaId = m.mediaId
+        WHERE j.personId = :personId
+        ORDER BY m.timestampMs DESC
     """
     )
     suspend fun getImagesIdsByPersonId(personId: Long): List<Long>
+
+    @Transaction
+    @Query(
+        """
+        SELECT m.* FROM media_items AS m
+        JOIN media_person_join AS j ON m.mediaId = j.mediaId
+        WHERE j.personId = :personId
+        ORDER BY m.timestampMs DESC
+    """
+    )
+    suspend fun getImagesByPersonIdFull(personId: Long): List<MediaEntity>
 
     @Transaction
     @Query(
@@ -98,6 +133,17 @@ interface PersonDao {
     """
     )
     suspend fun getImagesByNames(names: List<String>, count: Int): List<MediaEntity>
+
+    @Query(
+        """
+        SELECT j.mediaId FROM media_person_join AS j
+        JOIN person AS p ON j.personId = p.id
+        WHERE p.name IN (:names)
+        GROUP BY j.mediaId
+        HAVING COUNT(DISTINCT p.name) = :count
+    """
+    )
+    suspend fun getMediaIdsByNames(names: List<String>, count: Int): List<Long>
 
     @Query("SELECT COUNT(*) FROM person")
     suspend fun countPersons(): Int
@@ -150,6 +196,52 @@ interface PersonDao {
 
         return persons.map { person ->
             person to mediaMap[person.id].orEmpty()
+        }
+    }
+
+    @Query(
+        """
+        SELECT
+            id,
+            name,
+            thumbnailPath
+        FROM person
+        """
+    )
+    fun getPersonPreviewsFlow(): Flow<List<PersonPreview>>
+
+    @Query(
+        """
+        SELECT
+            personId,
+            mediaId
+        FROM media_person_join
+        """
+    )
+    fun getPersonMediaRefsFlow(): Flow<List<PersonMediaRef>>
+
+    @Query(
+        """
+        SELECT j.mediaId FROM media_person_join AS j
+        JOIN media_items AS m ON j.mediaId = m.mediaId
+        WHERE j.personId = :personId
+        ORDER BY m.timestampMs DESC
+        """
+    )
+    fun getImagesIdsByPersonIdFlow(personId: Long): Flow<List<Long>>
+
+    fun getPersonsWithMediaIdsFlow(): Flow<List<Pair<PersonPreview, List<Long>>>> {
+        return combine(
+            getPersonPreviewsFlow(),
+            getPersonMediaRefsFlow()
+        ) { persons, refs ->
+            val mediaMap = refs.groupBy(
+                keySelector = { it.personId },
+                valueTransform = { it.mediaId }
+            )
+            persons.map { person ->
+                person to mediaMap[person.id].orEmpty()
+            }
         }
     }
 }

@@ -18,7 +18,8 @@ import kotlin.math.max
 object ImageUtils {
 
     /**
-     * Finds all image URIs on the device.
+     * Finds image URIs on the device.
+     * Capped at 100 images for testing purposes.
      */
     fun scanMediaStore(context: Context): List<Pair<Long, Long>> {
         val list = mutableListOf<Pair<Long, Long>>()
