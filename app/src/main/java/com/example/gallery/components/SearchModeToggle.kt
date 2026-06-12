@@ -25,7 +25,7 @@ fun SearchModeToggle(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "Document Search (OCR)",
+                text = "Document Search",
                 style = MaterialTheme.typography.bodyMedium
             )
             Text(

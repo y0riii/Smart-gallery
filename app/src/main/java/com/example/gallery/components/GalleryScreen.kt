@@ -44,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.example.gallery.viewModels.GalleryViewModel
+import androidx.core.content.edit
 
 // Shared SharedPreferences constants (same file as ImageGridScreen)
 private const val GALLERY_PREFS_NAME = "gallery_prefs"
@@ -127,29 +128,14 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
                     nameThumbnails = nameThumbnails
                 )
 
-                if (viewModel.isSearching || viewModel.statusText.isNotEmpty()) {
+                if (viewModel.isSearching) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        if (viewModel.isSearching) {
-                            CircularProgressIndicator()
-                        } else {
-                            AnimatedVisibility(
-                                visible = viewModel.statusText.isNotEmpty(),
-                                enter = fadeIn(tween(AppConfig.StatusTextDuration)),
-                                exit = fadeOut(tween(AppConfig.StatusTextDuration))
-                            ) {
-                                Text(
-                                    text = viewModel.statusText,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(vertical = 4.dp)
-                                )
-                            }
-                        }
+                        CircularProgressIndicator()
                     }
                 }
 
@@ -163,7 +149,7 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
                         columnCount = newCount
                         // Persist new column count for next app launch
                         context.getSharedPreferences(GALLERY_PREFS_NAME, Context.MODE_PRIVATE)
-                            .edit().putInt(GALLERY_PREFS_KEY_COLUMNS, newCount).apply()
+                            .edit { putInt(GALLERY_PREFS_KEY_COLUMNS, newCount) }
                     },
                     // Feature 1: selection params from ViewModel
                     selectedUris = viewModel.selectedUris,
@@ -180,7 +166,7 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
 
             // Feature 1: selection action bar
             AnimatedVisibility(
-                visible = viewModel.isSelecting && fullScreenIndex == null,
+                visible = viewModel.isSelecting,
                 enter = slideInVertically(
                     initialOffsetY = { it },
                     animationSpec = tween(AppConfig.SelectionBarDuration, easing = AppConfig.EmphasizedEasing)

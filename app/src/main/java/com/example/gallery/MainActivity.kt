@@ -56,6 +56,10 @@ import com.example.gallery.db.GalleryPeriodicTriggerWorker
 import com.example.gallery.folders.AlbumsFolderRepository
 import androidx.core.content.ContextCompat
 import android.content.pm.PackageManager
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.ui.unit.dp
 import com.example.gallery.folders.CategoryFolderRepository
 import com.example.gallery.folders.PersonFolderRepository
 import com.example.gallery.viewModels.AlbumsViewModel
@@ -171,19 +175,18 @@ fun GalleryApp(
         hasPermission = result.values.any { it }
     }
 
+    val progress by GalleryService.progress.collectAsState()
+
     LaunchedEffect(Unit) {
         permissionLauncher.launch(permissionsToRequest)
     }
 
     LaunchedEffect(hasPermission) {
         if (hasPermission) {
-            galleryViewModel.statusText = "Showing all images."
             galleryViewModel.onPermissionGranted()
             peopleViewModel.onPermissionGranted()
             categoryViewModel.onPermissionGranted()
             albumsViewModel.onPermissionGranted()
-        } else {
-            galleryViewModel.statusText = "Permission denied."
         }
     }
 
@@ -209,6 +212,15 @@ fun GalleryApp(
         contentWindowInsets = ScaffoldDefaults.contentWindowInsets.exclude(WindowInsets.navigationBars),
         bottomBar = {
             if (!isFullScreen && !isSelecting) {
+                Column{
+                    progress?.let {LinearProgressIndicator(
+                        progress = { it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                    )}
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     val navColors = NavigationBarItemDefaults.colors(
                         indicatorColor = Color.Transparent,
@@ -255,7 +267,7 @@ fun GalleryApp(
                         label = { Text("Albums") },
                         colors = navColors
                     )
-                }
+                }}
             }
         }
     ) { innerPadding ->

@@ -24,8 +24,6 @@ class GalleryViewModel(
 
     var isSearching by mutableStateOf(false)
 
-    var statusText by mutableStateOf("")
-
     var prompt by mutableStateOf(TextFieldValue(""))
     var useClip by mutableStateOf(true)
     var fromDate by mutableStateOf<Long?>(null)
@@ -78,7 +76,6 @@ class GalleryViewModel(
     fun search() {
         viewModelScope.launch {
             isSearching = true
-            statusText = "Searching..."
             
             // Validate dates: if from > to, treat as empty
             val finalFrom = if (fromDate != null && toDate != null && fromDate!! > toDate!!) null else fromDate
@@ -95,11 +92,6 @@ class GalleryViewModel(
             else
                 service.searchDocuments(prompt.text, finalFrom, finalTo)
 
-            statusText = if (useClip)
-                "Showing CLIP image search results"
-            else
-                "Showing OCR document search results"
-
             isSearching = false
             // Set flag last so LaunchedEffect fires after all state is settled
             shouldScrollToTop = true
@@ -113,7 +105,6 @@ class GalleryViewModel(
         useClip = true
         viewModelScope.launch {
             images = service.getAllDeviceImages()
-            statusText = "Showing all images."
             // Set flag last so LaunchedEffect fires after images list is ready
             shouldScrollToTop = true
         }

@@ -37,7 +37,6 @@ object AppConfig {
     const val GridResizeDuration = 200
     const val SelectionBarDuration = 250
     const val SearchExpansionDuration = 200
-    const val StatusTextDuration = 200
 
     // Easing
     val StandardEasing = FastOutSlowInEasing

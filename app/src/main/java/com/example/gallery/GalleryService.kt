@@ -33,6 +33,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class GalleryService(private val context: Context) {
 
@@ -48,6 +49,8 @@ class GalleryService(private val context: Context) {
     companion object {
         private const val FACE_MATCH_THRESHOLD = 0.45f
         private const val CATEGORY_MATCH_THRESHOLD = 0.22f
+
+        val progress = MutableStateFlow<Float?>(null)
     }
 
     private val db = AppDatabase.getDatabase(context)
@@ -66,7 +69,6 @@ class GalleryService(private val context: Context) {
 
     private var initJob: Deferred<Unit> = CoroutineScope(SupervisorJob() + Dispatchers.IO).async {
         textEncoder // triggers initialization immediately
-        Unit
     }
 
     private var ftsSupported: Boolean = false
@@ -170,6 +172,7 @@ class GalleryService(private val context: Context) {
 
         val totalCount = imagesToProcess.size
         var counter = 0
+        progress.value = 0f
 
         imagesToProcess.forEach { (mediaId, timestamp) ->
             try {
@@ -276,11 +279,14 @@ class GalleryService(private val context: Context) {
 
                     counter++
                     Log.d("GalleryService", "Processed: $counter / $totalCount (ID: $mediaId)")
+                    progress.value = counter / totalCount.toFloat()
                 }
             } catch (e: Exception) {
                 Log.e("GalleryService", "Error processing image $mediaId", e)
             }
         }
+
+        progress.value = null
 
         imageEncoder.close()
         ocrProcessor.close()
