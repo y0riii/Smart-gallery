@@ -190,6 +190,6 @@ class AlbumsFolderRepository(
             }
         }
 
-        service.searchWithin(mediaIds, prompt, useClip, fromDate, toDate, sortMode)
+        service.searchWithin(mediaIds, prompt, useClip, fromDate, toDate, null)
     }
 }

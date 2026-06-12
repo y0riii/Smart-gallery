@@ -377,7 +377,7 @@ class GalleryService(private val context: Context) {
             val (names, cleanPrompt) = findNamesInPrompt(prompt)
 
             if (cleanPrompt.isBlank() && names.isEmpty()) {
-                return@withContext getDeviceImagesWithDateFilter(fromDate, toDate)
+                return@withContext getDeviceImagesWithDateFilter(fromDate, toDate).map { it.toMediaUri() }
             }
 
             initJob.await()
@@ -429,10 +429,16 @@ class GalleryService(private val context: Context) {
         useClip: Boolean,
         fromDate: Long?,
         toDate: Long?,
-        sortMode: SortMode = SortMode.RELEVANCE
+        sortMode: SortMode? = SortMode.RELEVANCE
     ): List<Uri> {
         if (prompt.isNullOrBlank()) {
             return withContext(Dispatchers.IO) {
+                if (sortMode == null){
+                    val originalSet = mediaIds.toSet()
+                    val images = getDeviceImagesWithDateFilter(fromDate, toDate)
+                    val intersection = images.filter { it in originalSet }
+                    return@withContext intersection.map { it.toMediaUri() }
+                }
                 val images = mediaDao.getMediaByIds(mediaIds)
                 val filtered = filterByDate(images, fromDate, toDate)
 
@@ -632,9 +638,9 @@ class GalleryService(private val context: Context) {
         }
     }
 
-    suspend fun getDeviceImagesWithDateFilter(fromDate: Long?, toDate: Long?): List<Uri> =
+    suspend fun getDeviceImagesWithDateFilter(fromDate: Long?, toDate: Long?): List<Long> =
         withContext(Dispatchers.IO) {
-            val list = mutableListOf<Uri>()
+            val list = mutableListOf<Long>()
             var selection: String? = null
             var selectionArgs: Array<String>? = null
 
@@ -663,7 +669,7 @@ class GalleryService(private val context: Context) {
             )?.use { cursor ->
                 val idIdx = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
                 while (cursor.moveToNext()) {
-                    list.add(cursor.getLong(idIdx).toMediaUri())
+                    list.add(cursor.getLong(idIdx))
                 }
             }
             list
