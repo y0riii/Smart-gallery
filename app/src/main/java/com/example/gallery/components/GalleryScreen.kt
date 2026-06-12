@@ -5,9 +5,14 @@ import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,13 +30,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import com.example.gallery.ui.theme.AppConfig
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -43,8 +41,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.example.gallery.viewModels.GalleryViewModel
 import androidx.core.content.edit
+import com.example.gallery.ui.theme.AppConfig
+import com.example.gallery.viewModels.GalleryViewModel
 
 // Shared SharedPreferences constants (same file as ImageGridScreen)
 private const val GALLERY_PREFS_NAME = "gallery_prefs"
@@ -52,6 +51,7 @@ private const val GALLERY_PREFS_KEY_COLUMNS = "grid_column_count"
 private const val GALLERY_DEFAULT_COLUMNS = 3
 private const val GALLERY_MIN_COLUMNS = 2
 private const val GALLERY_MAX_COLUMNS = 6
+
 // Hide preview button below this column count threshold
 private const val GALLERY_PREVIEW_HIDE_THRESHOLD = 5
 
@@ -99,13 +99,16 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
 
         if (fullScreenIndex == null) {
             // Feature 3: show preview button only when selecting AND cells are big enough
-            val showPreviewButton = viewModel.isSelecting && columnCount < GALLERY_PREVIEW_HIDE_THRESHOLD
+            val showPreviewButton =
+                viewModel.isSelecting && columnCount < GALLERY_PREVIEW_HIDE_THRESHOLD
 
             Column(modifier = Modifier.fillMaxSize()) {
                 Text(
                     text = "Gallery",
                     style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.padding(horizontal = 16.dp).padding(top = 16.dp, bottom = 4.dp)
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp)
+                        .padding(top = 16.dp, bottom = 4.dp)
                 )
                 SearchBar(
                     prompt = viewModel.prompt,
@@ -169,7 +172,10 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
                 visible = viewModel.isSelecting,
                 enter = slideInVertically(
                     initialOffsetY = { it },
-                    animationSpec = tween(AppConfig.SelectionBarDuration, easing = AppConfig.EmphasizedEasing)
+                    animationSpec = tween(
+                        AppConfig.SelectionBarDuration,
+                        easing = AppConfig.EmphasizedEasing
+                    )
                 ) + fadeIn(tween(AppConfig.SelectionBarDuration)),
                 exit = slideOutVertically(
                     targetOffsetY = { it },
@@ -188,11 +194,19 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
                             .padding(start = 16.dp)
                     )
                     IconButton(onClick = { viewModel.shareSelectedImages(context) }) {
-                        Icon(Icons.Default.Share, contentDescription = "Share selected", tint = MaterialTheme.colorScheme.primary)
+                        Icon(
+                            Icons.Default.Share,
+                            contentDescription = "Share selected",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                     }
                     Spacer(modifier = Modifier.width(4.dp))
                     IconButton(onClick = { showDeleteConfirmDialog = true }) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete selected", tint = MaterialTheme.colorScheme.error)
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Delete selected",
+                            tint = MaterialTheme.colorScheme.error
+                        )
                     }
                     Spacer(modifier = Modifier.width(4.dp))
                     TextButton(onClick = { viewModel.clearSelection() }) {

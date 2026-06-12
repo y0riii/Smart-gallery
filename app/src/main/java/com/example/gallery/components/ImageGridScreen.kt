@@ -3,12 +3,15 @@ package com.example.gallery.components
 import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.LazyGridState
@@ -23,13 +26,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import com.example.gallery.ui.theme.AppConfig
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,7 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import kotlin.collections.emptySet
+import com.example.gallery.ui.theme.AppConfig
 
 // Key used for storing the column count across app sessions
 private const val PREFS_NAME = "gallery_prefs"
@@ -47,6 +43,7 @@ private const val PREFS_KEY_COLUMNS = "grid_column_count"
 private const val DEFAULT_COLUMNS = 3
 private const val MIN_COLUMNS = 2
 private const val MAX_COLUMNS = 6
+
 // Hide preview button when cells are this small (too small to show the icon usefully)
 private const val PREVIEW_HIDE_THRESHOLD = 5
 
@@ -130,7 +127,10 @@ fun ImageGridScreen(
             visible = isSelecting && fullScreenIndex == null,
             enter = slideInVertically(
                 initialOffsetY = { it },
-                animationSpec = tween(AppConfig.SelectionBarDuration, easing = AppConfig.EmphasizedEasing)
+                animationSpec = tween(
+                    AppConfig.SelectionBarDuration,
+                    easing = AppConfig.EmphasizedEasing
+                )
             ) + fadeIn(tween(AppConfig.SelectionBarDuration)),
             exit = slideOutVertically(
                 targetOffsetY = { it },
@@ -153,14 +153,22 @@ fun ImageGridScreen(
                 // Share selected images
                 // Context is available here via LocalContext for the share intent
                 IconButton(onClick = onShareSelected) {
-                    Icon(Icons.Default.Share, contentDescription = "Share selected", tint = MaterialTheme.colorScheme.primary)
+                    Icon(
+                        Icons.Default.Share,
+                        contentDescription = "Share selected",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                 }
 
                 Spacer(modifier = Modifier.width(4.dp))
 
                 // Delete selected images (shows confirmation dialog first)
                 IconButton(onClick = { showDeleteConfirmDialog = true }) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete selected", tint = MaterialTheme.colorScheme.error)
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Delete selected",
+                        tint = MaterialTheme.colorScheme.error
+                    )
                 }
 
                 Spacer(modifier = Modifier.width(4.dp))

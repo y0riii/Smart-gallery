@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.core.net.toUri
 import androidx.lifecycle.viewModelScope
 import com.example.gallery.GalleryService
 import com.example.gallery.db.daos.PersonDao
@@ -13,7 +14,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
-import androidx.core.net.toUri
 
 class GalleryViewModel(
     service: GalleryService,
@@ -28,7 +28,7 @@ class GalleryViewModel(
     var useClip by mutableStateOf(true)
     var fromDate by mutableStateOf<Long?>(null)
     var toDate by mutableStateOf<Long?>(null)
-    
+
     var shouldScrollToTop by mutableStateOf(false)
 
     // Feature 4: use the sort-order-consistent query so the @mention dropdown everywhere
@@ -76,11 +76,13 @@ class GalleryViewModel(
     fun search() {
         viewModelScope.launch {
             isSearching = true
-            
+
             // Validate dates: if from > to, treat as empty
-            val finalFrom = if (fromDate != null && toDate != null && fromDate!! > toDate!!) null else fromDate
-            val finalTo = if (fromDate != null && toDate != null && fromDate!! > toDate!!) null else toDate
-            
+            val finalFrom =
+                if (fromDate != null && toDate != null && fromDate!! > toDate!!) null else fromDate
+            val finalTo =
+                if (fromDate != null && toDate != null && fromDate!! > toDate!!) null else toDate
+
             // Sync UI state if they were invalid
             if (fromDate != null && toDate != null && fromDate!! > toDate!!) {
                 fromDate = null

@@ -2,9 +2,9 @@ package com.example.gallery.folders
 
 import android.net.Uri
 import com.example.gallery.GalleryService
+import com.example.gallery.SortMode
 import com.example.gallery.db.daos.CategoryDao
 import com.example.gallery.utils.toMediaUri
-import com.example.gallery.SortMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn

@@ -67,7 +67,7 @@ abstract class FoldersViewModel(
         fromDate = null
         toDate = null
         sortMode = SortMode.RELEVANCE
-        
+
         selectedFolder = folders.find { it.bucketId == bucketId }
         applyFilters()
     }

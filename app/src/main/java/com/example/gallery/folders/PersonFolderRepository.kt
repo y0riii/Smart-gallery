@@ -31,8 +31,8 @@ class PersonFolderRepository(
      *  2. Placeholder people (#p1, #p2, …) — sorted numerically by their number.
      */
     private fun sortedPeople(list: List<FolderItem>): List<FolderItem> {
-        val named   = list.filter { !isPlaceholder(it.name) }.sortedBy { it.name.lowercase() }
-        val unnamed = list.filter {  isPlaceholder(it.name) }.sortedBy {
+        val named = list.filter { !isPlaceholder(it.name) }.sortedBy { it.name.lowercase() }
+        val unnamed = list.filter { isPlaceholder(it.name) }.sortedBy {
             // Extract the numeric suffix so #p2 comes before #p10
             it.name.removePrefix("#p").toIntOrNull() ?: Int.MAX_VALUE
         }
@@ -53,7 +53,7 @@ class PersonFolderRepository(
                     thumbnailUris = thumbnails,
                     insideFolderThumbnail = File(person.thumbnailPath).toUri()
                 )
-            // Use two-bucket sort: named people A–Z, then placeholders (#p1, #p2…) numerically
+                // Use two-bucket sort: named people A–Z, then placeholders (#p1, #p2…) numerically
             }.let { sortedPeople(it) }
         }.flowOn(Dispatchers.IO)
     }
@@ -89,7 +89,7 @@ class PersonFolderRepository(
                 thumbnailUris = thumbnails,
                 insideFolderThumbnail = File(person.thumbnailPath).toUri()
             )
-        // Use two-bucket sort: named people A–Z, then placeholders (#p1, #p2…) numerically
+            // Use two-bucket sort: named people A–Z, then placeholders (#p1, #p2…) numerically
         }.let { sortedPeople(it) }
     }
 }

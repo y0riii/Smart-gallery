@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
@@ -26,7 +27,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.shape.RoundedCornerShape
 import coil3.compose.AsyncImage
 import com.example.gallery.folders.FolderItem
 import com.example.gallery.ui.theme.AppConfig
@@ -124,7 +124,10 @@ fun FolderTile(folder: FolderItem, modifier: Modifier = Modifier, onClick: () ->
                             .size(AppConfig.FolderPersonThumbSize)           // size from AppConfig
                             .clip(RoundedCornerShape(AppConfig.FolderPersonThumbCornerRadius)) // rounded square
                             .border(
-                                BorderStroke(AppConfig.AvatarOutlineWidth, MaterialTheme.colorScheme.surface),
+                                BorderStroke(
+                                    AppConfig.AvatarOutlineWidth,
+                                    MaterialTheme.colorScheme.surface
+                                ),
                                 RoundedCornerShape(AppConfig.FolderPersonThumbCornerRadius)
                             ),
                         contentScale = ContentScale.Crop

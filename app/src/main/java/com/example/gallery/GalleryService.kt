@@ -8,7 +8,11 @@ import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 import androidx.room.Transaction
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import com.example.gallery.db.AppDatabase
+import com.example.gallery.db.GalleryIndexerWorker
 import com.example.gallery.db.entities.CategoryEntity
 import com.example.gallery.db.entities.MediaCategoryCrossRef
 import com.example.gallery.db.entities.MediaEntity
@@ -22,18 +26,14 @@ import com.example.gallery.ml.text.ClipTextEncoder
 import com.example.gallery.utils.ImageUtils
 import com.example.gallery.utils.VectorUtils
 import com.example.gallery.utils.toMediaUri
-import androidx.work.ExistingWorkPolicy
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
-import com.example.gallery.db.GalleryIndexerWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.withContext
 
 class GalleryService(private val context: Context) {
 
@@ -375,11 +375,11 @@ class GalleryService(private val context: Context) {
     suspend fun search(prompt: String, fromDate: Long? = null, toDate: Long? = null): List<Uri> {
         return withContext(Dispatchers.IO) {
             val (names, cleanPrompt) = findNamesInPrompt(prompt)
-            
+
             if (cleanPrompt.isBlank() && names.isEmpty()) {
                 return@withContext getDeviceImagesWithDateFilter(fromDate, toDate)
             }
-            
+
             initJob.await()
             val encoder = textEncoder
 
@@ -435,7 +435,7 @@ class GalleryService(private val context: Context) {
             return withContext(Dispatchers.IO) {
                 val images = mediaDao.getMediaByIds(mediaIds)
                 val filtered = filterByDate(images, fromDate, toDate)
-                
+
                 if (sortMode == SortMode.DATE_DESC) {
                     filtered.sortedByDescending { it.timestampMs }
                         .map { it.mediaId.toMediaUri() }
@@ -496,9 +496,10 @@ class GalleryService(private val context: Context) {
                         }
                     }.awaitAll().flatten()
                 }
-                
+
                 if (sortMode == SortMode.DATE_DESC) {
-                    sorted.sortedByDescending { it.first.timestampMs }.map { it.first.mediaId.toMediaUri() }
+                    sorted.sortedByDescending { it.first.timestampMs }
+                        .map { it.first.mediaId.toMediaUri() }
                 } else {
                     sorted.sortedByDescending { it.second }.map { it.first.mediaId.toMediaUri() }
                 }
@@ -506,7 +507,7 @@ class GalleryService(private val context: Context) {
                 // OCR search within
                 filtered =
                     filtered.filter { it.ocrText?.contains(cleanPrompt, ignoreCase = true) == true }
-                
+
                 if (sortMode == SortMode.DATE_DESC) {
                     filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toMediaUri() }
                 } else {
@@ -517,7 +518,11 @@ class GalleryService(private val context: Context) {
         }
     }
 
-    suspend fun searchDocuments(text: String, fromDate: Long? = null, toDate: Long? = null): List<Uri> {
+    suspend fun searchDocuments(
+        text: String,
+        fromDate: Long? = null,
+        toDate: Long? = null
+    ): List<Uri> {
         return withContext(Dispatchers.IO) {
             var results = if (ftsSupported) {
                 mediaDao.searchMediaFts(text)
