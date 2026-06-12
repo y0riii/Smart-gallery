@@ -45,7 +45,7 @@ object ImageUtils {
             }
         }
 
-        Log.d("MediaRepository", "MediaStore scanned: ${list.size} items (capped at 100)")
+        Log.d("MediaRepository", "MediaStore scanned: ${list.size} items")
         return list
     }
 

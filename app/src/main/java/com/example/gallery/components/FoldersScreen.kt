@@ -243,10 +243,7 @@ fun FoldersScreen(
                 toDate = viewModel.toDate,
                 onToDateChange = { viewModel.onDateRangeChanged(viewModel.fromDate, it) },
                 isSearching = viewModel.isLoading,
-                onSearch = { 
-                    viewModel.shouldScrollToTop = true
-                    viewModel.applyFilters() 
-                },
+                onSearch = { viewModel.applyFilters(scrollToTop = true) },
                 onClear = { viewModel.clearSearch() },
                 allNames = allNames,
                 showDates = showDates,

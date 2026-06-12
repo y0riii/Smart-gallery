@@ -72,8 +72,9 @@ abstract class FoldersViewModel(
         applyFilters()
     }
 
-    fun applyFilters() {
+    fun applyFilters(scrollToTop: Boolean = false) {
         val folder = selectedFolder ?: return
+        var firstEmission = scrollToTop  // local flag: only scroll on first emit of this job
         imagesCollectionJob?.cancel()
         imagesCollectionJob = viewModelScope.launch {
             isLoading = true
@@ -87,7 +88,10 @@ abstract class FoldersViewModel(
             ).collect { list ->
                 images = list
                 isLoading = false
-                shouldScrollToTop = true
+                if (firstEmission) {
+                    firstEmission = false
+                    shouldScrollToTop = true
+                }
             }
         }
     }
@@ -104,7 +108,7 @@ abstract class FoldersViewModel(
 
     fun onSortModeChanged(mode: SortMode) {
         sortMode = mode
-        applyFilters()
+        applyFilters(scrollToTop = true)
     }
 
     fun clearSelectedFolder() {
@@ -122,8 +126,7 @@ abstract class FoldersViewModel(
         fromDate = null
         toDate = null
         sortMode = SortMode.RELEVANCE
-        shouldScrollToTop = true
-        applyFilters()
+        applyFilters(scrollToTop = true)
     }
 
     override suspend fun onDeleteSuccess(uri: Uri) {
