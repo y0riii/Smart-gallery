@@ -124,7 +124,7 @@ fun FolderTile(folder: FolderItem, modifier: Modifier = Modifier, onClick: () ->
                             .size(AppConfig.FolderPersonThumbSize)           // size from AppConfig
                             .clip(RoundedCornerShape(AppConfig.FolderPersonThumbCornerRadius)) // rounded square
                             .border(
-                                BorderStroke(AppConfig.AvatarOutlineWidth, AppConfig.AvatarOutlineColor),
+                                BorderStroke(AppConfig.AvatarOutlineWidth, MaterialTheme.colorScheme.surface),
                                 RoundedCornerShape(AppConfig.FolderPersonThumbCornerRadius)
                             ),
                         contentScale = ContentScale.Crop

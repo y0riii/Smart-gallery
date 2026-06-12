@@ -198,7 +198,7 @@ fun SearchInputField(
                                 .size(AppConfig.MentionAvatarSize)  // size from AppConfig
                                 .clip(RoundedCornerShape(AppConfig.MentionAvatarCornerRadius)) // square with rounded corners
                                 .border(
-                                    BorderStroke(AppConfig.AvatarOutlineWidth, AppConfig.AvatarOutlineColor),
+                                    BorderStroke(AppConfig.AvatarOutlineWidth, MaterialTheme.colorScheme.surface),
                                     RoundedCornerShape(AppConfig.MentionAvatarCornerRadius)
                                 ),
                             contentScale = ContentScale.Crop

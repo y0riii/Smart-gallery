@@ -21,7 +21,6 @@ object AppConfig {
     val MentionAvatarCornerRadius = 6.dp
     // Avatar Outline
     val AvatarOutlineWidth = 1.5.dp
-    val AvatarOutlineColor = Color.White
 
     // Spacing
     val ScreenHorizontalPadding = 16.dp
