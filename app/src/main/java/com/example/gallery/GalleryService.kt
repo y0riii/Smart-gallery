@@ -390,7 +390,7 @@ class GalleryService(private val context: Context) {
             if (images.isEmpty()) return@withContext emptyList<Uri>()
 
             // If prompt is blank or encoder missing, just sort by date
-            if ((cleanPrompt.isBlank() && names.isEmpty()) || encoder == null) {
+            if (encoder == null) {
                 return@withContext images.sortedByDescending { it.timestampMs }
                     .map { it.mediaId.toMediaUri() }
             }
@@ -401,7 +401,7 @@ class GalleryService(private val context: Context) {
 
             // Sort the filtered images by their similarity to the modified text prompt
             val cores = Runtime.getRuntime().availableProcessors()
-            val chunkSize = (images.size / cores).coerceAtLeast(1)
+            val chunkSize = images.size / cores + 1
 
             val sortedImages = withContext(Dispatchers.Default) {
                 images.chunked(chunkSize).map { chunk ->
@@ -476,7 +476,7 @@ class GalleryService(private val context: Context) {
                     withContext(Dispatchers.Default) { encoder.getTextFeatures(cleanPrompt) }
 
                 val cores = Runtime.getRuntime().availableProcessors()
-                val chunkSize = (filtered.size / cores).coerceAtLeast(1)
+                val chunkSize = filtered.size / cores + 1
 
                 val sorted = withContext(Dispatchers.Default) {
                     filtered.chunked(chunkSize).map { chunk ->
