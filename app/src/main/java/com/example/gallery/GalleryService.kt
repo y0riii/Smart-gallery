@@ -47,7 +47,7 @@ class GalleryService(private val context: Context) {
     }
 
     companion object {
-        private const val FACE_MATCH_THRESHOLD = 0.45f
+        private const val FACE_MATCH_THRESHOLD = 0.44f
         private const val CATEGORY_MATCH_THRESHOLD = 0.22f
 
         val progress = MutableStateFlow<Float?>(null)
@@ -76,7 +76,7 @@ class GalleryService(private val context: Context) {
     /**
      * Compares the device's MediaStore with the Room Database and syncs them.
      */
-    suspend fun indexImagesBackground() {
+    suspend fun indexImagesBackground(onProgress: suspend (Int, Int) -> Unit) {
         withContext(Dispatchers.IO) {
             // 1. Check FTS support
             try {
@@ -113,7 +113,7 @@ class GalleryService(private val context: Context) {
                     "GalleryService",
                     "Sync: Found ${newImagesToProcess.size} new images to index."
                 )
-                processAndInsertImages(newImagesToProcess)
+                processAndInsertImages(newImagesToProcess, onProgress)
             } else {
                 Log.d("GalleryService", "Sync: Database is fully synced. No new images to process.")
             }
@@ -135,7 +135,7 @@ class GalleryService(private val context: Context) {
         Log.d("DB_DEBUG", "============================================")
     }
 
-    private suspend fun processAndInsertImages(imagesToProcess: List<Pair<Long, Long>>) {
+    private suspend fun processAndInsertImages(imagesToProcess: List<Pair<Long, Long>>, onProgress: suspend (Int, Int) -> Unit) {
         val imageEncoder = try {
             ClipImageEncoder(context)
         } catch (e: Exception) {
@@ -280,6 +280,7 @@ class GalleryService(private val context: Context) {
                     counter++
                     Log.d("GalleryService", "Processed: $counter / $totalCount (ID: $mediaId)")
                     progress.value = counter / totalCount.toFloat()
+                    onProgress(counter, totalCount)
                 }
             } catch (e: Exception) {
                 Log.e("GalleryService", "Error processing image $mediaId", e)

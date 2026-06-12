@@ -1,15 +1,15 @@
 package com.example.gallery.db
 
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.ServiceInfo
-import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import com.example.gallery.GalleryService
 import com.example.gallery.R
 
@@ -25,11 +25,22 @@ class GalleryIndexerWorker(
 
     override suspend fun doWork(): Result {
         // Promote to a foreground worker so Android doesn't kill it mid-index.
-        setForeground(createForegroundInfo())
+        setForeground(createForegroundInfo(0, 0))
 
         return try {
             val service = GalleryService(applicationContext)
-            service.indexImagesBackground()
+            service.indexImagesBackground { processed, total ->
+                setProgress(
+                    workDataOf(
+                        "processed" to processed,
+                        "total" to total
+                    )
+                )
+
+                setForeground(
+                    createForegroundInfo(processed, total)
+                )
+            }
             Result.success()
         } catch (e: Exception) {
             if (runAttemptCount < 3) {
@@ -40,32 +51,8 @@ class GalleryIndexerWorker(
         }
     }
 
-    private fun createForegroundInfo(): ForegroundInfo {
-        createNotificationChannel()
-        val notification = buildNotification()
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ForegroundInfo(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            )
-        } else {
-            ForegroundInfo(NOTIFICATION_ID, notification)
-        }
-    }
-
-    private fun buildNotification(): Notification {
-        return NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setContentTitle("Smart Gallery")
-            .setContentText("Indexing your photos…")
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setOngoing(true)
-            .setSilent(true)
-            .setProgress(0, 0, true) // indeterminate progress bar
-            .build()
-    }
-
     private fun createNotificationChannel() {
+        Log.d("GalleryWorker", "Creating notification channel")
         val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE)
                 as NotificationManager
         if (manager.getNotificationChannel(CHANNEL_ID) == null) {
@@ -79,5 +66,35 @@ class GalleryIndexerWorker(
             }
             manager.createNotificationChannel(channel)
         }
+    }
+
+    private fun createForegroundInfo(
+        processed: Int,
+        total: Int
+    ): ForegroundInfo {
+        createNotificationChannel()
+
+        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+            .setContentTitle("Smart Gallery")
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setOngoing(true)
+            .setSilent(true)
+            .setOnlyAlertOnce(true)
+
+        if (total == 0) {
+            notification
+                .setContentText("Preparing photo indexing...")
+                .setProgress(0, 0, true)
+        } else {
+            notification
+                .setContentText("Indexed $processed of $total photos")
+                .setProgress(total, processed, false)
+        }
+
+        return ForegroundInfo(
+            NOTIFICATION_ID,
+            notification.build(),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        )
     }
 }
