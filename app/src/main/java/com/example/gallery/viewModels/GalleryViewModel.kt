@@ -9,8 +9,11 @@ import androidx.lifecycle.viewModelScope
 import com.example.gallery.GalleryService
 import com.example.gallery.db.daos.PersonDao
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
+import androidx.core.net.toUri
 
 class GalleryViewModel(
     service: GalleryService,
@@ -30,11 +33,30 @@ class GalleryViewModel(
     
     var shouldScrollToTop by mutableStateOf(false)
 
-    val allNames = personDao.getAllNamesFlow().stateIn(
+    // Feature 4: use the sort-order-consistent query so the @mention dropdown everywhere
+    // shows named people A-Z first and #p1/#p2… placeholders last — same as the folder grid.
+    val allNames = personDao.getAllNamesSortedFlow().stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = emptyList()
     )
+
+    // Feature 5: map each person name → thumbnail URI so the @mention dropdown on the home
+    // screen can show the person's photo. Same thumbnail used by the folder tile caption.
+    // thumbnailPath is guarded against empty strings to avoid passing an invalid URI to Coil.
+    val nameThumbnails = personDao.getPersonPreviewsFlow()
+        .map { previews ->
+            previews
+                .filter { it.thumbnailPath.isNotEmpty() }
+                .associate { preview ->
+                    (preview.name ?: "") to File(preview.thumbnailPath).toUri()
+                }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyMap()
+        )
 
     fun onPermissionGranted() {
         viewModelScope.launch {

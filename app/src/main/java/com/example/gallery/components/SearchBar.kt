@@ -62,7 +62,10 @@ fun SearchBar(
     onSearch: () -> Unit,
     onClear: () -> Unit,
     allNames: List<String>,
-    showDates: Boolean = true
+    showDates: Boolean = true,
+    // Feature 5: optional map of person name → thumbnail URI, forwarded to SearchInputField
+    // for showing circular avatars in the @mention dropdown. Defaults to empty (no avatars).
+    nameThumbnails: Map<String, android.net.Uri?> = emptyMap()
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
@@ -85,7 +88,9 @@ fun SearchBar(
                 onValueChange = onPromptChange,
                 allNames = allNames,
                 modifier = Modifier.weight(1f),
-                onFocusChanged = { isFocused = it }
+                onFocusChanged = { isFocused = it },
+                // Feature 5: pass through so dropdown can show person avatars
+                nameThumbnails = nameThumbnails
             )
             Spacer(modifier = Modifier.width(8.dp))
 

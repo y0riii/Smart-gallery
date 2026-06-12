@@ -31,6 +31,11 @@ abstract class FoldersViewModel(
 
     var shouldScrollToTop by mutableStateOf(false)
 
+    // Feature 3: remembers the folders-grid scroll position so we can restore it when the user
+    // navigates back from an open folder.
+    var savedGridFirstIndex by mutableStateOf(0)
+    var savedGridFirstScrollOffset by mutableStateOf(0)
+
     private var foldersJob: kotlinx.coroutines.Job? = null
     private var imagesCollectionJob: kotlinx.coroutines.Job? = null
 

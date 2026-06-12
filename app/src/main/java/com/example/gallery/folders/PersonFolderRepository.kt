@@ -19,6 +19,26 @@ class PersonFolderRepository(
 ) : FolderSource {
     private val MIN_IMAGES = 10
 
+    // Matches auto-generated placeholder names like "#p1", "#p2", "#p10", etc.
+    private val PLACEHOLDER_REGEX = Regex("^#p\\d+$", RegexOption.IGNORE_CASE)
+
+    /** Returns true if the name is a system-generated placeholder (e.g. "#p1"). */
+    private fun isPlaceholder(name: String) = PLACEHOLDER_REGEX.matches(name)
+
+    /**
+     * Sorts people into two buckets:
+     *  1. Named people (not placeholders) — sorted A–Z case-insensitively.
+     *  2. Placeholder people (#p1, #p2, …) — sorted numerically by their number.
+     */
+    private fun sortedPeople(list: List<FolderItem>): List<FolderItem> {
+        val named   = list.filter { !isPlaceholder(it.name) }.sortedBy { it.name.lowercase() }
+        val unnamed = list.filter {  isPlaceholder(it.name) }.sortedBy {
+            // Extract the numeric suffix so #p2 comes before #p10
+            it.name.removePrefix("#p").toIntOrNull() ?: Int.MAX_VALUE
+        }
+        return named + unnamed
+    }
+
     override fun getFoldersFlow(): Flow<List<FolderItem>> {
         return personDao.getPersonsWithMediaIdsFlow().map { persons ->
             persons.mapNotNull { (person, mediaIds) ->
@@ -33,7 +53,8 @@ class PersonFolderRepository(
                     thumbnailUris = thumbnails,
                     insideFolderThumbnail = File(person.thumbnailPath).toUri()
                 )
-            }.sortedBy { it.name }
+            // Use two-bucket sort: named people A–Z, then placeholders (#p1, #p2…) numerically
+            }.let { sortedPeople(it) }
         }.flowOn(Dispatchers.IO)
     }
 
@@ -68,6 +89,7 @@ class PersonFolderRepository(
                 thumbnailUris = thumbnails,
                 insideFolderThumbnail = File(person.thumbnailPath).toUri()
             )
-        }.sortedBy { it.name }
+        // Use two-bucket sort: named people A–Z, then placeholders (#p1, #p2…) numerically
+        }.let { sortedPeople(it) }
     }
 }

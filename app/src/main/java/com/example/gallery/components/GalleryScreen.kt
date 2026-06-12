@@ -57,6 +57,8 @@ private const val GALLERY_PREVIEW_HIDE_THRESHOLD = 5
 @Composable
 fun GalleryScreen(viewModel: GalleryViewModel) {
     val allNames by viewModel.allNames.collectAsState()
+    // Feature 5: person name → thumbnail URI for the @mention dropdown avatars
+    val nameThumbnails by viewModel.nameThumbnails.collectAsState()
     val fullScreenIndex = viewModel.fullScreenIndex
     val gridState = rememberLazyGridState()
     val context = LocalContext.current
@@ -120,7 +122,9 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
                     onClear = {
                         viewModel.clearSearch()
                     },
-                    allNames = allNames
+                    allNames = allNames,
+                    // Feature 5: pass thumbnails so avatars appear in the @mention dropdown
+                    nameThumbnails = nameThumbnails
                 )
 
                 if (viewModel.isSearching || viewModel.statusText.isNotEmpty()) {

@@ -2,6 +2,12 @@ package com.example.gallery.components
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.TextField
@@ -10,6 +16,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.example.gallery.ui.theme.AppConfig
+import android.net.Uri
+import coil3.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,6 +34,7 @@ import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
 
 data class MentionQuery(val start: Int, val end: Int, val query: String)
@@ -114,7 +124,10 @@ fun SearchInputField(
     onValueChange: (TextFieldValue) -> Unit,
     allNames: List<String>,
     modifier: Modifier = Modifier,
-    onFocusChanged: (Boolean) -> Unit
+    onFocusChanged: (Boolean) -> Unit,
+    // Feature 5: optional map of name → thumbnail URI; when provided, shows a circular
+    // avatar to the left of each name in the @mention dropdown.
+    nameThumbnails: Map<String, Uri?> = emptyMap()
 ) {
     var mentionQuery by remember { mutableStateOf<MentionQuery?>(null) }
     var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -138,7 +151,8 @@ fun SearchInputField(
                 val mention = extractMention(it.text, it.selection.start)
                 mentionQuery = mention
                 suggestions = if (mention != null) {
-                    allNames.filter { name -> name.startsWith(mention.query, true) }.take(5)
+                    // Feature 4: allow up to 20 results now that the dropdown is scrollable
+                    allNames.filter { name -> name.startsWith(mention.query, true) }.take(20)
                 } else {
                     emptyList()
                 }
@@ -165,11 +179,37 @@ fun SearchInputField(
                     suggestions = emptyList()
                 }
             },
-            properties = PopupProperties(focusable = false)
+            properties = PopupProperties(focusable = false),
+            // Feature 4: cap the dropdown height so it becomes scrollable when there are many results
+            modifier = Modifier.heightIn(max = AppConfig.MentionDropdownMaxHeight)
         ) {
             suggestions.forEach { name ->
+                // Feature 5: compute the leading icon BEFORE the DropdownMenuItem call.
+                // We use an explicit (@Composable () -> Unit)? type so Kotlin correctly
+                // treats the lambda as @Composable. The ?.let { } pattern cannot propagate
+                // @Composable through the lambda chain and silently produces null.
+                val thumbUri = nameThumbnails[name]
+                val personAvatar: (@Composable () -> Unit)? = if (thumbUri != null) {
+                    {
+                        AsyncImage(
+                            model = thumbUri,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(AppConfig.MentionAvatarSize)  // size from AppConfig
+                                .clip(RoundedCornerShape(AppConfig.MentionAvatarCornerRadius)) // square with rounded corners
+                                .border(
+                                    BorderStroke(AppConfig.AvatarOutlineWidth, AppConfig.AvatarOutlineColor),
+                                    RoundedCornerShape(AppConfig.MentionAvatarCornerRadius)
+                                ),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                } else null
+
                 DropdownMenuItem(
+                    leadingIcon = personAvatar,   // null → no icon and no reserved space
                     text = { Text(name) },
+                    modifier = Modifier.fillMaxWidth(),  // stretch item to full dropdown width
                     onClick = {
                         val mq = mentionQuery ?: return@DropdownMenuItem
 

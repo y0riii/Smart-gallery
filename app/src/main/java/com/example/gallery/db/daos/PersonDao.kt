@@ -40,6 +40,27 @@ interface PersonDao {
     )
     fun getAllNamesFlow(): Flow<List<String>>
 
+    /**
+     * Feature 4: returns person names sorted identically to PersonFolderRepository.sortedPeople():
+     * named people (not matching #p\d+) come first in A-Z order,
+     * placeholder people (#p1, #p2…) come last sorted numerically by their number.
+     *
+     * CASE WHEN bucket: 0 = real name, 1 = placeholder.
+     * CAST(SUBSTR(name,3) AS INTEGER) extracts the numeric part of '#p<n>' for numeric ordering.
+     */
+    @Query(
+        """
+        SELECT name FROM person
+        ORDER BY
+            CASE WHEN name GLOB '#p[0-9]*' THEN 1 ELSE 0 END ASC,
+            CASE WHEN name GLOB '#p[0-9]*'
+                 THEN CAST(SUBSTR(name, 3) AS INTEGER)
+                 ELSE LOWER(name)
+            END ASC
+    """
+    )
+    fun getAllNamesSortedFlow(): Flow<List<String>>
+
     @Query("UPDATE person SET embedding = :newEmbedding WHERE id = :personId")
     suspend fun updatePersonEmbeddingRaw(personId: Long, newEmbedding: ByteArray)
 

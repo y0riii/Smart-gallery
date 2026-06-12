@@ -11,12 +11,25 @@ object AppConfig {
     val SearchFieldCornerRadius = 12.dp
     val FolderThumbnailSize = 48.dp
     val SelectionIconSize = 22.dp
+    // Feature 1: size of the person thumbnail shown in the folder tile caption row
+    val FolderPersonThumbSize = 40.dp
+    // Feature 1: corner radius for the square-with-rounded-corners person thumbnail in the tile caption
+    val FolderPersonThumbCornerRadius = 6.dp
+    // Feature 5: size of the circular person avatar in the @mention dropdown
+    val MentionAvatarSize = 32.dp
+    // Feature 5: corner radius for the person avatar in the @mention dropdown
+    val MentionAvatarCornerRadius = 6.dp
+    // Avatar Outline
+    val AvatarOutlineWidth = 1.5.dp
+    val AvatarOutlineColor = Color.White
 
     // Spacing
     val ScreenHorizontalPadding = 16.dp
     val FolderGridSpacing = 12.dp
     val FolderGridPadding = 12.dp
     val FolderTileInnerPadding = 12.dp
+    // Feature 4: max height of the scrollable @mention suggestions dropdown
+    val MentionDropdownMaxHeight = 240.dp
 
     // Animation durations
     const val TabTransitionDuration = 300
