@@ -209,7 +209,7 @@ class GalleryService(private val context: Context) {
                             }
 
                             var personId: Long
-                            val thumbnail = ImageUtils.cropImage(bitmap, face.boundingBox)
+                            val thumbnail = ImageUtils.cropImage(bitmap, ImageUtils.scaleRect(face.boundingBox, 1.5F))
                             val thumbnailSize = thumbnail.width * thumbnail.height
                             if (bestMatch == null || VectorUtils.dotProduct(
                                     normalizedFaceFeatures,
