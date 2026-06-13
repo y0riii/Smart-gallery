@@ -7,30 +7,30 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 
 private val LightColorScheme = lightColorScheme(
-    primary            = LightPrimary,
-    onPrimary          = LightOnPrimary,
-    background         = LightBackground,
-    onBackground       = LightOnBackground,
-    surface            = LightSurface,
-    onSurface          = LightOnSurface,
-    onSurfaceVariant   = LightOnSurfaceVar,
-    surfaceVariant     = LightSurfaceVar,
-    outline            = LightOutline,
-    outlineVariant     = LightOutlineVar,
+    primary = LightPrimary,
+    onPrimary = LightOnPrimary,
+    background = LightBackground,
+    onBackground = LightOnBackground,
+    surface = LightSurface,
+    onSurface = LightOnSurface,
+    onSurfaceVariant = LightOnSurfaceVar,
+    surfaceVariant = LightSurfaceVar,
+    outline = LightOutline,
+    outlineVariant = LightOutlineVar,
     // Keep error/tertiary at Material defaults so AlertDialogs look standard
 )
 
 private val DarkColorScheme = darkColorScheme(
-    primary            = DarkPrimary,
-    onPrimary          = DarkOnPrimary,
-    background         = DarkBackground,
-    onBackground       = DarkOnBackground,
-    surface            = DarkSurface,
-    onSurface          = DarkOnSurface,
-    onSurfaceVariant   = DarkOnSurfaceVar,
-    surfaceVariant     = DarkSurfaceVar,
-    outline            = DarkOutline,
-    outlineVariant     = DarkOutlineVar,
+    primary = DarkPrimary,
+    onPrimary = DarkOnPrimary,
+    background = DarkBackground,
+    onBackground = DarkOnBackground,
+    surface = DarkSurface,
+    onSurface = DarkOnSurface,
+    onSurfaceVariant = DarkOnSurfaceVar,
+    surfaceVariant = DarkSurfaceVar,
+    outline = DarkOutline,
+    outlineVariant = DarkOutlineVar,
 )
 
 /**
@@ -52,7 +52,7 @@ fun GalleryTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
-        typography  = Typography,
-        content     = content
+        typography = Typography,
+        content = content
     )
 }

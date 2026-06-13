@@ -19,8 +19,8 @@ import com.example.gallery.R
  */
 private val provider = GoogleFont.Provider(
     providerAuthority = "com.google.android.gms.fonts",
-    providerPackage   = "com.google.android.gms",
-    certificates      = R.array.com_google_android_gms_fonts_certs
+    providerPackage = "com.google.android.gms",
+    certificates = R.array.com_google_android_gms_fonts_certs
 )
 
 private val InterFont = GoogleFont("Inter")
@@ -46,45 +46,45 @@ private val InterFontFamily = FontFamily(
  */
 val Typography = Typography(
     titleLarge = TextStyle(
-        fontFamily   = InterFontFamily,
-        fontWeight   = FontWeight.SemiBold,
-        fontSize     = 22.sp,
-        lineHeight   = 28.sp,
+        fontFamily = InterFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 22.sp,
+        lineHeight = 28.sp,
         letterSpacing = 0.sp
     ),
     titleMedium = TextStyle(
-        fontFamily   = InterFontFamily,
-        fontWeight   = FontWeight.SemiBold,
-        fontSize     = 17.sp,
-        lineHeight   = 24.sp,
+        fontFamily = InterFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 17.sp,
+        lineHeight = 24.sp,
         letterSpacing = 0.sp
     ),
     bodyLarge = TextStyle(
-        fontFamily   = InterFontFamily,
-        fontWeight   = FontWeight.Normal,
-        fontSize     = 16.sp,
-        lineHeight   = 24.sp,
+        fontFamily = InterFontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 16.sp,
+        lineHeight = 24.sp,
         letterSpacing = 0.15.sp
     ),
     bodyMedium = TextStyle(
-        fontFamily   = InterFontFamily,
-        fontWeight   = FontWeight.SemiBold,
-        fontSize     = 14.sp,
-        lineHeight   = 20.sp,
+        fontFamily = InterFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
         letterSpacing = 0.1.sp
     ),
     bodySmall = TextStyle(
-        fontFamily   = InterFontFamily,
-        fontWeight   = FontWeight.Normal,
-        fontSize     = 12.sp,
-        lineHeight   = 16.sp,
+        fontFamily = InterFontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
         letterSpacing = 0.1.sp
     ),
     labelSmall = TextStyle(
-        fontFamily   = InterFontFamily,
-        fontWeight   = FontWeight.Medium,
-        fontSize     = 11.sp,
-        lineHeight   = 16.sp,
+        fontFamily = InterFontFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = 11.sp,
+        lineHeight = 16.sp,
         letterSpacing = 0.5.sp
     )
 )

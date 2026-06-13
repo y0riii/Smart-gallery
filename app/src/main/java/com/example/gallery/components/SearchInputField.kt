@@ -1,32 +1,29 @@
 package com.example.gallery.components
 
+import android.net.Uri
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.border
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.Text
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.foundation.shape.RoundedCornerShape
-import com.example.gallery.ui.theme.AppConfig
-import android.net.Uri
-import coil3.compose.AsyncImage
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.buildAnnotatedString
@@ -34,8 +31,9 @@ import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
+import coil3.compose.AsyncImage
+import com.example.gallery.ui.theme.AppConfig
 
 data class MentionQuery(val start: Int, val end: Int, val query: String)
 
@@ -198,7 +196,10 @@ fun SearchInputField(
                                 .size(AppConfig.MentionAvatarSize)  // size from AppConfig
                                 .clip(RoundedCornerShape(AppConfig.MentionAvatarCornerRadius)) // square with rounded corners
                                 .border(
-                                    BorderStroke(AppConfig.AvatarOutlineWidth, MaterialTheme.colorScheme.surface),
+                                    BorderStroke(
+                                        AppConfig.AvatarOutlineWidth,
+                                        MaterialTheme.colorScheme.surface
+                                    ),
                                     RoundedCornerShape(AppConfig.MentionAvatarCornerRadius)
                                 ),
                             contentScale = ContentScale.Crop

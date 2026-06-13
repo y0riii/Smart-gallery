@@ -8,7 +8,11 @@ import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 import androidx.room.Transaction
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import com.example.gallery.db.AppDatabase
+import com.example.gallery.db.GalleryIndexerWorker
 import com.example.gallery.db.entities.CategoryEntity
 import com.example.gallery.db.entities.FaceEntity
 import com.example.gallery.db.entities.MediaCategoryCrossRef
@@ -21,17 +25,14 @@ import com.example.gallery.ml.text.ClipTextEncoder
 import com.example.gallery.utils.ImageUtils
 import com.example.gallery.utils.VectorUtils
 import com.example.gallery.utils.toMediaUri
-import androidx.work.ExistingWorkPolicy
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
 import com.example.gallery.db.FaceClusteringWorker
-import com.example.gallery.db.GalleryIndexerWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 
 class GalleryService(private val context: Context) {
@@ -51,6 +52,8 @@ class GalleryService(private val context: Context) {
 
     companion object {
         private const val CATEGORY_MATCH_THRESHOLD = 0.22f
+
+        val progress = MutableStateFlow<Float?>(null)
     }
 
     private val db = AppDatabase.getDatabase(context)
@@ -78,7 +81,7 @@ class GalleryService(private val context: Context) {
     /**
      * Compares the device's MediaStore with the Room Database and syncs them.
      */
-    suspend fun indexImagesBackground() {
+    suspend fun indexImagesBackground(onProgress: suspend (Int, Int) -> Unit) {
         withContext(Dispatchers.IO) {
             // 1. Check FTS support
             try {
@@ -115,7 +118,7 @@ class GalleryService(private val context: Context) {
                     "GalleryService",
                     "Sync: Found ${newImagesToProcess.size} new images to index."
                 )
-                processAndInsertImages(newImagesToProcess)
+                processAndInsertImages(newImagesToProcess, onProgress)
             } else {
                 Log.d("GalleryService", "Sync: Database is fully synced. No new images to process.")
             }
@@ -137,7 +140,7 @@ class GalleryService(private val context: Context) {
         Log.d("DB_DEBUG", "============================================")
     }
 
-    private suspend fun processAndInsertImages(imagesToProcess: List<Pair<Long, Long>>) {
+    private suspend fun processAndInsertImages(imagesToProcess: List<Pair<Long, Long>>, onProgress: suspend (Int, Int) -> Unit) {
         val imageEncoder = try {
             ClipImageEncoder(context)
         } catch (e: Exception) {
@@ -174,6 +177,7 @@ class GalleryService(private val context: Context) {
 
         val totalCount = imagesToProcess.size
         var counter = 0
+        progress.value = 0f
 
         imagesToProcess.forEach { (mediaId, timestamp) ->
             try {
@@ -232,11 +236,15 @@ class GalleryService(private val context: Context) {
 
                     counter++
                     Log.d("GalleryService", "Processed: $counter / $totalCount (ID: $mediaId)")
+                    progress.value = counter / totalCount.toFloat()
+                    onProgress(counter, totalCount)
                 }
             } catch (e: Exception) {
                 Log.e("GalleryService", "Error processing image $mediaId", e)
             }
         }
+
+        progress.value = null
 
         imageEncoder.close()
         ocrProcessor.close()
@@ -313,11 +321,11 @@ class GalleryService(private val context: Context) {
     suspend fun search(prompt: String, fromDate: Long? = null, toDate: Long? = null): List<Uri> {
         return withContext(Dispatchers.IO) {
             val (names, cleanPrompt) = findNamesInPrompt(prompt)
-            
+
             if (cleanPrompt.isBlank() && names.isEmpty()) {
-                return@withContext getDeviceImagesWithDateFilter(fromDate, toDate)
+                return@withContext getDeviceImagesWithDateFilter(fromDate, toDate).map { it.toMediaUri() }
             }
-            
+
             initJob.await()
             val encoder = textEncoder
 
@@ -367,13 +375,19 @@ class GalleryService(private val context: Context) {
         useClip: Boolean,
         fromDate: Long?,
         toDate: Long?,
-        sortMode: SortMode = SortMode.RELEVANCE
+        sortMode: SortMode? = SortMode.RELEVANCE
     ): List<Uri> {
         if (prompt.isNullOrBlank()) {
             return withContext(Dispatchers.IO) {
+                if (sortMode == null){
+                    val originalSet = mediaIds.toSet()
+                    val images = getDeviceImagesWithDateFilter(fromDate, toDate)
+                    val intersection = images.filter { it in originalSet }
+                    return@withContext intersection.map { it.toMediaUri() }
+                }
                 val images = mediaDao.getMediaByIds(mediaIds)
                 val filtered = filterByDate(images, fromDate, toDate)
-                
+
                 if (sortMode == SortMode.DATE_DESC) {
                     filtered.sortedByDescending { it.timestampMs }
                         .map { it.mediaId.toMediaUri() }
@@ -434,9 +448,10 @@ class GalleryService(private val context: Context) {
                         }
                     }.awaitAll().flatten()
                 }
-                
+
                 if (sortMode == SortMode.DATE_DESC) {
-                    sorted.sortedByDescending { it.first.timestampMs }.map { it.first.mediaId.toMediaUri() }
+                    sorted.sortedByDescending { it.first.timestampMs }
+                        .map { it.first.mediaId.toMediaUri() }
                 } else {
                     sorted.sortedByDescending { it.second }.map { it.first.mediaId.toMediaUri() }
                 }
@@ -444,7 +459,7 @@ class GalleryService(private val context: Context) {
                 // OCR search within
                 filtered =
                     filtered.filter { it.ocrText?.contains(cleanPrompt, ignoreCase = true) == true }
-                
+
                 if (sortMode == SortMode.DATE_DESC) {
                     filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toMediaUri() }
                 } else {
@@ -455,7 +470,11 @@ class GalleryService(private val context: Context) {
         }
     }
 
-    suspend fun searchDocuments(text: String, fromDate: Long? = null, toDate: Long? = null): List<Uri> {
+    suspend fun searchDocuments(
+        text: String,
+        fromDate: Long? = null,
+        toDate: Long? = null
+    ): List<Uri> {
         return withContext(Dispatchers.IO) {
             var results = if (ftsSupported) {
                 mediaDao.searchMediaFts(text)
@@ -565,9 +584,9 @@ class GalleryService(private val context: Context) {
         }
     }
 
-    suspend fun getDeviceImagesWithDateFilter(fromDate: Long?, toDate: Long?): List<Uri> =
+    suspend fun getDeviceImagesWithDateFilter(fromDate: Long?, toDate: Long?): List<Long> =
         withContext(Dispatchers.IO) {
-            val list = mutableListOf<Uri>()
+            val list = mutableListOf<Long>()
             var selection: String? = null
             var selectionArgs: Array<String>? = null
 
@@ -596,7 +615,7 @@ class GalleryService(private val context: Context) {
             )?.use { cursor ->
                 val idIdx = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
                 while (cursor.moveToNext()) {
-                    list.add(cursor.getLong(idIdx).toMediaUri())
+                    list.add(cursor.getLong(idIdx))
                 }
             }
             list
