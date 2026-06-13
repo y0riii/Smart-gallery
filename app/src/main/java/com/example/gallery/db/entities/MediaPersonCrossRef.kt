@@ -25,6 +25,5 @@ import androidx.room.Index
 )
 data class MediaPersonCrossRef(
     val mediaId: Long,
-    val personId: Long,
-    val embedding: FloatArray
+    val personId: Long
 )

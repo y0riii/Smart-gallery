@@ -10,10 +10,9 @@ import android.util.Log
 import androidx.room.Transaction
 import com.example.gallery.db.AppDatabase
 import com.example.gallery.db.entities.CategoryEntity
+import com.example.gallery.db.entities.FaceEntity
 import com.example.gallery.db.entities.MediaCategoryCrossRef
 import com.example.gallery.db.entities.MediaEntity
-import com.example.gallery.db.entities.MediaPersonCrossRef
-import com.example.gallery.db.entities.PersonEntity
 import com.example.gallery.ml.face.FaceDetectionProcessor
 import com.example.gallery.ml.face.FaceEncoder
 import com.example.gallery.ml.image.ClipImageEncoder
@@ -25,6 +24,7 @@ import com.example.gallery.utils.toMediaUri
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import com.example.gallery.db.FaceClusteringWorker
 import com.example.gallery.db.GalleryIndexerWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -37,16 +37,19 @@ import kotlinx.coroutines.withContext
 class GalleryService(private val context: Context) {
 
     fun startIndexingWorkManager() {
-        val oneTimeRequest = OneTimeWorkRequestBuilder<GalleryIndexerWorker>().build()
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            "GalleryIndexing_OneTime",
-            ExistingWorkPolicy.KEEP,
-            oneTimeRequest
-        )
+        val indexRequest = OneTimeWorkRequestBuilder<GalleryIndexerWorker>().build()
+        val clusterRequest = OneTimeWorkRequestBuilder<FaceClusteringWorker>().build()
+        WorkManager.getInstance(context)
+            .beginUniqueWork(
+                "GalleryIndexing_OneTime",
+                ExistingWorkPolicy.KEEP,
+                indexRequest
+            )
+            .then(clusterRequest)
+            .enqueue()
     }
 
     companion object {
-        private const val FACE_MATCH_THRESHOLD = 0.45f
         private const val CATEGORY_MATCH_THRESHOLD = 0.22f
     }
 
@@ -54,6 +57,7 @@ class GalleryService(private val context: Context) {
     private val mediaDao = db.mediaDao()
     private val personDao = db.personDao()
     private val categoryDao = db.categoryDao()
+    private val faceDao = db.faceDao()
 
     private val textEncoder: ClipTextEncoder? by lazy {
         try {
@@ -190,70 +194,22 @@ class GalleryService(private val context: Context) {
                         listOf(MediaEntity(mediaId, timestamp, false, features, text))
                     )
 
-                    // 1. Process Faces
+                    // 1. Save face embeddings to FaceEntity (clustering happens offline later)
                     withContext(Dispatchers.Default) {
                         faces.forEach { face ->
                             val croppedImage = faceDetector.alignFace(bitmap, face)
                             val faceFeatures = faceEncoder.getFaceFeatures(croppedImage)
-                            val normalizedFaceFeatures = VectorUtils.normalize(faceFeatures)
 
-                            val allPersons = personDao.getAllPersons()
-                            val bestMatch = allPersons.maxByOrNull {
-                                val avgVec = VectorUtils.normalize(
-                                    VectorUtils.divide(it.embedding, it.counter.toFloat())
-                                )
-                                VectorUtils.dotProduct(normalizedFaceFeatures, avgVec)
-                            }
-
-                            var personId: Long
                             val thumbnail = ImageUtils.cropImage(bitmap, face.boundingBox)
                             val thumbnailSize = thumbnail.width * thumbnail.height
-                            if (bestMatch == null || VectorUtils.dotProduct(
-                                    normalizedFaceFeatures,
-                                    VectorUtils.normalize(
-                                        VectorUtils.divide(
-                                            bestMatch.embedding,
-                                            bestMatch.counter.toFloat()
-                                        )
-                                    )
-                                ) < FACE_MATCH_THRESHOLD
-                            ) {
-                                personId = (personDao.countPersons() + 1).toLong()
-                                val thumbnailPath = ImageUtils.createThumbnail(context, thumbnail)
-                                personDao.insertPerson(
-                                    PersonEntity(
-                                        personId,
-                                        "#p$personId",
-                                        faceFeatures,
-                                        1,
-                                        thumbnailPath,
-                                        thumbnailSize
-                                    )
-                                )
-                            } else {
-                                personId = bestMatch.id
-                                if (!personDao.crossRefExists(mediaId, personId)) {
-                                    val newEmbedding =
-                                        VectorUtils.add(bestMatch.embedding, faceFeatures)
-                                    personDao.updatePersonEmbedding(personId, newEmbedding)
-                                    personDao.incrementPersonCounter(personId)
-                                    if (thumbnailSize > bestMatch.thumbnailSize) {
-                                        ImageUtils.deleteThumbnail(bestMatch.thumbnailPath)
-                                        val thumbnailPath =
-                                            ImageUtils.createThumbnail(context, thumbnail)
-                                        personDao.updatePersonThumbnail(
-                                            personId,
-                                            thumbnailPath,
-                                            thumbnailSize
-                                        )
-                                    }
-                                }
-                            }
-                            personDao.insertCrossRef(
-                                MediaPersonCrossRef(
-                                    mediaId,
-                                    personId,
-                                    faceFeatures
+                            val thumbnailPath = ImageUtils.createThumbnail(context, thumbnail)
+
+                            faceDao.insertFace(
+                                FaceEntity(
+                                    mediaId = mediaId,
+                                    embedding = faceFeatures,
+                                    thumbnailPath = thumbnailPath,
+                                    thumbnailSize = thumbnailSize
                                 )
                             )
                         }
@@ -289,28 +245,16 @@ class GalleryService(private val context: Context) {
     }
 
     /**
-     * Deletes an image from the database and cleans up all associations (Person embeddings, Categories).
+     * Deletes an image from the database and cleans up face data.
+     * Orphaned persons (persons with no remaining cross-refs) will be
+     * cleaned up on the next clustering run.
      */
     @Transaction
     private suspend fun deleteImageFromDb(mediaId: Long) {
-        // 1. Cleanup Person Embeddings
-        val crossRefs = personDao.getCrossRefsForMedia(mediaId)
-        crossRefs.forEach { ref ->
-            val person = personDao.getPersonById(ref.personId)
-            if (person != null) {
-                if (person.counter > 1) {
-                    val updatedEmbedding = VectorUtils.subtract(person.embedding, ref.embedding)
-                    personDao.updatePersonEmbedding(person.id, updatedEmbedding)
-                    personDao.decrementPersonCounter(person.id)
-                } else {
-                    // Only one image for this person, delete the person entirely
-                    personDao.deletePerson(person.id)
-                    ImageUtils.deleteThumbnail(person.thumbnailPath)
-                }
-            }
-        }
+        // 1. Delete face entries for this media
+        faceDao.deleteFacesForMedia(mediaId)
 
-        // 2. Cross-refs are deleted automatically via CASCADE in Room
+        // 2. Delete the media entity (cross-refs are deleted via CASCADE)
         val entity = mediaDao.getMediaById(mediaId)
         if (entity != null) {
             mediaDao.delete(entity)

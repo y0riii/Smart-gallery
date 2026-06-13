@@ -8,8 +8,6 @@ data class PersonEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
     val name: String? = null,
-    val embedding: FloatArray,
-    val counter: Long = 0,
     val thumbnailPath: String,
     val thumbnailSize: Int
 )
