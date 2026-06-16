@@ -148,23 +148,22 @@ class MainActivity : ComponentActivity() {
 }
 
 private fun getPermissionsToRequest(): Array<String> {
-    return when {
-        // Android 14+
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> {
-            arrayOf(
-                Manifest.permission.READ_MEDIA_IMAGES,
-                Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
-            )
-        }
-        // Android 13
-        Build.VERSION.SDK_INT == Build.VERSION_CODES.TIRAMISU -> {
-            arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
-        }
-        // Android 12 and below
-        else -> {
-            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-        }
+    val permissions = mutableListOf<String>()
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        permissions += Manifest.permission.POST_NOTIFICATIONS
+        permissions += Manifest.permission.READ_MEDIA_IMAGES
     }
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        permissions += Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+    }
+
+    if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
+        permissions += Manifest.permission.READ_EXTERNAL_STORAGE
+    }
+
+    return permissions.toTypedArray()
 }
 
 @Composable

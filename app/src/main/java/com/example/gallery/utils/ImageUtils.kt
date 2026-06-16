@@ -74,6 +74,21 @@ object ImageUtils {
         }
     }
 
+    fun scaleRect(rect: Rect, scale: Float): Rect {
+        val centerX = rect.exactCenterX()
+        val centerY = rect.exactCenterY()
+
+        val newWidth = rect.width() * scale
+        val newHeight = rect.height() * scale
+
+        val left = (centerX - newWidth / 2).toInt().coerceAtLeast(0)
+        val top = (centerY - newHeight / 2).toInt().coerceAtLeast(0)
+        val right = (centerX + newWidth / 2).toInt()
+        val bottom = (centerY + newHeight / 2).toInt()
+
+        return Rect(left, top, right, bottom)
+    }
+
     fun cropImage(source: Bitmap, rect: Rect): Bitmap {
         val left = rect.left.coerceAtLeast(0)
         val top = rect.top.coerceAtLeast(0)
