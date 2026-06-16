@@ -9,5 +9,15 @@ data class PersonEntity(
     val id: Long = 0,
     val name: String? = null,
     val thumbnailPath: String,
-    val thumbnailSize: Int
-)
+    val thumbnailSize: Int,
+    val Embedding: FloatArray? = null,
+//    val count: Int = 1
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is PersonEntity) return false
+        return id == other.id
+    }
+
+    override fun hashCode(): Int = id.hashCode()
+}

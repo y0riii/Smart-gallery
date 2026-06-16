@@ -66,6 +66,24 @@ interface PersonDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertCrossRefs(refs: List<MediaPersonCrossRef>)
 
+    @Query("UPDATE person SET Embedding = :embedding WHERE id = :personId")
+    suspend fun updateAvgEmbeddingRaw(personId: Long, embedding: ByteArray)
+
+    suspend fun updateAvgEmbedding(personId: Long, embedding: FloatArray) {
+        val buffer = java.nio.ByteBuffer.allocate(embedding.size * 4)
+        buffer.asFloatBuffer().put(embedding)
+        updateAvgEmbeddingRaw(personId, buffer.array())
+    }
+
+//    @Query("UPDATE person SET count = count + 1 WHERE id = :personId")
+//    suspend fun incrementPersonCounter(personId: Long)
+//
+//    @Query("UPDATE person SET count = CASE WHEN count > 0 THEN count - 1 ELSE 0 END WHERE id = :personId")
+//    suspend fun decrementPersonCounter(personId: Long)
+//
+//    @Query("UPDATE person SET count = :newCount WHERE id = :personId")
+//    suspend fun updatePersonCounter(personId: Long, newCount: Long)
+
     @Query("DELETE FROM person")
     suspend fun deleteAllPersons()
 
