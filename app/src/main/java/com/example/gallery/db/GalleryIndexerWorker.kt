@@ -42,12 +42,9 @@ class GalleryIndexerWorker(
                 )
             }
             Result.success()
-        } catch (e: Exception) {
-            if (runAttemptCount < 3) {
-                Result.retry()
-            } else {
-                Result.failure()
-            }
+        } catch (e: Throwable) {
+            Log.e("GalleryIndexerWorker", "Error during indexing", e)
+            Result.retry()
         }
     }
 

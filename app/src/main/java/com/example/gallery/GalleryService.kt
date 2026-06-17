@@ -38,8 +38,18 @@ import kotlinx.coroutines.withContext
 class GalleryService(private val context: Context) {
 
     fun startIndexingWorkManager() {
-        val indexRequest = OneTimeWorkRequestBuilder<GalleryIndexerWorker>().build()
-        val clusterRequest = OneTimeWorkRequestBuilder<FaceClusteringWorker>().build()
+        val indexRequest = OneTimeWorkRequestBuilder<GalleryIndexerWorker>()
+            .setBackoffCriteria(
+                androidx.work.BackoffPolicy.LINEAR,
+                5,
+                java.util.concurrent.TimeUnit.MINUTES
+            ).build()
+        val clusterRequest = OneTimeWorkRequestBuilder<FaceClusteringWorker>()
+            .setBackoffCriteria(
+                androidx.work.BackoffPolicy.LINEAR,
+                5,
+                java.util.concurrent.TimeUnit.MINUTES
+            ).build()
         WorkManager.getInstance(context)
             .beginUniqueWork(
                 "GalleryIndexing_OneTime",
@@ -172,7 +182,7 @@ class GalleryService(private val context: Context) {
             ocrProcessor?.close()
             faceDetector?.close()
             faceEncoder?.close()
-            return
+            throw IllegalStateException("Processors failed to initialize")
         }
 
         val totalCount = imagesToProcess.size

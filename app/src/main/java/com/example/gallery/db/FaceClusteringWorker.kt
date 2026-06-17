@@ -286,7 +286,7 @@ class FaceClusteringWorker(
             Result.success()
         } catch (e: Exception) {
             Log.e(TAG, "Clustering failed", e)
-            if (runAttemptCount < 3) Result.retry() else Result.failure()
+            Result.retry()
         }
     }
 

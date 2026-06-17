@@ -305,7 +305,7 @@ fun FoldersScreen(
                         // Feature 1: wire selection state from DeletableViewModel base class
                         selectedUris = viewModel.selectedUris,
                         isSelecting = viewModel.isSelecting,
-                        onLongPress = { uri -> viewModel.startSelection(uri) },
+                        onUpdateSelection = { viewModel.updateSelection(it) },
                         onToggleSelect = { uri -> viewModel.toggleSelection(uri) },
                         onCancelSelection = { viewModel.clearSelection() },
                         onDeleteSelected = { viewModel.deleteSelectedImages() },

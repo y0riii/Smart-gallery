@@ -13,12 +13,29 @@ class GalleryPeriodicTriggerWorker(
 ) : Worker(appContext, workerParams) {
 
     override fun doWork(): Result {
-        val oneTimeRequest = OneTimeWorkRequestBuilder<GalleryIndexerWorker>().build()
-        WorkManager.getInstance(applicationContext).enqueueUniqueWork(
-            "GalleryIndexing_OneTime",
-            ExistingWorkPolicy.KEEP,
-            oneTimeRequest
-        )
+        val indexRequest = OneTimeWorkRequestBuilder<GalleryIndexerWorker>()
+            .setBackoffCriteria(
+                androidx.work.BackoffPolicy.LINEAR,
+                5,
+                java.util.concurrent.TimeUnit.MINUTES
+            ).build()
+            
+        val clusterRequest = OneTimeWorkRequestBuilder<FaceClusteringWorker>()
+            .setBackoffCriteria(
+                androidx.work.BackoffPolicy.LINEAR,
+                5,
+                java.util.concurrent.TimeUnit.MINUTES
+            ).build()
+            
+        WorkManager.getInstance(applicationContext)
+            .beginUniqueWork(
+                "GalleryIndexing_OneTime",
+                ExistingWorkPolicy.KEEP,
+                indexRequest
+            )
+            .then(clusterRequest)
+            .enqueue()
+            
         return Result.success()
     }
 }
