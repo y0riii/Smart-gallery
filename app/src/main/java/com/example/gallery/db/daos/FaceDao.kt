@@ -30,6 +30,7 @@ interface FaceDao {
     @Query("UPDATE faces SET personId = NULL")
     suspend fun clearAllPersonAssignments()
 
+
     @Query("SELECT COUNT(*) FROM faces")
     suspend fun countFaces(): Int
 }

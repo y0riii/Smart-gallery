@@ -84,17 +84,17 @@ class FaceClusteringWorker(
                         val norm = normalizedFaces[faceIdx]
                         for (d in norm.indices) sum[d] += norm[d]
                     }
-                    val clusterAvg = VectorUtils.normalize(
-                        VectorUtils.divide(sum, cluster.size.toFloat())
-                    )
+//                    val clusterAvg = VectorUtils.normalize(
+//                        VectorUtils.divide(sum, cluster.size.toFloat())
+//                    )
 
                     val personId = personDao.insertPerson(
                         PersonEntity(
                             name = personName,
                             thumbnailPath = bestFace.thumbnailPath,
                             thumbnailSize = bestFace.thumbnailSize,
-                            Embedding = clusterAvg,
-//                            count = cluster.size
+                            Embedding = sum,
+                            count = cluster.size
                         )
                     )
 
@@ -117,7 +117,7 @@ class FaceClusteringWorker(
             val preservedPersonIds = preservedPersons.map { it.id }.toSet()
             Log.d(TAG, "Preserved persons (user-named): ${preservedPersonIds.size}")
 
-            // 3. Compute and store average embeddings for each preserved person
+            // 3. Store average embeddings for each preserved person
             //    Map: personId -> (averageEmbedding, faceCount)
             val preservedCentroids = mutableMapOf<Long, Pair<FloatArray, Int>>()
             for (person in preservedPersons) {
@@ -125,16 +125,16 @@ class FaceClusteringWorker(
                 if (personFaces.isEmpty()) continue
 
 //                 Sum all embeddings, normalize to get centroid
-                val dim = personFaces.first().embedding.size
-                val sum = FloatArray(dim)
-                for (face in personFaces) {
-                    val norm = VectorUtils.normalize(face.embedding)
-                    for (i in norm.indices) sum[i] += norm[i]
-                }
+//                val dim = personFaces.first().embedding.size
+//                val sum = FloatArray(dim)
+//                for (face in personFaces) {
+//                    val norm = VectorUtils.normalize(face.embedding)
+//                    for (i in norm.indices) sum[i] += norm[i]
+//                }
                 val avg = VectorUtils.normalize(
-                    VectorUtils.divide(sum, personFaces.size.toFloat())
+                    VectorUtils.divide(person.Embedding, person.count.toFloat())
                 )
-                preservedCentroids[person.id] = avg to personFaces.size
+                preservedCentroids[person.id] = avg to person.count
 
 //                // Persist the average embedding
 //                personDao.updateAverageEmbedding(person.id, avg)
@@ -194,7 +194,8 @@ class FaceClusteringWorker(
                         VectorUtils.divide(newSum, newCount.toFloat())
                     )
                     preservedCentroids[bestPersonId] = newAvg to newCount
-                    personDao.updateAvgEmbedding(bestPersonId, newAvg)
+                    personDao.updateEmbedding(bestPersonId, newSum)
+                    personDao.incrementPersonCounter(bestPersonId)
 
                     Log.d(TAG, "Auto-assigned face ${face.faceId} to person $bestPersonId (similarity=$bestSimilarity)")
                 } else {
@@ -253,16 +254,17 @@ class FaceClusteringWorker(
                         val norm = normalizedLeftovers[faceIdx]
                         for (d in norm.indices) sum[d] += norm[d]
                     }
-                    val clusterAvg = VectorUtils.normalize(
-                        VectorUtils.divide(sum, cluster.size.toFloat())
-                    )
+//                    val clusterAvg = VectorUtils.normalize(
+//                        VectorUtils.divide(sum, cluster.size.toFloat())
+//                    )
 
                     val personId = personDao.insertPerson(
                         PersonEntity(
                             name = personName,
                             thumbnailPath = bestFace.thumbnailPath,
                             thumbnailSize = bestFace.thumbnailSize,
-                            Embedding = clusterAvg
+                            Embedding = sum,
+                            count = cluster.size
                         )
                     )
 

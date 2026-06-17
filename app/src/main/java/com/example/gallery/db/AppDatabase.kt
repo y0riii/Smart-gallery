@@ -27,7 +27,7 @@ import com.example.gallery.db.entities.PersonEntity
         MediaCategoryCrossRef::class,
         FaceEntity::class
     ],
-    version = 14,
+    version = 15,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

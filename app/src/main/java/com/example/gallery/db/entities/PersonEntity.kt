@@ -10,8 +10,8 @@ data class PersonEntity(
     val name: String? = null,
     val thumbnailPath: String,
     val thumbnailSize: Int,
-    val Embedding: FloatArray? = null,
-//    val count: Int = 1
+    val Embedding: FloatArray,
+    val count: Int = 1
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

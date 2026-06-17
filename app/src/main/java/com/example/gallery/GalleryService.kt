@@ -26,6 +26,7 @@ import com.example.gallery.utils.ImageUtils
 import com.example.gallery.utils.VectorUtils
 import com.example.gallery.utils.toMediaUri
 import com.example.gallery.db.FaceClusteringWorker
+import com.example.gallery.db.daos.FaceDao
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -269,15 +270,38 @@ class GalleryService(private val context: Context) {
      */
     @Transaction
     private suspend fun deleteImageFromDb(mediaId: Long) {
-        // 1. Delete face entries for this media
+        val faces = faceDao.getFacesForMedia(mediaId)
+        // 1. Update embeddings for persons
+        for (face in faces) {
+            if (face.personId == null) {
+                continue
+            }
+            val person = personDao.getPersonById(face.personId)
+            val normFace = VectorUtils.normalize(face.embedding)
+            if (person != null) {
+                if (person.count > 1) {
+                    val updatedEmbedding = VectorUtils.subtract(person.Embedding, normFace)
+                    personDao.updateEmbedding(person.id, updatedEmbedding)
+                    personDao.decrementPersonCounter(person.id)
+                } else {
+                    // only one image left for the person, delete the image entirely
+                    personDao.deletePerson(person.id)
+                    ImageUtils.deleteThumbnail(person.thumbnailPath)
+                }
+
+            }
+        }
+
+        // 2. Delete face entries for this media
         faceDao.deleteFacesForMedia(mediaId)
 
-        // 2. Delete the media entity (cross-refs are deleted via CASCADE)
+        // 3. Delete the media entity (cross-refs are deleted via CASCADE)
         val entity = mediaDao.getMediaById(mediaId)
         if (entity != null) {
             mediaDao.delete(entity)
         }
     }
+
 
     suspend fun getAllDeviceImages(): List<Uri> =
         withContext(Dispatchers.IO) {
