@@ -40,15 +40,8 @@ class ClipImageEncoder(context: Context) : AutoCloseable {
     private val session: OrtSession
 
     init {
-        val file = File(context.filesDir, "image_model.ort")
-        if (!file.exists()) {
-            context.assets.open("image_model.ort").use { inputStream ->
-                FileOutputStream(file).use { outputStream ->
-                    inputStream.copyTo(outputStream)
-                }
-            }
-        }
-        session = env.createSession(file.absolutePath)
+        val modelBytes = context.assets.open("image_model.ort").readBytes()
+        session = env.createSession(modelBytes)
     }
 
     private fun preprocessImage(bitmap: Bitmap): OnnxTensor {
