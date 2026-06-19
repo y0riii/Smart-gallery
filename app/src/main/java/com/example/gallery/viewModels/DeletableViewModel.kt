@@ -44,12 +44,6 @@ abstract class DeletableViewModel(protected val service: GalleryService) : ViewM
     /** True whenever at least one image is selected. */
     val isSelecting: Boolean get() = selectedUris.isNotEmpty()
 
-    /**
-     * Enters selection mode with the first long-pressed image already selected.
-     */
-    fun startSelection(uri: Uri) {
-        selectedUris = setOf(uri)
-    }
 
     /**
      * Adds [uri] to the selection if not present, or removes it if already selected.
@@ -60,6 +54,11 @@ abstract class DeletableViewModel(protected val service: GalleryService) : ViewM
         } else {
             selectedUris + uri
         }
+    }
+
+    /** Replaces the current selection with a new set of URIs. */
+    fun updateSelection(uris: Set<Uri>) {
+        selectedUris = uris
     }
 
     /** Exits selection mode and clears all selected images. */

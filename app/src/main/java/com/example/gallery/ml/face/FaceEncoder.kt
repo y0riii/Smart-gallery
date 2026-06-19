@@ -103,6 +103,6 @@ class FaceEncoder(context: Context) : AutoCloseable {
 
     override fun close() {
         session.close()
-        env.close()
+        // Do NOT call env.close() — see ClipImageEncoder for explanation.
     }
 }

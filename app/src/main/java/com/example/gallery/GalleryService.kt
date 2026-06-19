@@ -32,16 +32,43 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 
 class GalleryService(private val context: Context) {
 
     fun startIndexingWorkManager() {
-        val oneTimeRequest = OneTimeWorkRequestBuilder<GalleryIndexerWorker>().build()
+        val oneTimeRequest = OneTimeWorkRequestBuilder<GalleryIndexerWorker>()
+            .setBackoffCriteria(
+                androidx.work.BackoffPolicy.EXPONENTIAL,
+                30, java.util.concurrent.TimeUnit.SECONDS
+            )
+            .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             "GalleryIndexing_OneTime",
             ExistingWorkPolicy.KEEP,
+            oneTimeRequest
+        )
+    }
+
+    /**
+     * Called from BootReceiver — starts indexing immediately so we stay within
+     * the BOOT_COMPLETED foreground-service exemption window (Android 12+).
+     * If ML init fails under boot-time memory pressure, Result.retry() kicks in
+     * and WorkManager's default exponential backoff (30s, 60s, 120s…) handles it.
+     */
+    fun startIndexingAfterBoot() {
+        val oneTimeRequest = OneTimeWorkRequestBuilder<GalleryIndexerWorker>()
+            .setBackoffCriteria(
+                androidx.work.BackoffPolicy.EXPONENTIAL,
+                30, java.util.concurrent.TimeUnit.SECONDS
+            )
+            .build()
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "GalleryIndexing_OneTime",
+            ExistingWorkPolicy.REPLACE,
             oneTimeRequest
         )
     }
@@ -67,8 +94,10 @@ class GalleryService(private val context: Context) {
         }
     }
 
-    private var initJob: Deferred<Unit> = CoroutineScope(SupervisorJob() + Dispatchers.IO).async {
-        textEncoder // triggers initialization immediately
+    private val initJob: Deferred<Unit> = CoroutineScope(SupervisorJob() + Dispatchers.IO).async(
+        start = kotlinx.coroutines.CoroutineStart.LAZY  // only runs when await() is first called
+    ) {
+        textEncoder // triggers lazy initialization
     }
 
     private var ftsSupported: Boolean = false
@@ -123,16 +152,8 @@ class GalleryService(private val context: Context) {
     }
 
     private suspend fun logDatabaseContent() {
-        val allItems = mediaDao.getAllMedia()
-        Log.d("DB_DEBUG", "=== CURRENT DATABASE CONTENT (${allItems.size} items) ===")
-        allItems.forEachIndexed { index, entity ->
-            val embeddingPreview = entity.embedding.take(3).joinToString(", ")
-            Log.d(
-                "DB_DEBUG",
-                "[#$index] ID: ${entity.mediaId} | OCR: ${entity.ocrText?.take(30) ?: "None"}... | Vector: [$embeddingPreview...]"
-            )
-        }
-        Log.d("DB_DEBUG", "============================================")
+        val count = mediaDao.getAllMediaIds().size
+        Log.d("DB_DEBUG", "=== DATABASE: $count indexed items ===")
     }
 
     private suspend fun processAndInsertImages(imagesToProcess: List<Pair<Long, Long>>, onProgress: suspend (Int, Int) -> Unit) {
@@ -162,137 +183,167 @@ class GalleryService(private val context: Context) {
         }
 
         if (imageEncoder == null || ocrProcessor == null || faceDetector == null || faceEncoder == null) {
-            Log.e("GalleryService", "Aborting indexing because processors failed to initialize.")
             imageEncoder?.close()
             ocrProcessor?.close()
             faceDetector?.close()
             faceEncoder?.close()
-            return
+            // Throw so the caller (GalleryIndexerWorker) catches it and returns Result.retry()
+            // instead of Result.success(). A silent return here would cause WorkManager to mark
+            // the work as permanently done (KEEP policy), preventing any future retry.
+            throw RuntimeException("One or more ML processors failed to initialize — will retry later.")
         }
 
         val totalCount = imagesToProcess.size
         var counter = 0
         progress.value = 0f
 
-        imagesToProcess.forEach { (mediaId, timestamp) ->
-            try {
-                val bitmap = ImageUtils.getBitmapFromUri(context, mediaId.toMediaUri())
-                if (bitmap != null) {
-                    val (features, text, faces) = withContext(Dispatchers.Default) {
-                        val featuresDeferred = async { imageEncoder.getImageFeatures(bitmap) }
-                        val textDeferred = async { ocrProcessor.recognizeText(bitmap) }
-                        val facesDeferred = async { faceDetector.detectFaces(bitmap) }
-                        Triple(
-                            featuresDeferred.await(),
-                            textDeferred.await(),
-                            facesDeferred.await()
-                        )
-                    }
+        try {
+            imagesToProcess.forEach { (mediaId, timestamp) ->
+                // Stop early if the worker has been cancelled by WorkManager
+                currentCoroutineContext().ensureActive()
 
-                    mediaDao.insertAll(
-                        listOf(MediaEntity(mediaId, timestamp, false, features, text))
-                    )
-
-                    // 1. Process Faces
-                    withContext(Dispatchers.Default) {
-                        faces.forEach { face ->
-                            val croppedImage = faceDetector.alignFace(bitmap, face)
-                            val faceFeatures = faceEncoder.getFaceFeatures(croppedImage)
-                            val normalizedFaceFeatures = VectorUtils.normalize(faceFeatures)
-
-                            val allPersons = personDao.getAllPersons()
-                            val bestMatch = allPersons.maxByOrNull {
-                                val avgVec = VectorUtils.normalize(
-                                    VectorUtils.divide(it.embedding, it.counter.toFloat())
+                try {
+                    val bitmap = ImageUtils.getBitmapFromUri(context, mediaId.toMediaUri())
+                    if (bitmap != null) {
+                        try {
+                            val (features, text, faces) = withContext(Dispatchers.Default) {
+                                val featuresDeferred =
+                                    async { imageEncoder.getImageFeatures(bitmap) }
+                                val textDeferred = async { ocrProcessor.recognizeText(bitmap) }
+                                val facesDeferred = async { faceDetector.detectFaces(bitmap) }
+                                Triple(
+                                    featuresDeferred.await(),
+                                    textDeferred.await(),
+                                    facesDeferred.await()
                                 )
-                                VectorUtils.dotProduct(normalizedFaceFeatures, avgVec)
                             }
 
-                            var personId: Long
-                            val thumbnail = ImageUtils.cropImage(bitmap, ImageUtils.scaleRect(face.boundingBox, 1.5F))
-                            val thumbnailSize = thumbnail.width * thumbnail.height
-                            if (bestMatch == null || VectorUtils.dotProduct(
-                                    normalizedFaceFeatures,
-                                    VectorUtils.normalize(
-                                        VectorUtils.divide(
-                                            bestMatch.embedding,
-                                            bestMatch.counter.toFloat()
+                            mediaDao.insertAll(
+                                listOf(MediaEntity(mediaId, timestamp, false, features, text))
+                            )
+
+                            // 1. Process Faces
+                            withContext(Dispatchers.Default) {
+                                faces.forEach { face ->
+                                    val croppedImage = faceDetector.alignFace(bitmap, face)
+                                    val faceFeatures = faceEncoder.getFaceFeatures(croppedImage)
+                                    val normalizedFaceFeatures =
+                                        VectorUtils.normalize(faceFeatures)
+
+                                    val allPersons = personDao.getAllPersons()
+                                    val bestMatch = allPersons.maxByOrNull {
+                                        val avgVec = VectorUtils.normalize(
+                                            VectorUtils.divide(
+                                                it.embedding,
+                                                it.counter.toFloat()
+                                            )
                                         )
+                                        VectorUtils.dotProduct(normalizedFaceFeatures, avgVec)
+                                    }
+
+                                    var personId: Long
+                                    val thumbnail = ImageUtils.cropImage(
+                                        bitmap,
+                                        ImageUtils.scaleRect(face.boundingBox, 1.5F)
                                     )
-                                ) < FACE_MATCH_THRESHOLD
-                            ) {
-                                personId = (personDao.countPersons() + 1).toLong()
-                                val thumbnailPath = ImageUtils.createThumbnail(context, thumbnail)
-                                personDao.insertPerson(
-                                    PersonEntity(
-                                        personId,
-                                        "#p$personId",
-                                        faceFeatures,
-                                        1,
-                                        thumbnailPath,
-                                        thumbnailSize
-                                    )
-                                )
-                            } else {
-                                personId = bestMatch.id
-                                if (!personDao.crossRefExists(mediaId, personId)) {
-                                    val newEmbedding =
-                                        VectorUtils.add(bestMatch.embedding, faceFeatures)
-                                    personDao.updatePersonEmbedding(personId, newEmbedding)
-                                    personDao.incrementPersonCounter(personId)
-                                    if (thumbnailSize > bestMatch.thumbnailSize) {
-                                        ImageUtils.deleteThumbnail(bestMatch.thumbnailPath)
+                                    val thumbnailSize = thumbnail.width * thumbnail.height
+                                    if (bestMatch == null || VectorUtils.dotProduct(
+                                            normalizedFaceFeatures,
+                                            VectorUtils.normalize(
+                                                VectorUtils.divide(
+                                                    bestMatch.embedding,
+                                                    bestMatch.counter.toFloat()
+                                                )
+                                            )
+                                        ) < FACE_MATCH_THRESHOLD
+                                    ) {
+                                        personId = (personDao.countPersons() + 1).toLong()
                                         val thumbnailPath =
                                             ImageUtils.createThumbnail(context, thumbnail)
-                                        personDao.updatePersonThumbnail(
+                                        personDao.insertPerson(
+                                            PersonEntity(
+                                                personId,
+                                                "#p$personId",
+                                                faceFeatures,
+                                                1,
+                                                thumbnailPath,
+                                                thumbnailSize
+                                            )
+                                        )
+                                    } else {
+                                        personId = bestMatch.id
+                                        if (!personDao.crossRefExists(mediaId, personId)) {
+                                            val newEmbedding =
+                                                VectorUtils.add(
+                                                    bestMatch.embedding,
+                                                    faceFeatures
+                                                )
+                                            personDao.updatePersonEmbedding(
+                                                personId,
+                                                newEmbedding
+                                            )
+                                            personDao.incrementPersonCounter(personId)
+                                            if (thumbnailSize > bestMatch.thumbnailSize) {
+                                                ImageUtils.deleteThumbnail(bestMatch.thumbnailPath)
+                                                val thumbnailPath =
+                                                    ImageUtils.createThumbnail(context, thumbnail)
+                                                personDao.updatePersonThumbnail(
+                                                    personId,
+                                                    thumbnailPath,
+                                                    thumbnailSize
+                                                )
+                                            }
+                                        }
+                                    }
+                                    personDao.insertCrossRef(
+                                        MediaPersonCrossRef(
+                                            mediaId,
                                             personId,
-                                            thumbnailPath,
-                                            thumbnailSize
+                                            faceFeatures
+                                        )
+                                    )
+                                }
+
+                                // 2. Process Categories (Auto-assignment logic)
+                                val allCategories = categoryDao.getAllCategories()
+                                allCategories.forEach { category ->
+                                    val similarity =
+                                        VectorUtils.dotProduct(features, category.embedding)
+                                    if (similarity > CATEGORY_MATCH_THRESHOLD) {
+                                        categoryDao.insertCrossRef(
+                                            MediaCategoryCrossRef(
+                                                mediaId,
+                                                category.id,
+                                                similarity
+                                            )
                                         )
                                     }
                                 }
                             }
-                            personDao.insertCrossRef(
-                                MediaPersonCrossRef(
-                                    mediaId,
-                                    personId,
-                                    faceFeatures
-                                )
-                            )
-                        }
 
-                        // 2. Process Categories (Auto-assignment logic)
-                        val allCategories = categoryDao.getAllCategories()
-                        allCategories.forEach { category ->
-                            val similarity = VectorUtils.dotProduct(features, category.embedding)
-                            if (similarity > CATEGORY_MATCH_THRESHOLD) {
-                                categoryDao.insertCrossRef(
-                                    MediaCategoryCrossRef(
-                                        mediaId,
-                                        category.id,
-                                        similarity
-                                    )
-                                )
-                            }
+                            counter++
+                            Log.d(
+                                "GalleryService",
+                                "Processed: $counter / $totalCount (ID: $mediaId)"
+                            )
+                            progress.value = counter / totalCount.toFloat()
+                            onProgress(counter, totalCount)
+                        } finally {
+                            bitmap.recycle()
                         }
                     }
-
-                    counter++
-                    Log.d("GalleryService", "Processed: $counter / $totalCount (ID: $mediaId)")
-                    progress.value = counter / totalCount.toFloat()
-                    onProgress(counter, totalCount)
+                } catch (e: Exception) {
+                    Log.e("GalleryService", "Error processing image $mediaId", e)
                 }
-            } catch (e: Exception) {
-                Log.e("GalleryService", "Error processing image $mediaId", e)
             }
+        } finally {
+            // Always release native resources, even if the coroutine was cancelled
+            progress.value = null
+            imageEncoder.close()
+            ocrProcessor.close()
+            faceDetector.close()
+            faceEncoder.close()
         }
-
-        progress.value = null
-
-        imageEncoder.close()
-        ocrProcessor.close()
-        faceDetector.close()
-        faceEncoder.close()
     }
 
     /**

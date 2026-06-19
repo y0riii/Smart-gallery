@@ -157,7 +157,7 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
                     // Feature 1: selection params from ViewModel
                     selectedUris = viewModel.selectedUris,
                     isSelecting = viewModel.isSelecting,
-                    onLongPress = { uri -> viewModel.startSelection(uri) },
+                    onUpdateSelection = { viewModel.updateSelection(it) },
                     onToggleSelect = { uri -> viewModel.toggleSelection(uri) },
                     onImageClick = { index -> viewModel.openFullScreen(index) },
                     // Feature 3: null hides the button

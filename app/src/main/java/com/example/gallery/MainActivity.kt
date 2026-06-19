@@ -1,9 +1,13 @@
 package com.example.gallery
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -56,7 +60,7 @@ import com.example.gallery.components.CategoryFoldersScreen
 import com.example.gallery.components.GalleryScreen
 import com.example.gallery.components.PeopleFoldersScreen
 import com.example.gallery.db.AppDatabase
-import com.example.gallery.db.GalleryPeriodicTriggerWorker
+import com.example.gallery.db.GalleryIndexerWorker
 import com.example.gallery.folders.AlbumsFolderRepository
 import com.example.gallery.folders.CategoryFolderRepository
 import com.example.gallery.folders.PersonFolderRepository
@@ -106,11 +110,34 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         scheduleBackgroundIndexing()
+        requestBatteryOptimizationExemptionOnce()
         setContent {
             GalleryTheme {
                 GalleryApp(galleryViewModel, peopleViewModel, categoryViewModel, albumsViewModel)
             }
         }
+    }
+
+    /**
+     * Requests battery optimization exemption exactly once (on first app open).
+     * Uses a SharedPreferences flag so the system dialog is never shown again
+     * after the user has dismissed or accepted it.
+     */
+    private fun requestBatteryOptimizationExemptionOnce() {
+        val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
+        val alreadyAsked = prefs.getBoolean("battery_opt_asked", false)
+        if (alreadyAsked) return
+
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            startActivity(intent)
+        }
+
+        // Mark as asked regardless of user choice — we never ask again
+        prefs.edit().putBoolean("battery_opt_asked", true).apply()
     }
 
     override fun onStart() {
@@ -135,7 +162,7 @@ class MainActivity : ComponentActivity() {
             .build()
 
         val indexingRequest =
-            PeriodicWorkRequestBuilder<GalleryPeriodicTriggerWorker>(12, TimeUnit.HOURS)
+            PeriodicWorkRequestBuilder<GalleryIndexerWorker>(12, TimeUnit.HOURS)
                 .setConstraints(constraints)
                 .build()
 

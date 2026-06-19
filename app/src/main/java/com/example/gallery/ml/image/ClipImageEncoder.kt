@@ -111,6 +111,8 @@ class ClipImageEncoder(context: Context) : AutoCloseable {
 
     override fun close() {
         session.close()
-        env.close()
+        // Do NOT call env.close() — OrtEnvironment.getEnvironment() is a global singleton.
+        // Closing it here destroys the shared native handle, causing a double-free crash
+        // when FaceEncoder (or any other encoder) later calls env.close() on the same instance.
     }
 }
