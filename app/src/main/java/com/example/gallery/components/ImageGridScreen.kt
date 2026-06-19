@@ -58,7 +58,7 @@ fun ImageGridScreen(
     // ── Feature 1: selection state passed in from the parent ─────────────────
     selectedUris: Set<Uri> = emptySet(),
     isSelecting: Boolean = false,
-    onLongPress: (Uri) -> Unit = {},
+    onUpdateSelection: (Set<Uri>) -> Unit = {},
     onToggleSelect: (Uri) -> Unit = {},
     onCancelSelection: () -> Unit = {},
     onDeleteSelected: () -> Unit = {},
@@ -98,7 +98,7 @@ fun ImageGridScreen(
                 // Feature 1: selection params
                 selectedUris = selectedUris,
                 isSelecting = isSelecting,
-                onLongPress = onLongPress,
+                onUpdateSelection = onUpdateSelection,
                 onToggleSelect = onToggleSelect,
                 onImageClick = { index -> onIndexChanged(index) },
                 // Feature 3: null hides the button; non-null shows it on every cell

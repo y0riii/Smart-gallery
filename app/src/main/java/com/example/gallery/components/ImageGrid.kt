@@ -43,8 +43,17 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import coil3.compose.AsyncImage
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.geometry.Offset
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlin.math.max
+import kotlin.math.min
 import com.example.gallery.ui.theme.AppConfig
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ImageGrid(
@@ -57,7 +66,7 @@ fun ImageGrid(
     // ── Feature 1: selection state ───────────────────────────────────────────
     selectedUris: Set<Uri> = emptySet(),
     isSelecting: Boolean = false,
-    onLongPress: (Uri) -> Unit = {},
+    onUpdateSelection: (Set<Uri>) -> Unit = {},
     onToggleSelect: (Uri) -> Unit = {},
     // ── Feature 3: preview button (null = hidden) ────────────────────────────
     onPreviewImage: ((Int) -> Unit)? = null,
@@ -65,6 +74,22 @@ fun ImageGrid(
 ) {
     // Accumulates scale delta between column-count snaps (Feature 2)
     var zoomAccumulator by remember { mutableStateOf(1f) }
+
+    val currentSelectedUris by rememberUpdatedState(selectedUris)
+    val currentImages by rememberUpdatedState(images)
+
+    var dragStartIndex by remember { mutableStateOf<Int?>(null) }
+    var initialSelection by remember { mutableStateOf<Set<Uri>>(emptySet()) }
+    var autoScrollSpeed by remember { mutableStateOf(0f) }
+
+    LaunchedEffect(autoScrollSpeed) {
+        if (autoScrollSpeed != 0f) {
+            while (isActive) {
+                gridState.scrollBy(autoScrollSpeed)
+                delay(16)
+            }
+        }
+    }
 
     val animatedCellPadding by animateDpAsState(
         targetValue = when {
@@ -93,17 +118,12 @@ fun ImageGrid(
                             val zoom = event.calculateZoom()
                             if (zoom != 1f) {
                                 zoomAccumulator *= zoom
-                                // Consume the event so the grid doesn't try to scroll
                                 event.changes.forEach { it.consume() }
-
-                                // Snap to a new column count when threshold is crossed
                                 when {
-                                    // Pinching in → fewer columns (larger cells)
                                     zoomAccumulator > 1.25f && columnCount > 2 -> {
                                         onColumnCountChange(columnCount - 1)
                                         zoomAccumulator = 1f
                                     }
-                                    // Pinching out → more columns (smaller cells)
                                     zoomAccumulator < 0.80f && columnCount < 6 -> {
                                         onColumnCountChange(columnCount + 1)
                                         zoomAccumulator = 1f
@@ -111,12 +131,70 @@ fun ImageGrid(
                                 }
                             }
                         } else {
-                            // Single finger: reset accumulator, do not consume
                             zoomAccumulator = 1f
                         }
                     } while (event.changes.any { it.pressed })
                     zoomAccumulator = 1f
                 }
+            }
+            .pointerInput(Unit) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { offset ->
+                        val index = gridState.getIndexAtPosition(offset)
+                        if (index != null && index < currentImages.size) {
+                            dragStartIndex = index
+                            initialSelection = currentSelectedUris
+                            val uri = currentImages[index]
+
+                            val newSelection = if (uri in initialSelection) {
+                                initialSelection - uri
+                            } else {
+                                initialSelection + uri
+                            }
+                            onUpdateSelection(newSelection)
+                        }
+                    },
+                    onDrag = { change, _ ->
+                        val startIndex = dragStartIndex ?: return@detectDragGesturesAfterLongPress
+                        val currentIndex = gridState.getIndexAtPosition(change.position)
+
+                        val y = change.position.y
+                        val viewportHeight = size.height
+                        val threshold = 100.dp.toPx()
+                        val maxScrollSpeed = 20.dp.toPx()
+
+                        if (y < threshold) {
+                            autoScrollSpeed = -((threshold - y) / threshold) * maxScrollSpeed
+                        } else if (y > viewportHeight - threshold) {
+                            autoScrollSpeed = ((y - (viewportHeight - threshold)) / threshold) * maxScrollSpeed
+                        } else {
+                            autoScrollSpeed = 0f
+                        }
+
+                        if (currentIndex != null && currentIndex < currentImages.size) {
+                            val isAdding = currentImages[startIndex] !in initialSelection
+
+                            val rangeUris = currentImages.filterIndexed { index, _ ->
+                                isIndexSelected(index, startIndex, currentIndex, columnCount)
+                            }.toSet()
+
+                            val newSelection = if (isAdding) {
+                                initialSelection + rangeUris
+                            } else {
+                                initialSelection - rangeUris
+                            }
+                            onUpdateSelection(newSelection)
+                        }
+                    },
+                    onDragEnd = {
+                        dragStartIndex = null
+                        autoScrollSpeed = 0f
+                    },
+                    onDragCancel = {
+                        dragStartIndex = null
+                        autoScrollSpeed = 0f
+                    }
+                )
             }
     ) {
         LazyVerticalGrid(
@@ -142,19 +220,15 @@ fun ImageGrid(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .combinedClickable(
-                                onClick = {
-                                    if (isSelecting) {
-                                        // Feature 1: tapping while selecting toggles the image
-                                        onToggleSelect(uri)
-                                    } else {
-                                        // Normal mode: open full screen
-                                        onImageClick(index)
-                                    }
-                                },
-                                // Feature 1: long press enters selection mode
-                                onLongClick = { onLongPress(uri) }
-                            ),
+                            .clickable {
+                                if (isSelecting) {
+                                    // Feature 1: tapping while selecting toggles the image
+                                    onToggleSelect(uri)
+                                } else {
+                                    // Normal mode: open full screen
+                                    onImageClick(index)
+                                }
+                            },
                         contentScale = ContentScale.Crop, // Always fill the square cell
                     )
 
@@ -229,4 +303,24 @@ fun ImageGridPreview() {
             )
         }
     }
+}
+
+fun LazyGridState.getIndexAtPosition(hitPoint: Offset): Int? {
+    return layoutInfo.visibleItemsInfo.firstOrNull { itemInfo ->
+        val offset = itemInfo.offset
+        val size = itemInfo.size
+        hitPoint.x >= offset.x && hitPoint.x <= offset.x + size.width &&
+                hitPoint.y >= offset.y && hitPoint.y <= offset.y + size.height
+    }?.index
+}
+
+private fun isIndexSelected(
+    index: Int,
+    startIndex: Int,
+    currentIndex: Int,
+    @Suppress("UNUSED_PARAMETER") columnCount: Int
+): Boolean {
+    val lo = min(startIndex, currentIndex)
+    val hi = max(startIndex, currentIndex)
+    return index in lo..hi
 }
