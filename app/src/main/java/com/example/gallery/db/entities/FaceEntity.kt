@@ -22,8 +22,10 @@ data class FaceEntity(
     val faceId: Long = 0,
     val mediaId: Long,
     val embedding: FloatArray,
-    val thumbnailPath: String,
-    val thumbnailSize: Int,
+    val boxLeft: Int,
+    val boxTop: Int,
+    val boxRight: Int,
+    val boxBottom: Int,
     val personId: Long? = null
 ) {
     override fun equals(other: Any?): Boolean {

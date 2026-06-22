@@ -14,7 +14,6 @@ import com.example.gallery.db.entities.FaceEntity
 import com.example.gallery.db.entities.FtsMediaEntity
 import com.example.gallery.db.entities.MediaCategoryCrossRef
 import com.example.gallery.db.entities.MediaEntity
-import com.example.gallery.db.entities.MediaPersonCrossRef
 import com.example.gallery.db.entities.PersonEntity
 
 @Database(
@@ -22,12 +21,11 @@ import com.example.gallery.db.entities.PersonEntity
         MediaEntity::class,
         FtsMediaEntity::class,
         PersonEntity::class,
-        MediaPersonCrossRef::class,
         CategoryEntity::class,
         MediaCategoryCrossRef::class,
         FaceEntity::class
     ],
-    version = 15,
+    version = 20,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

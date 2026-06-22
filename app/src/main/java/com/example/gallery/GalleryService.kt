@@ -3,6 +3,7 @@ package com.example.gallery
 import android.app.PendingIntent
 import android.content.ContentUris
 import android.content.Context
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -17,8 +18,10 @@ import com.example.gallery.db.entities.CategoryEntity
 import com.example.gallery.db.entities.FaceEntity
 import com.example.gallery.db.entities.MediaCategoryCrossRef
 import com.example.gallery.db.entities.MediaEntity
+import com.example.gallery.db.entities.PersonEntity
 import com.example.gallery.ml.face.FaceDetectionProcessor
 import com.example.gallery.ml.face.FaceEncoder
+import com.example.gallery.ml.face.ChineseWhispers
 import com.example.gallery.ml.image.ClipImageEncoder
 import com.example.gallery.ml.ocr.OcrProcessor
 import com.example.gallery.ml.text.ClipTextEncoder
@@ -62,7 +65,9 @@ class GalleryService(private val context: Context) {
     }
 
     companion object {
+        private const val TAG = "GalleryService"
         private const val CATEGORY_MATCH_THRESHOLD = 0.22f
+        private const val ASSIGN_THRESHOLD = 0.45f
 
         val progress = MutableStateFlow<Float?>(null)
     }
@@ -209,22 +214,21 @@ class GalleryService(private val context: Context) {
                         listOf(MediaEntity(mediaId, timestamp, false, features, text))
                     )
 
-                    // 1. Save face embeddings to FaceEntity (clustering happens offline later)
+                    // 1. Save face embeddings + bounding box to FaceEntity (clustering happens offline later)
                     withContext(Dispatchers.Default) {
                         faces.forEach { face ->
                             val croppedImage = faceDetector.alignFace(bitmap, face)
                             val faceFeatures = faceEncoder.getFaceFeatures(croppedImage)
-
-                            val thumbnail = ImageUtils.cropImage(bitmap, face.boundingBox)
-                            val thumbnailSize = thumbnail.width * thumbnail.height
-                            val thumbnailPath = ImageUtils.createThumbnail(context, thumbnail)
+                            val box = ImageUtils.scaleRect(face.boundingBox, 1.5f)
 
                             faceDao.insertFace(
                                 FaceEntity(
                                     mediaId = mediaId,
                                     embedding = faceFeatures,
-                                    thumbnailPath = thumbnailPath,
-                                    thumbnailSize = thumbnailSize
+                                    boxLeft = box.left,
+                                    boxTop = box.top,
+                                    boxRight = box.right,
+                                    boxBottom = box.bottom
                                 )
                             )
                         }
@@ -284,11 +288,10 @@ class GalleryService(private val context: Context) {
                     personDao.updateEmbedding(person.id, updatedEmbedding)
                     personDao.decrementPersonCounter(person.id)
                 } else {
-                    // only one image left for the person, delete the image entirely
-                    personDao.deletePerson(person.id)
+                    // only one face left for the person, delete the person entirely
                     ImageUtils.deleteThumbnail(person.thumbnailPath)
+                    personDao.deletePerson(person.id)
                 }
-
             }
         }
 
@@ -302,6 +305,205 @@ class GalleryService(private val context: Context) {
         }
     }
 
+
+    /**
+     * Performs face clustering on all faces in the database.
+     *
+     * - First run (no persons exist): runs full Chinese Whispers clustering.
+     * - Subsequent runs: assigns new (unassigned) faces to existing persons
+     *   via sequential centroid comparison, or creates new singleton persons.
+     * - After clustering, generates person thumbnails from face bounding boxes.
+     */
+    suspend fun createClusters() {
+        withContext(Dispatchers.IO) {
+            val allFaces = faceDao.getAllFaces()
+            Log.d(TAG, "Loaded ${allFaces.size} faces for clustering")
+
+            if (allFaces.isEmpty()) {
+                Log.d(TAG, "No faces to cluster, skipping")
+                return@withContext
+            }
+
+            val newFaces = allFaces.filter { it.personId == null }
+            val allPersons = personDao.getAllPersons()
+
+            if (allPersons.isEmpty()) {
+                // ── FIRST RUN: Full Chinese Whispers on all faces ──
+                Log.d(TAG, "First run: no persons exist, running full Chinese Whispers")
+                faceDao.clearAllPersonAssignments()
+
+                val normalizedFaces = allFaces.map { VectorUtils.normalize(it.embedding) }
+                val clusters = ChineseWhispers.cluster(normalizedFaces)
+                var personCounter = 0
+
+                for (cluster in clusters) {
+                    personCounter++
+                    if (cluster.isEmpty()) continue
+
+                    val personName = "#p$personCounter"
+
+                    // Compute sum of normalized embeddings for this cluster
+                    val dim = allFaces.first().embedding.size
+                    val sum = FloatArray(dim)
+                    for (faceIdx in cluster) {
+                        val norm = normalizedFaces[faceIdx]
+                        for (d in norm.indices) sum[d] += norm[d]
+                    }
+
+                    // thumbnail creation
+                    val clusterFaces = cluster.map { allFaces[it] }
+                    val bestFace = clusterFaces.maxByOrNull {
+                        (it.boxRight - it.boxLeft) * (it.boxBottom - it.boxTop)
+                    } ?: continue
+
+                    val boxArea = (bestFace.boxRight - bestFace.boxLeft) * (bestFace.boxBottom - bestFace.boxTop)
+                    val bitmap = ImageUtils.getBitmapFromUri(context, bestFace.mediaId.toMediaUri())
+                    val rect = Rect(bestFace.boxLeft, bestFace.boxTop, bestFace.boxRight, bestFace.boxBottom)
+                    val cropped = ImageUtils.cropImage(bitmap!!, rect)
+                    val thumbnailPath = ImageUtils.createThumbnail(context, cropped)
+
+                    val personId = personDao.insertPerson(
+                        PersonEntity(
+                            id = personCounter.toLong(),
+                            name = personName,
+                            thumbnailPath = thumbnailPath,
+                            thumbnailSize = boxArea,
+                            Embedding = sum,
+                            count = cluster.size
+                        )
+                    )
+
+                    for (faceIdx in cluster) {
+                        val face = allFaces[faceIdx]
+                        faceDao.updateFacePersonId(face.faceId, personId)
+                    }
+
+
+
+                    Log.d(TAG, "Created person '$personName' (id=$personId): ${cluster.size} faces")
+                }
+
+                Log.d(TAG, "First run complete: ${clusters.size} persons created from ${allFaces.size} faces")
+            } else {
+                // ── SUBSEQUENT RUNS: Incremental centroid assignment ──
+                if (newFaces.isEmpty()) {
+                    Log.d(TAG, "No new faces to process")
+                } else {
+                    Log.d(TAG, "Incremental run: ${newFaces.size} new faces, ${allPersons.size} existing persons")
+
+                    var assignedCount = 0
+                    var newPersonCount = 0
+
+                    for (face in newFaces) {
+                        val normEmb = VectorUtils.normalize(face.embedding)
+                        val boxArea = (face.boxRight - face.boxLeft) * (face.boxBottom - face.boxTop)
+                        val bitmap = ImageUtils.getBitmapFromUri(context, face.mediaId.toMediaUri())
+                        val rect = Rect(face.boxLeft, face.boxTop, face.boxRight, face.boxBottom)
+                        val cropped = ImageUtils.cropImage(bitmap!!, rect)
+                        val thumbnailPath = ImageUtils.createThumbnail(context, cropped)
+
+                        val bestMatch = allPersons.maxByOrNull {
+                            val avgVec = VectorUtils.normalize(
+                                VectorUtils.divide(it.Embedding, it.count.toFloat())
+                            )
+                            VectorUtils.dotProduct(normEmb, avgVec)
+                        }
+
+                        val personId: Long
+                        if (bestMatch == null || VectorUtils.dotProduct(
+                                normEmb,
+                                VectorUtils.normalize(
+                                    VectorUtils.divide(
+                                        bestMatch.Embedding,
+                                        bestMatch.count.toFloat()
+                                    )
+                                )
+                            ) < ASSIGN_THRESHOLD
+                        ) {
+                            personId = (personDao.countPersons() + 1).toLong()
+                            personDao.insertPerson(
+                                PersonEntity(
+                                    id = personId,
+                                    name = "#p$personId",
+                                    thumbnailPath = thumbnailPath,
+                                    thumbnailSize = boxArea,
+                                    Embedding = normEmb,
+                                    count = 1
+                                )
+                            )
+                            newPersonCount++
+                            Log.d(TAG, "Created new person '#p$personId' (id=$personId) for face ${face.faceId}")
+                        } else {
+                            personId = bestMatch.id
+                            val newEmbedding = VectorUtils.add(bestMatch.Embedding, normEmb)
+                            personDao.updateEmbedding(personId, newEmbedding)
+                            personDao.incrementPersonCounter(personId)
+                            if (boxArea > bestMatch.thumbnailSize){
+                                personDao.updatePersonThumbnail(personId, thumbnailPath, boxArea)
+                            }
+
+                            assignedCount++
+                            Log.d(TAG, "Assigned face ${face.faceId} to person $personId with name: ${bestMatch.name}")
+                        }
+                        faceDao.updateFacePersonId(face.faceId, personId)
+
+                    }
+
+                    Log.d(TAG, "Incremental run complete: $assignedCount assigned to existing, $newPersonCount new persons created")
+                }
+            }
+
+            // ── Generate person thumbnails from face bounding boxes ──
+//            generatePersonThumbnails()
+        }
+    }
+
+    /**
+     * For each person, finds the face with the largest bounding box area,
+     * loads the source bitmap, crops it, and creates a thumbnail.
+     */
+    private suspend fun generatePersonThumbnails() {
+        val allPersons = personDao.getAllPersons()
+        val allFaces = faceDao.getAllFaces()
+
+        // Group faces by personId
+        val facesByPerson = allFaces
+            .filter { it.personId != null }
+            .groupBy { it.personId!! }
+
+        for (person in allPersons) {
+            val faces = facesByPerson[person.id] ?: continue
+
+            // Pick the face with the largest bounding box area
+            val bestFace = faces.maxByOrNull {
+                (it.boxRight - it.boxLeft) * (it.boxBottom - it.boxTop)
+            } ?: continue
+
+            val boxArea = (bestFace.boxRight - bestFace.boxLeft) * (bestFace.boxBottom - bestFace.boxTop)
+
+            // Skip if person already has a thumbnail at least as large
+            if (person.thumbnailPath.isNotEmpty() && person.thumbnailSize >= boxArea) {
+                continue
+            }
+
+            // Delete old thumbnail if it exists
+            if (person.thumbnailPath.isNotEmpty()) {
+                ImageUtils.deleteThumbnail(person.thumbnailPath)
+            }
+
+            // Load bitmap from media, crop, and save thumbnail
+            val bitmap = ImageUtils.getBitmapFromUri(context, bestFace.mediaId.toMediaUri())
+            if (bitmap != null) {
+                val rect = Rect(bestFace.boxLeft, bestFace.boxTop, bestFace.boxRight, bestFace.boxBottom)
+                val cropped = ImageUtils.cropImage(bitmap, rect)
+                val thumbnailPath = ImageUtils.createThumbnail(context, cropped)
+                personDao.updatePersonThumbnail(person.id, thumbnailPath, boxArea)
+                Log.d(TAG, "Generated thumbnail for person ${person.id} (name=${person.name})")
+            } else {
+                Log.w(TAG, "Could not load bitmap for media ${bestFace.mediaId} to create thumbnail for person ${person.id}")
+            }
+        }
+    }
 
     suspend fun getAllDeviceImages(): List<Uri> =
         withContext(Dispatchers.IO) {
