@@ -24,12 +24,14 @@ class VectorUtils {
         }
 
         fun divide(vector: FloatArray, scalar: Float): FloatArray {
+
             val result = FloatArray(vector.size)
             for (i in vector.indices) {
                 result[i] = vector[i] / scalar
             }
             return result
         }
+
 
         fun add(vecA: FloatArray, vecB: FloatArray): FloatArray {
             val result = FloatArray(vecA.size)

@@ -5,9 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
-import com.example.gallery.db.Converters
 import com.example.gallery.db.entities.MediaEntity
-import com.example.gallery.db.entities.MediaPersonCrossRef
 import com.example.gallery.db.entities.PersonEntity
 import com.example.gallery.db.previews.PersonMediaRef
 import com.example.gallery.db.previews.PersonPreview
@@ -27,7 +25,7 @@ interface PersonDao {
     suspend fun getAllPersons(): List<PersonEntity>
 
     @Query("SELECT * FROM person WHERE id = :id")
-    suspend fun getPersonById(id: Long): PersonEntity?
+    suspend fun getPersonById(id: Long?): PersonEntity?
 
     @Query("SELECT name FROM person")
     suspend fun getAllNames(): List<String>
@@ -35,7 +33,7 @@ interface PersonDao {
     @Query(
         """
         SELECT name FROM person
-        ORDER BY counter DESC, name ASC
+        ORDER BY name ASC
     """
     )
     fun getAllNamesFlow(): Flow<List<String>>
@@ -61,50 +59,42 @@ interface PersonDao {
     )
     fun getAllNamesSortedFlow(): Flow<List<String>>
 
-    @Query("UPDATE person SET embedding = :newEmbedding WHERE id = :personId")
-    suspend fun updatePersonEmbeddingRaw(personId: Long, newEmbedding: ByteArray)
+    @Query("UPDATE person SET Embedding = :embedding WHERE id = :personId")
+    suspend fun updateEmbeddingRaw(personId: Long, embedding: ByteArray)
 
-    suspend fun updatePersonEmbedding(personId: Long, embedding: FloatArray) {
-        val bytes = Converters().fromFloatArray(embedding)
-        updatePersonEmbeddingRaw(personId, bytes)
+    suspend fun updateEmbedding(personId: Long, embedding: FloatArray) {
+        val buffer = java.nio.ByteBuffer.allocate(embedding.size * 4)
+        buffer.asFloatBuffer().put(embedding)
+        updateEmbeddingRaw(personId, buffer.array())
     }
 
-    @Query("UPDATE person SET counter = counter + 1 WHERE id = :personId")
+    @Query("UPDATE person SET count = count + 1 WHERE id = :personId")
     suspend fun incrementPersonCounter(personId: Long)
 
-    @Query("UPDATE person SET counter = CASE WHEN counter > 0 THEN counter - 1 ELSE 0 END WHERE id = :personId")
+    @Query("UPDATE person SET count = CASE WHEN count > 0 THEN count - 1 ELSE 0 END WHERE id = :personId")
     suspend fun decrementPersonCounter(personId: Long)
 
-    @Query("UPDATE person SET counter = :newCount WHERE id = :personId")
+    @Query("UPDATE person SET count = :newCount WHERE id = :personId")
     suspend fun updatePersonCounter(personId: Long, newCount: Long)
 
-    @Query("UPDATE person SET thumbnailPath = :thumbnailPath, thumbnailSize = :thumbnailSize WHERE id = :personId")
-    suspend fun updatePersonThumbnail(personId: Long, thumbnailPath: String, thumbnailSize: Int)
-
-    @Query("SELECT * FROM person WHERE name = :name LIMIT 1")
-    suspend fun getPersonByName(name: String): PersonEntity?
-
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertCrossRef(ref: MediaPersonCrossRef)
-
-    @Query("SELECT * FROM media_person_join WHERE mediaId = :mediaId")
-    suspend fun getCrossRefsForMedia(mediaId: Long): List<MediaPersonCrossRef>
+    @Query("DELETE FROM person")
+    suspend fun deleteAllPersons()
 
     @Transaction
     @Query(
         """
-        SELECT p.* FROM person AS p
-        JOIN media_person_join AS j ON p.id = j.personId
-        WHERE j.mediaId = :mediaId
+        SELECT DISTINCT p.* FROM person AS p
+        JOIN faces AS f ON p.id = f.personId
+        WHERE f.mediaId = :mediaId
     """
     )
     suspend fun getPersonsForImage(mediaId: Long): List<PersonEntity>
 
     @Query(
         """
-        SELECT j.mediaId FROM media_person_join AS j
-        JOIN media_items AS m ON j.mediaId = m.mediaId
-        WHERE j.personId = :personId
+        SELECT DISTINCT f.mediaId FROM faces AS f
+        JOIN media_items AS m ON f.mediaId = m.mediaId
+        WHERE f.personId = :personId
         ORDER BY m.timestampMs DESC
     """
     )
@@ -113,9 +103,9 @@ interface PersonDao {
     @Transaction
     @Query(
         """
-        SELECT m.* FROM media_items AS m
-        JOIN media_person_join AS j ON m.mediaId = j.mediaId
-        WHERE j.personId = :personId
+        SELECT DISTINCT m.* FROM media_items AS m
+        JOIN faces AS f ON m.mediaId = f.mediaId
+        WHERE f.personId = :personId
         ORDER BY m.timestampMs DESC
     """
     )
@@ -125,21 +115,22 @@ interface PersonDao {
     @Query(
         """
     SELECT m.* FROM media_items AS m
-    JOIN media_person_join AS j ON m.mediaId = j.mediaId
-    JOIN person AS f ON j.personId = f.id
-    WHERE f.name IN (:names)
+    JOIN faces AS fc ON m.mediaId = fc.mediaId
+    JOIN person AS p ON fc.personId = p.id
+    WHERE p.name IN (:names)
     GROUP BY m.mediaId
-    HAVING COUNT(DISTINCT f.name) = :count
+    HAVING COUNT(DISTINCT p.name) = :count
     """
     )
     suspend fun getImagesByNames(names: List<String>, count: Int): List<MediaEntity>
 
+
     @Query(
         """
-        SELECT j.mediaId FROM media_person_join AS j
-        JOIN person AS p ON j.personId = p.id
+        SELECT fc.mediaId FROM faces AS fc
+        JOIN person AS p ON fc.personId = p.id
         WHERE p.name IN (:names)
-        GROUP BY j.mediaId
+        GROUP BY fc.mediaId
         HAVING COUNT(DISTINCT p.name) = :count
     """
     )
@@ -150,16 +141,6 @@ interface PersonDao {
 
     @Query("DELETE FROM person WHERE id = :personId")
     suspend fun deletePerson(personId: Long)
-
-    @Query(
-        """
-    SELECT EXISTS(
-        SELECT 1 FROM media_person_join
-        WHERE mediaId = :mediaId AND personId = :personId
-    )
-    """
-    )
-    suspend fun crossRefExists(mediaId: Long, personId: Long): Boolean
 
     @Query(
         """
@@ -174,13 +155,15 @@ interface PersonDao {
 
     @Query(
         """
-        SELECT
+        SELECT DISTINCT
             personId,
             mediaId
-        FROM media_person_join
+        FROM faces
+        WHERE personId IS NOT NULL
         """
     )
     suspend fun getPersonMediaRefs(): List<PersonMediaRef>
+
 
     @Transaction
     suspend fun getPersonsWithMediaIds():
@@ -212,19 +195,20 @@ interface PersonDao {
 
     @Query(
         """
-        SELECT
+        SELECT DISTINCT
             personId,
             mediaId
-        FROM media_person_join
+        FROM faces
+        WHERE personId IS NOT NULL
         """
     )
     fun getPersonMediaRefsFlow(): Flow<List<PersonMediaRef>>
 
     @Query(
         """
-        SELECT j.mediaId FROM media_person_join AS j
-        JOIN media_items AS m ON j.mediaId = m.mediaId
-        WHERE j.personId = :personId
+        SELECT DISTINCT f.mediaId FROM faces AS f
+        JOIN media_items AS m ON f.mediaId = m.mediaId
+        WHERE f.personId = :personId
         ORDER BY m.timestampMs DESC
         """
     )
@@ -244,4 +228,9 @@ interface PersonDao {
             }
         }
     }
+    @Query("UPDATE person SET thumbnailPath = :thumbnailPath, thumbnailSize = :thumbnailSize WHERE id = :personId")
+    suspend fun updatePersonThumbnail(personId: Long, thumbnailPath: String, thumbnailSize: Int)
+
 }
+
+
