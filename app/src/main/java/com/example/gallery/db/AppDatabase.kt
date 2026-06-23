@@ -6,13 +6,14 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.example.gallery.db.daos.CategoryDao
+import com.example.gallery.db.daos.FaceDao
 import com.example.gallery.db.daos.MediaDao
 import com.example.gallery.db.daos.PersonDao
 import com.example.gallery.db.entities.CategoryEntity
+import com.example.gallery.db.entities.FaceEntity
 import com.example.gallery.db.entities.FtsMediaEntity
 import com.example.gallery.db.entities.MediaCategoryCrossRef
 import com.example.gallery.db.entities.MediaEntity
-import com.example.gallery.db.entities.MediaPersonCrossRef
 import com.example.gallery.db.entities.PersonEntity
 
 @Database(
@@ -20,11 +21,11 @@ import com.example.gallery.db.entities.PersonEntity
         MediaEntity::class,
         FtsMediaEntity::class,
         PersonEntity::class,
-        MediaPersonCrossRef::class,
         CategoryEntity::class,
-        MediaCategoryCrossRef::class
+        MediaCategoryCrossRef::class,
+        FaceEntity::class
     ],
-    version = 13,
+    version = 20,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -32,6 +33,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun mediaDao(): MediaDao
     abstract fun personDao(): PersonDao
     abstract fun categoryDao(): CategoryDao
+    abstract fun faceDao(): FaceDao
 
     companion object {
         @Volatile
@@ -49,7 +51,7 @@ abstract class AppDatabase : RoomDatabase() {
                 AppDatabase::class.java,
                 DB_NAME
             )
-                .fallbackToDestructiveMigration()
+                .fallbackToDestructiveMigration(false)
                 .build()
         }
     }

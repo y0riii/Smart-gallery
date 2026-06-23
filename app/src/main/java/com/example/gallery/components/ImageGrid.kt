@@ -54,6 +54,7 @@ import kotlinx.coroutines.isActive
 import kotlin.math.max
 import kotlin.math.min
 import com.example.gallery.ui.theme.AppConfig
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ImageGrid(
@@ -118,12 +119,17 @@ fun ImageGrid(
                             val zoom = event.calculateZoom()
                             if (zoom != 1f) {
                                 zoomAccumulator *= zoom
+                                // Consume the event so the grid doesn't try to scroll
                                 event.changes.forEach { it.consume() }
+
+                                // Snap to a new column count when threshold is crossed
                                 when {
+                                    // Pinching in → fewer columns (larger cells)
                                     zoomAccumulator > 1.25f && columnCount > 2 -> {
                                         onColumnCountChange(columnCount - 1)
                                         zoomAccumulator = 1f
                                     }
+                                    // Pinching out → more columns (smaller cells)
                                     zoomAccumulator < 0.80f && columnCount < 6 -> {
                                         onColumnCountChange(columnCount + 1)
                                         zoomAccumulator = 1f
@@ -131,6 +137,7 @@ fun ImageGrid(
                                 }
                             }
                         } else {
+                            // Single finger: reset accumulator, do not consume
                             zoomAccumulator = 1f
                         }
                     } while (event.changes.any { it.pressed })
