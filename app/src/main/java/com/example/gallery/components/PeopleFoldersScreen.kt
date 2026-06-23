@@ -29,7 +29,7 @@ fun PeopleFoldersScreen(peopleViewModel: PeopleViewModel, allNames: List<String>
     FoldersScreen(
         viewModel = peopleViewModel,
         allNames = sortedNames,           // Feature 4: sorted list replaces the raw allNames
-        modifier = Modifier.clickable {
+        onRenameClick = {
             showRenameDialog = true
         },
         folderGridHeader = {

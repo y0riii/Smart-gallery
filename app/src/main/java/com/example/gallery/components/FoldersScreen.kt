@@ -12,6 +12,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -66,7 +68,7 @@ import com.example.gallery.viewModels.FoldersViewModel
 fun FoldersScreen(
     viewModel: FoldersViewModel,
     allNames: List<String>,
-    modifier: Modifier = Modifier,
+    onRenameClick: (() -> Unit)? = null,
     canSort: Boolean = false,
     showDates: Boolean = true,
     folderGridHeader: @Composable ColumnScope.() -> Unit = {},
@@ -227,11 +229,32 @@ fun FoldersScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                         }
 
-                        Text(
-                            text = currentFolder.name,
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = modifier
-                        )
+                        // Feature: Show edit icon to make it clear the title is renamable
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = if (onRenameClick != null) {
+                                Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable(onClick = onRenameClick)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            } else {
+                                Modifier
+                            }
+                        ) {
+                            Text(
+                                text = currentFolder.name,
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            if (onRenameClick != null) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "Rename folder",
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
