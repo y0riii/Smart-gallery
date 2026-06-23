@@ -54,7 +54,6 @@ import kotlinx.coroutines.isActive
 import kotlin.math.max
 import kotlin.math.min
 import com.example.gallery.ui.theme.AppConfig
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ImageGrid(
@@ -119,17 +118,12 @@ fun ImageGrid(
                             val zoom = event.calculateZoom()
                             if (zoom != 1f) {
                                 zoomAccumulator *= zoom
-                                // Consume the event so the grid doesn't try to scroll
                                 event.changes.forEach { it.consume() }
-
-                                // Snap to a new column count when threshold is crossed
                                 when {
-                                    // Pinching in → fewer columns (larger cells)
                                     zoomAccumulator > 1.25f && columnCount > 2 -> {
                                         onColumnCountChange(columnCount - 1)
                                         zoomAccumulator = 1f
                                     }
-                                    // Pinching out → more columns (smaller cells)
                                     zoomAccumulator < 0.80f && columnCount < 6 -> {
                                         onColumnCountChange(columnCount + 1)
                                         zoomAccumulator = 1f
@@ -137,7 +131,6 @@ fun ImageGrid(
                                 }
                             }
                         } else {
-                            // Single finger: reset accumulator, do not consume
                             zoomAccumulator = 1f
                         }
                     } while (event.changes.any { it.pressed })
@@ -152,7 +145,6 @@ fun ImageGrid(
                             dragStartIndex = index
                             initialSelection = currentSelectedUris
                             val uri = currentImages[index]
-
                             val newSelection = if (uri in initialSelection) {
                                 initialSelection - uri
                             } else {
@@ -164,12 +156,10 @@ fun ImageGrid(
                     onDrag = { change, _ ->
                         val startIndex = dragStartIndex ?: return@detectDragGesturesAfterLongPress
                         val currentIndex = gridState.getIndexAtPosition(change.position)
-
                         val y = change.position.y
                         val viewportHeight = size.height
                         val threshold = 100.dp.toPx()
                         val maxScrollSpeed = 20.dp.toPx()
-
                         if (y < threshold) {
                             autoScrollSpeed = -((threshold - y) / threshold) * maxScrollSpeed
                         } else if (y > viewportHeight - threshold) {
@@ -177,14 +167,11 @@ fun ImageGrid(
                         } else {
                             autoScrollSpeed = 0f
                         }
-
                         if (currentIndex != null && currentIndex < currentImages.size) {
                             val isAdding = currentImages[startIndex] !in initialSelection
-
                             val rangeUris = currentImages.filterIndexed { index, _ ->
                                 isIndexSelected(index, startIndex, currentIndex, columnCount)
                             }.toSet()
-
                             val newSelection = if (isAdding) {
                                 initialSelection + rangeUris
                             } else {
@@ -317,7 +304,7 @@ fun LazyGridState.getIndexAtPosition(hitPoint: Offset): Int? {
         val offset = itemInfo.offset
         val size = itemInfo.size
         hitPoint.x >= offset.x && hitPoint.x <= offset.x + size.width &&
-                hitPoint.y >= offset.y && hitPoint.y <= offset.y + size.height
+        hitPoint.y >= offset.y && hitPoint.y <= offset.y + size.height
     }?.index
 }
 
