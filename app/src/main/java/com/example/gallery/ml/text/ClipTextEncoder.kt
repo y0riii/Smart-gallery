@@ -15,15 +15,8 @@ class ClipTextEncoder(context: Context) {
     private val tokenizer = ClipTokenizer(context)
 
     init {
-        val file = File(context.filesDir, "text_model.ort")
-        if (!file.exists()) {
-            context.assets.open("text_model.ort").use { inputStream ->
-                FileOutputStream(file).use { outputStream ->
-                    inputStream.copyTo(outputStream)
-                }
-            }
-        }
-        session = env.createSession(file.absolutePath)
+        val modelBytes = context.assets.open("text_model.ort").readBytes()
+        session = env.createSession(modelBytes)
     }
 
     fun getTextFeatures(text: String): FloatArray {

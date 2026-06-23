@@ -34,15 +34,8 @@ class FaceEncoder(context: Context) : AutoCloseable {
     private val session: OrtSession
 
     init {
-        val file = File(context.filesDir, "MobileFaceNet.ort")
-        if (!file.exists()) {
-            context.assets.open("MobileFaceNet.ort").use { inputStream ->
-                FileOutputStream(file).use { outputStream ->
-                    inputStream.copyTo(outputStream)
-                }
-            }
-        }
-        session = env.createSession(file.absolutePath)
+        val modelBytes = context.assets.open("MobileFaceNet.ort").readBytes()
+        session = env.createSession(modelBytes)
     }
 
     private fun preprocessImage(bitmap: Bitmap): OnnxTensor {

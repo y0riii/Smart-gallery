@@ -145,7 +145,6 @@ fun ImageGrid(
                             dragStartIndex = index
                             initialSelection = currentSelectedUris
                             val uri = currentImages[index]
-                            
                             val newSelection = if (uri in initialSelection) {
                                 initialSelection - uri
                             } else {
@@ -157,12 +156,10 @@ fun ImageGrid(
                     onDrag = { change, _ ->
                         val startIndex = dragStartIndex ?: return@detectDragGesturesAfterLongPress
                         val currentIndex = gridState.getIndexAtPosition(change.position)
-                        
                         val y = change.position.y
                         val viewportHeight = size.height
                         val threshold = 100.dp.toPx()
                         val maxScrollSpeed = 20.dp.toPx()
-                        
                         if (y < threshold) {
                             autoScrollSpeed = -((threshold - y) / threshold) * maxScrollSpeed
                         } else if (y > viewportHeight - threshold) {
@@ -170,14 +167,11 @@ fun ImageGrid(
                         } else {
                             autoScrollSpeed = 0f
                         }
-                        
                         if (currentIndex != null && currentIndex < currentImages.size) {
                             val isAdding = currentImages[startIndex] !in initialSelection
-                            
                             val rangeUris = currentImages.filterIndexed { index, _ ->
                                 isIndexSelected(index, startIndex, currentIndex, columnCount)
                             }.toSet()
-                            
                             val newSelection = if (isAdding) {
                                 initialSelection + rangeUris
                             } else {

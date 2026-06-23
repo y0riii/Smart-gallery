@@ -12,6 +12,8 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.example.gallery.GalleryService
 import com.example.gallery.R
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class GalleryIndexerWorker(
     appContext: Context,
@@ -25,25 +27,39 @@ class GalleryIndexerWorker(
 
     override suspend fun doWork(): Result {
         // Promote to a foreground worker so Android doesn't kill it mid-index.
-        setForeground(createForegroundInfo(0, 0))
+        // Wrapped in try-catch: on some devices setForeground throws if the OS
+        // hasn't allocated the foreground service slot yet.
+        try {
+            setForeground(createForegroundInfo(0, 0))
+        } catch (e: Exception) {
+            Log.e("GalleryIndexerWorker", "setForeground failed (non-fatal)", e)
+        }
+
+        val notificationManager = applicationContext
+            .getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         return try {
             val service = GalleryService(applicationContext)
             service.indexImagesBackground { processed, total ->
-                setProgress(
-                    workDataOf(
-                        "processed" to processed,
-                        "total" to total
+                withContext(Dispatchers.Main) {
+                    setProgress(
+                        workDataOf(
+                            "processed" to processed,
+                            "total" to total
+                        )
                     )
-                )
-
-                setForeground(
-                    createForegroundInfo(processed, total)
+                }
+                // Update the notification directly — much cheaper than calling setForeground
+                // in a loop (avoids repeated IPC round-trips).
+                notificationManager.notify(
+                    NOTIFICATION_ID,
+                    createForegroundInfo(processed, total).notification
                 )
             }
             Result.success()
         } catch (e: Throwable) {
-            Log.e("GalleryIndexerWorker", "Error during indexing", e)
+            // Catch Throwable (not just Exception) so OutOfMemoryErrors also trigger retry.
+            Log.e("GalleryIndexerWorker", "Indexing failed, will retry", e)
             Result.retry()
         }
     }
