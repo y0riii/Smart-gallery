@@ -54,8 +54,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.example.gallery.SortMode
@@ -73,6 +75,11 @@ fun FoldersScreen(
     showDates: Boolean = true,
     folderGridHeader: @Composable ColumnScope.() -> Unit = {},
     selectedFolderActions: @Composable RowScope.(FolderItem) -> Unit = {},
+    // Feature: customizable empty state
+    emptyStateIcon: ImageVector = Icons.Default.PhotoAlbum,
+    emptyStateTitle: String = "No items yet",
+    emptyStateDescription: String? = null,
+    emptyStateAction: @Composable (() -> Unit)? = null,
     // Feature 5: optional name→thumbnail map passed down to the SearchBar inside an open folder,
     // so @mention suggestions can display circular person avatars. Defaults to empty.
     nameThumbnails: Map<String, android.net.Uri?> = emptyMap()
@@ -160,17 +167,31 @@ fun FoldersScreen(
                         .fillMaxWidth(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(
-                                Icons.Default.PhotoAlbum,
+                                emptyStateIcon,
                                 contentDescription = null,
                                 modifier = Modifier.size(64.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Spacer(Modifier.height(12.dp))
                             Text(
-                                "No items yet",
+                                emptyStateTitle,
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            if (emptyStateDescription != null) {
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    text = emptyStateDescription,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(horizontal = 32.dp)
+                                )
+                            }
+                            if (emptyStateAction != null) {
+                                Spacer(Modifier.height(24.dp))
+                                emptyStateAction()
+                            }
                         }
                     }
                 } else {

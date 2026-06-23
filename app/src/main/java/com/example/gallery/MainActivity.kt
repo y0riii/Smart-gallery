@@ -263,10 +263,10 @@ fun GalleryApp(
                             icon = {
                                 Icon(
                                     Icons.Default.CollectionsBookmark,
-                                    contentDescription = "Tags"
+                                    contentDescription = "Smart Albums"
                                 )
                             },
-                            label = { Text("Tags") },
+                            label = { Text("Smart Albums") },
                             colors = navColors
                         )
                         NavigationBarItem(
