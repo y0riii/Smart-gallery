@@ -12,8 +12,11 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -202,7 +205,17 @@ fun ImageGrid(
             // Feature 2: Fixed column count (replaces Adaptive) so pinch is precise
             columns = GridCells.Fixed(columnCount),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(2.dp) // Tight padding for small cells
+            contentPadding = PaddingValues(
+                start = 2.dp,
+                top = 2.dp,
+                end = 2.dp,
+                bottom = if (isSelecting) {
+                    val navBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                    80.dp + navBarPadding
+                } else {
+                    2.dp
+                }
+            )
         ) {
             itemsIndexed(images, key = { _, uri -> uri.toString() }) { index, uri ->
                 val isSelected = uri in selectedUris
