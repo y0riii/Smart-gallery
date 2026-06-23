@@ -2,6 +2,8 @@ package com.example.gallery.components
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,6 +34,9 @@ fun PeopleFoldersScreen(peopleViewModel: PeopleViewModel, allNames: List<String>
         onRenameClick = {
             showRenameDialog = true
         },
+        emptyStateIcon = Icons.Default.Group,
+        emptyStateTitle = "No people found",
+        emptyStateDescription = "People will start showing here after the app finishes processing your pictures.",
         folderGridHeader = {
             Text(
                 text = "People",
