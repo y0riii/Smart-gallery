@@ -8,11 +8,16 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.work.BackoffPolicy
 import androidx.work.CoroutineWorker
+import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.example.gallery.GalleryService
 import com.example.gallery.R
+import java.util.concurrent.TimeUnit
 
 class FaceClusteringWorker(
     appContext: Context,
@@ -26,18 +31,44 @@ class FaceClusteringWorker(
     }
 
     override suspend fun doWork(): Result {
-        setForeground(createForegroundInfo())
+        try {
+            setForeground(createForegroundInfo())
+        } catch (e: Exception) {
+            Log.w(TAG, "setForeground failed — running as background worker", e)
+        }
+        
+        val notificationManager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(NOTIFICATION_ID, buildNotification())
 
         return try {
             val galleryService = GalleryService(applicationContext)
             galleryService.createClusters()
             Result.success()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            Log.w(TAG, "Worker was cancelled")
+            throw e
         } catch (e: Exception) {
-            Log.e(TAG, "Clustering failed", e)
+            Log.e(TAG, "Clustering failed, will retry", e)
             Result.retry()
+        } finally {
+            if (isStopped) {
+                Log.w(TAG, "Worker was stopped — rescheduling clustering")
+                val clusterRequest = OneTimeWorkRequestBuilder<FaceClusteringWorker>()
+                    .setInitialDelay(1, TimeUnit.MINUTES)
+                    .setBackoffCriteria(BackoffPolicy.LINEAR, 5, TimeUnit.MINUTES)
+                    .build()
+
+                WorkManager.getInstance(applicationContext)
+                    .beginUniqueWork(
+                        "FaceClustering_Retry",
+                        ExistingWorkPolicy.REPLACE,
+                        clusterRequest
+                    )
+                    .enqueue()
+            }
         }
     }
- 
+
     private fun createForegroundInfo(): ForegroundInfo {
         createNotificationChannel()
         val notification = buildNotification()

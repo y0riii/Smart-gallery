@@ -13,14 +13,14 @@ class OcrProcessor() : AutoCloseable {
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
     suspend fun recognizeText(bitmap: Bitmap): String? =
-        suspendCoroutine { cont ->
+        kotlinx.coroutines.suspendCancellableCoroutine { cont ->
             try {
                 val image = InputImage.fromBitmap(bitmap, 0)
                 recognizer.process(image)
                     .addOnSuccessListener { cont.resume(it.text) }
                     .addOnFailureListener { cont.resume(null) } // Resume null on failure to keep going
             } catch (e: Exception) {
-                cont.resume(null)
+                if (cont.isActive) cont.resume(null)
             }
         }
 

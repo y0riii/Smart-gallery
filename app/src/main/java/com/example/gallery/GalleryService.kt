@@ -70,6 +70,7 @@ class GalleryService(private val context: Context) {
         private const val ASSIGN_THRESHOLD = 0.45f
 
         val progress = MutableStateFlow<Float?>(null)
+        val indexingMutex = kotlinx.coroutines.sync.Mutex()
     }
 
     private val db = AppDatabase.getDatabase(context)
@@ -98,48 +99,57 @@ class GalleryService(private val context: Context) {
      * Compares the device's MediaStore with the Room Database and syncs them.
      */
     suspend fun indexImagesBackground(onProgress: suspend (Int, Int) -> Unit) {
-        withContext(Dispatchers.IO) {
-            // 1. Check FTS support
-            try {
-                db.openHelper.readableDatabase
-                    .query("SELECT rowid FROM media_items_fts LIMIT 1")
-                    .use { _ -> ftsSupported = true }
-            } catch (_: Exception) {
-                ftsSupported = false
-            }
-
-            // 2. Fetch IDs currently on the device
-            val deviceImages = ImageUtils.scanMediaStore(context)
-            val deviceImageIds = deviceImages.map { it.first }.toSet()
-
-            // 3. Fetch IDs currently in the database
-            val dbImageIds = mediaDao.getAllMediaIds().toSet()
-
-            // 4. Calculate the differences (The Diff)
-            val idsToDelete = dbImageIds - deviceImageIds // In DB, but missing from device
-            val idsToAdd = deviceImageIds - dbImageIds    // On device, but missing from DB
-
-            // 5. Delete removed images from the database and cleanup associations
-            if (idsToDelete.isNotEmpty()) {
-                Log.d("GalleryService", "Sync: Deleting ${idsToDelete.size} obsolete images")
-                idsToDelete.forEach { mediaId ->
-                    deleteImageFromDb(mediaId)
+        if (!indexingMutex.tryLock()) {
+            Log.d(TAG, "Sync: Indexing is already in progress. Aborting duplicate request.")
+            return
+        }
+        try {
+            withContext(Dispatchers.IO) {
+                // 1. Check FTS support
+                try {
+                    db.openHelper.readableDatabase
+                        .query("SELECT rowid FROM media_items_fts LIMIT 1")
+                        .use { _ -> ftsSupported = true }
+                } catch (_: Exception) {
+                    ftsSupported = false
                 }
-            }
 
-            // 6. Process and insert newly added images
-            if (idsToAdd.isNotEmpty()) {
-                val newImagesToProcess = deviceImages.filter { it.first in idsToAdd }
-                Log.d(
-                    "GalleryService",
-                    "Sync: Found ${newImagesToProcess.size} new images to index."
-                )
-                processAndInsertImages(newImagesToProcess, onProgress)
-            } else {
-                Log.d("GalleryService", "Sync: Database is fully synced. No new images to process.")
-            }
+                // 2. Fetch IDs currently on the device
+                val deviceImages = ImageUtils.scanMediaStore(context)
+                val deviceImageIds = deviceImages.map { it.first }.toSet()
 
-            logDatabaseContent()
+                // 3. Fetch IDs currently in the database
+                val dbImageIds = mediaDao.getAllMediaIds().toSet()
+
+                // 4. Calculate the differences (The Diff)
+                val idsToDelete = dbImageIds - deviceImageIds // In DB, but missing from device
+                val idsToAdd = deviceImageIds - dbImageIds    // On device, but missing from DB
+
+                // 5. Delete removed images from the database and cleanup associations
+                if (idsToDelete.isNotEmpty()) {
+                    Log.d("GalleryService", "Sync: Deleting ${idsToDelete.size} obsolete images")
+                    idsToDelete.forEach { mediaId ->
+                        deleteImageFromDb(mediaId)
+                    }
+                }
+
+                // 6. Process and insert newly added images
+                if (idsToAdd.isNotEmpty()) {
+                    val newImagesToProcess = deviceImages.filter { it.first in idsToAdd }
+                    Log.d(
+                        "GalleryService",
+                        "Sync: Found ${newImagesToProcess.size} new images to index."
+                    )
+                    onProgress(0, newImagesToProcess.size)
+                    processAndInsertImages(newImagesToProcess, onProgress)
+                } else {
+                    Log.d("GalleryService", "Sync: Database is fully synced. No new images to process.")
+                }
+
+                logDatabaseContent()
+            }
+        } finally {
+            indexingMutex.unlock()
         }
     }
 
@@ -156,7 +166,10 @@ class GalleryService(private val context: Context) {
         Log.d("DB_DEBUG", "============================================")
     }
 
-    private suspend fun processAndInsertImages(imagesToProcess: List<Pair<Long, Long>>, onProgress: suspend (Int, Int) -> Unit) {
+    private suspend fun processAndInsertImages(
+        imagesToProcess: List<Pair<Long, Long>>,
+        onProgress: suspend (Int, Int) -> Unit
+    ) {
         val imageEncoder = try {
             ClipImageEncoder(context)
         } catch (e: Exception) {
@@ -200,14 +213,30 @@ class GalleryService(private val context: Context) {
                 val bitmap = ImageUtils.getBitmapFromUri(context, mediaId.toMediaUri())
                 if (bitmap != null) {
                     val (features, text, faces) = withContext(Dispatchers.Default) {
-                        val featuresDeferred = async { imageEncoder.getImageFeatures(bitmap) }
-                        val textDeferred = async { ocrProcessor.recognizeText(bitmap) }
-                        val facesDeferred = async { faceDetector.detectFaces(bitmap) }
+                        val featuresDeferred = async {
+                            kotlinx.coroutines.withTimeoutOrNull(60000) {
+                                imageEncoder.getImageFeatures(bitmap)
+                            }
+                        }
+                        val textDeferred = async {
+                            kotlinx.coroutines.withTimeoutOrNull(60000) {
+                                ocrProcessor.recognizeText(bitmap)
+                            }
+                        }
+                        val facesDeferred = async {
+                            kotlinx.coroutines.withTimeoutOrNull(60000) {
+                                faceDetector.detectFaces(bitmap)
+                            }
+                        }
                         Triple(
                             featuresDeferred.await(),
                             textDeferred.await(),
                             facesDeferred.await()
                         )
+                    }
+
+                    if (features == null) {
+                        throw java.util.concurrent.TimeoutException("CLIP embedding extraction timed out")
                     }
 
                     mediaDao.insertAll(
@@ -216,7 +245,8 @@ class GalleryService(private val context: Context) {
 
                     // 1. Save face embeddings + bounding box to FaceEntity (clustering happens offline later)
                     withContext(Dispatchers.Default) {
-                        faces.forEach { face ->
+                        val finalFaces = faces ?: emptyList()
+                        finalFaces.forEach { face ->
                             val croppedImage = faceDetector.alignFace(bitmap, face)
                             val faceFeatures = faceEncoder.getFaceFeatures(croppedImage)
                             val box = ImageUtils.scaleRect(face.boundingBox, 1.5f)
@@ -256,6 +286,9 @@ class GalleryService(private val context: Context) {
                 }
             } catch (e: Exception) {
                 Log.e("GalleryService", "Error processing image $mediaId", e)
+                if (e is java.util.concurrent.TimeoutException) {
+                    throw e // Rethrow to bubble out of the loop and trigger WorkManager retry
+                }
             }
         }
 

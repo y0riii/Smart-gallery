@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
 import java.io.File
 
 class GalleryViewModel(
@@ -112,8 +113,8 @@ class GalleryViewModel(
         }
     }
 
-    override suspend fun onDeleteSuccess(uri: Uri) {
-        // Refresh images list after deletion is confirmed
-        images = service.getAllDeviceImages()
+    override suspend fun onDeleteSuccess(uris: List<Uri>) {
+        // Refresh images list by filtering out the deleted URIs locally
+        images = images.filter { it !in uris }
     }
 }

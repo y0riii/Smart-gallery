@@ -129,7 +129,7 @@ abstract class FoldersViewModel(
         applyFilters(scrollToTop = true)
     }
 
-    override suspend fun onDeleteSuccess(uri: Uri) {
+    override suspend fun onDeleteSuccess(uris: List<Uri>) {
         applyFilters()
     }
 }

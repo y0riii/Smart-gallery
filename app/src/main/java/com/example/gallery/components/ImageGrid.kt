@@ -148,12 +148,10 @@ fun ImageGrid(
                             dragStartIndex = index
                             initialSelection = currentSelectedUris
                             val uri = currentImages[index]
-                            val newSelection = if (uri in initialSelection) {
-                                initialSelection - uri
-                            } else {
-                                initialSelection + uri
+                            if (uri !in initialSelection) {
+                                val newSelection = initialSelection + uri
+                                onUpdateSelection(newSelection)
                             }
-                            onUpdateSelection(newSelection)
                         }
                     },
                     onDrag = { change, _ ->

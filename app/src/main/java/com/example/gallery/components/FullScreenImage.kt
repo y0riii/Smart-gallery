@@ -77,6 +77,16 @@ fun FullScreenImage(
     val view = LocalView.current
     val window = remember(view) { (view.context as? Activity)?.window }
 
+    // Close or adjust page index if the images list changes (e.g. after deletion)
+    LaunchedEffect(images) {
+        if (images.isEmpty()) {
+            onClose()
+        } else if (pagerState.currentPage >= images.size) {
+            val targetPage = images.size - 1
+            pagerState.scrollToPage(targetPage)
+        }
+    }
+
     // Track state for controls and gestures
     var isCurrentPageZoomed by remember { mutableStateOf(value = false) }
     var isDraggingDownGlobal by remember { mutableStateOf(false) }

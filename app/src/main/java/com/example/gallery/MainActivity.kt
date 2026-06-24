@@ -61,6 +61,7 @@ import com.example.gallery.components.GalleryScreen
 import com.example.gallery.components.PeopleFoldersScreen
 import com.example.gallery.db.AppDatabase
 import com.example.gallery.db.GalleryIndexerWorker
+import com.example.gallery.db.GalleryPeriodicTriggerWorker
 import com.example.gallery.folders.AlbumsFolderRepository
 import com.example.gallery.folders.CategoryFolderRepository
 import com.example.gallery.folders.PersonFolderRepository
@@ -162,7 +163,7 @@ class MainActivity : ComponentActivity() {
             .build()
 
         val indexingRequest =
-            PeriodicWorkRequestBuilder<GalleryIndexerWorker>(12, TimeUnit.HOURS)
+            PeriodicWorkRequestBuilder<GalleryPeriodicTriggerWorker>(3, TimeUnit.HOURS)
                 .setConstraints(constraints)
                 .build()
 
