@@ -208,31 +208,28 @@ class GalleryService(private val context: Context) {
         var counter = 0
         progress.value = 0f
 
+        val failedIds = mutableListOf<Long>()
+
         imagesToProcess.forEach { (mediaId, timestamp) ->
             try {
                 val bitmap = ImageUtils.getBitmapFromUri(context, mediaId.toMediaUri())
                 if (bitmap != null) {
                     val (features, text, faces) = withContext(Dispatchers.Default) {
-                        val featuresDeferred = async {
-                            kotlinx.coroutines.withTimeoutOrNull(60000) {
-                                imageEncoder.getImageFeatures(bitmap)
-                            }
+                        val featuresDeferred = async(Dispatchers.IO) {
+                            imageEncoder.getImageFeatures(bitmap)
                         }
-                        val textDeferred = async {
-                            kotlinx.coroutines.withTimeoutOrNull(60000) {
-                                ocrProcessor.recognizeText(bitmap)
-                            }
+                        val textDeferred = async(Dispatchers.IO) {
+                            ocrProcessor.recognizeText(bitmap)
                         }
-                        val facesDeferred = async {
-                            kotlinx.coroutines.withTimeoutOrNull(60000) {
-                                faceDetector.detectFaces(bitmap)
-                            }
+                        val facesDeferred = async(Dispatchers.IO) {
+                            faceDetector.detectFaces(bitmap)
                         }
-                        Triple(
-                            featuresDeferred.await(),
-                            textDeferred.await(),
-                            facesDeferred.await()
-                        )
+                        
+                        val featuresRes = kotlinx.coroutines.withTimeoutOrNull(60000) { featuresDeferred.await() }
+                        val textRes = kotlinx.coroutines.withTimeoutOrNull(60000) { textDeferred.await() }
+                        val facesRes = kotlinx.coroutines.withTimeoutOrNull(60000) { facesDeferred.await() }
+                        
+                        Triple(featuresRes, textRes, facesRes)
                     }
 
                     if (features == null) {
@@ -248,19 +245,23 @@ class GalleryService(private val context: Context) {
                         val finalFaces = faces ?: emptyList()
                         finalFaces.forEach { face ->
                             val croppedImage = faceDetector.alignFace(bitmap, face)
-                            val faceFeatures = faceEncoder.getFaceFeatures(croppedImage)
-                            val box = ImageUtils.scaleRect(face.boundingBox, 1.5f)
+                            val faceFeatures = kotlinx.coroutines.withTimeoutOrNull(30000) {
+                                withContext(Dispatchers.IO) { faceEncoder.getFaceFeatures(croppedImage) }
+                            }
+                            if (faceFeatures != null) {
+                                val box = ImageUtils.scaleRect(face.boundingBox, 1.5f)
 
-                            faceDao.insertFace(
-                                FaceEntity(
-                                    mediaId = mediaId,
-                                    embedding = faceFeatures,
-                                    boxLeft = box.left,
-                                    boxTop = box.top,
-                                    boxRight = box.right,
-                                    boxBottom = box.bottom
+                                faceDao.insertFace(
+                                    FaceEntity(
+                                        mediaId = mediaId,
+                                        embedding = faceFeatures,
+                                        boxLeft = box.left,
+                                        boxTop = box.top,
+                                        boxRight = box.right,
+                                        boxBottom = box.bottom
+                                    )
                                 )
-                            )
+                            }
                         }
 
                         // 2. Process Categories (Auto-assignment logic)
@@ -287,9 +288,15 @@ class GalleryService(private val context: Context) {
             } catch (e: Exception) {
                 Log.e("GalleryService", "Error processing image $mediaId", e)
                 if (e is java.util.concurrent.TimeoutException) {
-                    throw e // Rethrow to bubble out of the loop and trigger WorkManager retry
+                    Log.w("GalleryService", "Skipping image $mediaId due to timeout. Will retry later.")
+                    failedIds.add(mediaId)
                 }
             }
+        }
+
+        if (failedIds.isNotEmpty()) {
+            Log.e("GalleryService", "Indexing finished with ${failedIds.size} timeouts. Triggering WorkManager retry.")
+            throw java.util.concurrent.TimeoutException("Some images timed out during indexing")
         }
 
         progress.value = null
