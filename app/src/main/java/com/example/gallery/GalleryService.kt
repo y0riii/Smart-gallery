@@ -245,8 +245,11 @@ class GalleryService(private val context: Context) {
                         val finalFaces = faces ?: emptyList()
                         finalFaces.forEach { face ->
                             val croppedImage = faceDetector.alignFace(bitmap, face)
+                            val faceFeaturesDeferred = async(Dispatchers.IO) { 
+                                faceEncoder.getFaceFeatures(croppedImage) 
+                            }
                             val faceFeatures = kotlinx.coroutines.withTimeoutOrNull(30000) {
-                                withContext(Dispatchers.IO) { faceEncoder.getFaceFeatures(croppedImage) }
+                                faceFeaturesDeferred.await()
                             }
                             if (faceFeatures != null) {
                                 val box = ImageUtils.scaleRect(face.boundingBox, 1.5f)
