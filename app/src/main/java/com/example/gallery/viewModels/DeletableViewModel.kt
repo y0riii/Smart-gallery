@@ -28,7 +28,7 @@ abstract class DeletableViewModel(protected val service: GalleryService) : ViewM
         private set
 
     var fullScreenIndex by mutableStateOf<Int?>(null)
-        private set
+        protected set
 
     // ── Single-delete pending URI ──────────────────────────────────────────────
     private var pendingDeleteUri: Uri? = null

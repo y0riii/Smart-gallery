@@ -113,7 +113,14 @@ class GalleryViewModel(
     }
 
     override suspend fun onDeleteSuccess(uri: Uri) {
-        // Refresh images list after deletion is confirmed
-        images = service.getAllDeviceImages()
+        val deletedIndex = images.indexOf(uri)
+        images = images - uri
+        if (fullScreenIndex != null) {
+            fullScreenIndex = when {
+                images.isEmpty() -> null
+                deletedIndex >= images.size -> images.size - 1
+                else -> deletedIndex
+            }
+        }
     }
 }
