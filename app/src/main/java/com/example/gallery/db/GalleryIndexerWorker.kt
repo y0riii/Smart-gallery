@@ -40,7 +40,7 @@ class GalleryIndexerWorker(
 
         return try {
             val service = GalleryService(applicationContext)
-            service.indexImagesBackground { processed, total ->
+            val didRun = service.indexImagesBackground { processed, total ->
                 withContext(Dispatchers.Main) {
                     setProgress(
                         workDataOf(
@@ -56,7 +56,11 @@ class GalleryIndexerWorker(
                     createForegroundInfo(processed, total).notification
                 )
             }
-            Result.success()
+            if (didRun) {
+                Result.success()
+            } else {
+                Result.failure()
+            }
         } catch (e: Throwable) {
             // Catch Throwable (not just Exception) so OutOfMemoryErrors also trigger retry.
             Log.e("GalleryIndexerWorker", "Indexing failed, will retry", e)

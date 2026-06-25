@@ -162,7 +162,7 @@ class MainActivity : ComponentActivity() {
             .build()
 
         val indexingRequest =
-            PeriodicWorkRequestBuilder<GalleryIndexerWorker>(12, TimeUnit.HOURS)
+            PeriodicWorkRequestBuilder<GalleryIndexerWorker>(1, TimeUnit.HOURS)
                 .setConstraints(constraints)
                 .build()
 

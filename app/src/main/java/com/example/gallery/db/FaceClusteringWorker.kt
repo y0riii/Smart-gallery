@@ -30,8 +30,12 @@ class FaceClusteringWorker(
 
         return try {
             val galleryService = GalleryService(applicationContext)
-            galleryService.createClusters()
-            Result.success()
+            val didRun = galleryService.createClusters()
+            if (didRun) {
+                Result.success()
+            } else {
+                Result.failure()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Clustering failed", e)
             Result.retry()

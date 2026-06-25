@@ -37,7 +37,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
+import android.os.SystemClock
 
 class GalleryService(private val context: Context) {
 
@@ -68,8 +70,15 @@ class GalleryService(private val context: Context) {
         private const val TAG = "GalleryService"
         private const val CATEGORY_MATCH_THRESHOLD = 0.22f
         private const val ASSIGN_THRESHOLD = 0.45f
+        private const val PROGRESS_THROTTLE_MS = 500L
 
         val progress = MutableStateFlow<Float?>(null)
+
+        /** Only one indexing run may execute at a time across all callers. */
+        private val indexMutex = Mutex()
+
+        /** Only one clustering run may execute at a time. */
+        private val clusterMutex = Mutex()
     }
 
     private val db = AppDatabase.getDatabase(context)
@@ -96,50 +105,59 @@ class GalleryService(private val context: Context) {
 
     /**
      * Compares the device's MediaStore with the Room Database and syncs them.
+     *
+     * Returns true if indexing ran, false if skipped because another invocation
+     * was already in progress (callers should treat false as a no-op, not an error).
      */
-    suspend fun indexImagesBackground(onProgress: suspend (Int, Int) -> Unit) {
-        withContext(Dispatchers.IO) {
-            // 1. Check FTS support
-            try {
-                db.openHelper.readableDatabase
-                    .query("SELECT rowid FROM media_items_fts LIMIT 1")
-                    .use { _ -> ftsSupported = true }
-            } catch (_: Exception) {
-                ftsSupported = false
-            }
-
-            // 2. Fetch IDs currently on the device
-            val deviceImages = ImageUtils.scanMediaStore(context)
-            val deviceImageIds = deviceImages.map { it.first }.toSet()
-
-            // 3. Fetch IDs currently in the database
-            val dbImageIds = mediaDao.getAllMediaIds().toSet()
-
-            // 4. Calculate the differences (The Diff)
-            val idsToDelete = dbImageIds - deviceImageIds // In DB, but missing from device
-            val idsToAdd = deviceImageIds - dbImageIds    // On device, but missing from DB
-
-            // 5. Delete removed images from the database and cleanup associations
-            if (idsToDelete.isNotEmpty()) {
-                Log.d("GalleryService", "Sync: Deleting ${idsToDelete.size} obsolete images")
-                idsToDelete.forEach { mediaId ->
-                    deleteImageFromDb(mediaId)
+    suspend fun indexImagesBackground(onProgress: suspend (Int, Int) -> Unit): Boolean {
+        if (!indexMutex.tryLock()) {
+            Log.d(TAG, "indexImagesBackground: another run is in progress — skipping.")
+            return false
+        }
+        try {
+            return withContext(Dispatchers.IO) {
+                // 1. Check FTS support
+                try {
+                    db.openHelper.readableDatabase
+                        .query("SELECT rowid FROM media_items_fts LIMIT 1")
+                        .use { _ -> ftsSupported = true }
+                } catch (_: Exception) {
+                    ftsSupported = false
                 }
-            }
 
-            // 6. Process and insert newly added images
-            if (idsToAdd.isNotEmpty()) {
-                val newImagesToProcess = deviceImages.filter { it.first in idsToAdd }
-                Log.d(
-                    "GalleryService",
-                    "Sync: Found ${newImagesToProcess.size} new images to index."
-                )
-                processAndInsertImages(newImagesToProcess, onProgress)
-            } else {
-                Log.d("GalleryService", "Sync: Database is fully synced. No new images to process.")
-            }
+                // 2. Fetch IDs currently on the device
+                val deviceImages = ImageUtils.scanMediaStore(context)
+                val deviceImageIds = deviceImages.map { it.first }.toSet()
 
-            logDatabaseContent()
+                // 3. Fetch IDs currently in the database
+                val dbImageIds = mediaDao.getAllMediaIds().toSet()
+
+                // 4. Calculate the differences (The Diff)
+                val idsToDelete = dbImageIds - deviceImageIds // In DB, but missing from device
+                val idsToAdd = deviceImageIds - dbImageIds    // On device, but missing from DB
+
+                // 5. Delete removed images from the database and cleanup associations
+                if (idsToDelete.isNotEmpty()) {
+                    Log.d(TAG, "Sync: Deleting ${idsToDelete.size} obsolete images")
+                    idsToDelete.forEach { mediaId ->
+                        deleteImageFromDb(mediaId)
+                    }
+                }
+
+                // 6. Process and insert newly added images
+                if (idsToAdd.isNotEmpty()) {
+                    val newImagesToProcess = deviceImages.filter { it.first in idsToAdd }
+                    Log.d(TAG, "Sync: Found ${newImagesToProcess.size} new images to index.")
+                    processAndInsertImages(newImagesToProcess, onProgress)
+                } else {
+                    Log.d(TAG, "Sync: Database is fully synced. No new images to process.")
+                }
+
+                logDatabaseContent()
+                true
+            }
+        } finally {
+            indexMutex.unlock()
         }
     }
 
@@ -314,8 +332,13 @@ class GalleryService(private val context: Context) {
      *   via sequential centroid comparison, or creates new singleton persons.
      * - After clustering, generates person thumbnails from face bounding boxes.
      */
-    suspend fun createClusters() {
-        withContext(Dispatchers.IO) {
+    suspend fun createClusters(): Boolean {
+        if (!clusterMutex.tryLock()) {
+            Log.d(TAG, "createClusters: another run is in progress — skipping.")
+            return false
+        }
+        try {
+            withContext(Dispatchers.IO) {
             val allFaces = faceDao.getAllFaces()
             Log.d(TAG, "Loaded ${allFaces.size} faces for clustering")
 
@@ -455,6 +478,10 @@ class GalleryService(private val context: Context) {
 
             // ── Generate person thumbnails from face bounding boxes ──
 //            generatePersonThumbnails()
+        }
+        return true
+        } finally {
+            clusterMutex.unlock()
         }
     }
 
