@@ -40,6 +40,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import android.os.SystemClock
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.CancellationException
 
 class GalleryService(private val context: Context) {
 
@@ -212,68 +215,98 @@ class GalleryService(private val context: Context) {
         val totalCount = imagesToProcess.size
         var counter = 0
         progress.value = 0f
+        var lastProgressMs = 0L
 
         imagesToProcess.forEach { (mediaId, timestamp) ->
             try {
-                val bitmap = ImageUtils.getBitmapFromUri(context, mediaId.toMediaUri())
-                if (bitmap != null) {
-                    val (features, text, faces) = withContext(Dispatchers.Default) {
-                        val featuresDeferred = async { imageEncoder.getImageFeatures(bitmap) }
-                        val textDeferred = async { ocrProcessor.recognizeText(bitmap) }
-                        val facesDeferred = async { faceDetector.detectFaces(bitmap) }
-                        Triple(
-                            featuresDeferred.await(),
-                            textDeferred.await(),
-                            facesDeferred.await()
-                        )
-                    }
-
-                    mediaDao.insertAll(
-                        listOf(MediaEntity(mediaId, timestamp, false, features, text))
-                    )
-
-                    // 1. Save face embeddings + bounding box to FaceEntity (clustering happens offline later)
-                    withContext(Dispatchers.Default) {
-                        faces.forEach { face ->
-                            val croppedImage = faceDetector.alignFace(bitmap, face)
-                            val faceFeatures = faceEncoder.getFaceFeatures(croppedImage)
-                            val box = ImageUtils.scaleRect(face.boundingBox, 1.5f)
-
-                            faceDao.insertFace(
-                                FaceEntity(
-                                    mediaId = mediaId,
-                                    embedding = faceFeatures,
-                                    boxLeft = box.left,
-                                    boxTop = box.top,
-                                    boxRight = box.right,
-                                    boxBottom = box.bottom
-                                )
+                withTimeout(120000L) { // 2 minutes timeout
+                    val bitmap = ImageUtils.getBitmapFromUri(context, mediaId.toMediaUri())
+                    if (bitmap != null) {
+                        val (features, text, faces) = withContext(Dispatchers.Default) {
+                            val featuresDeferred = async { imageEncoder.getImageFeatures(bitmap) }
+                            val textDeferred = async { ocrProcessor.recognizeText(bitmap) }
+                            val facesDeferred = async { faceDetector.detectFaces(bitmap) }
+                            Triple(
+                                featuresDeferred.await(),
+                                textDeferred.await(),
+                                facesDeferred.await()
                             )
                         }
 
-                        // 2. Process Categories (Auto-assignment logic)
-                        val allCategories = categoryDao.getAllCategories()
-                        allCategories.forEach { category ->
-                            val similarity = VectorUtils.dotProduct(features, category.embedding)
-                            if (similarity > CATEGORY_MATCH_THRESHOLD) {
-                                categoryDao.insertCrossRef(
-                                    MediaCategoryCrossRef(
-                                        mediaId,
-                                        category.id,
-                                        similarity
+                        mediaDao.insertAll(
+                            listOf(MediaEntity(mediaId, timestamp, false, features, text))
+                        )
+
+                        // 1. Save face embeddings + bounding box to FaceEntity (clustering happens offline later)
+                        withContext(Dispatchers.Default) {
+                            faces.forEach { face ->
+                                val croppedImage = faceDetector.alignFace(bitmap, face)
+                                val faceFeatures = faceEncoder.getFaceFeatures(croppedImage)
+                                val box = ImageUtils.scaleRect(face.boundingBox, 1.5f)
+
+                                faceDao.insertFace(
+                                    FaceEntity(
+                                        mediaId = mediaId,
+                                        embedding = faceFeatures,
+                                        boxLeft = box.left,
+                                        boxTop = box.top,
+                                        boxRight = box.right,
+                                        boxBottom = box.bottom
                                     )
                                 )
                             }
+
+                            // 2. Process Categories (Auto-assignment logic)
+                            val allCategories = categoryDao.getAllCategories()
+                            allCategories.forEach { category ->
+                                val similarity = VectorUtils.dotProduct(features, category.embedding)
+                                if (similarity > CATEGORY_MATCH_THRESHOLD) {
+                                    categoryDao.insertCrossRef(
+                                        MediaCategoryCrossRef(
+                                            mediaId,
+                                            category.id,
+                                            similarity
+                                        )
+                                    )
+                                }
+                            }
                         }
                     }
+                }
 
-                    counter++
-                    Log.d("GalleryService", "Processed: $counter / $totalCount (ID: $mediaId)")
+                // If processing succeeds, increment counter and report progress
+                counter++
+                Log.d(TAG, "Processed: $counter / $totalCount (ID: $mediaId)")
+
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastProgressMs >= PROGRESS_THROTTLE_MS || counter == totalCount) {
+                    lastProgressMs = now
+                    progress.value = counter / totalCount.toFloat()
+                    onProgress(counter, totalCount)
+                }
+            } catch (e: TimeoutCancellationException) {
+                Log.e(TAG, "Timeout processing image $mediaId, skipping", e)
+                counter++
+                // Still update progress so the UI advances past the skipped image
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastProgressMs >= PROGRESS_THROTTLE_MS || counter == totalCount) {
+                    lastProgressMs = now
                     progress.value = counter / totalCount.toFloat()
                     onProgress(counter, totalCount)
                 }
             } catch (e: Exception) {
-                Log.e("GalleryService", "Error processing image $mediaId", e)
+                if (e is CancellationException) {
+                    throw e
+                }
+                Log.e(TAG, "Error processing image $mediaId", e)
+                counter++
+                // Still update progress so the UI advances past the skipped image
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastProgressMs >= PROGRESS_THROTTLE_MS || counter == totalCount) {
+                    lastProgressMs = now
+                    progress.value = counter / totalCount.toFloat()
+                    onProgress(counter, totalCount)
+                }
             }
         }
 
