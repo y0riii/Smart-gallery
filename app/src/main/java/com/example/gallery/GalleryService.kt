@@ -169,39 +169,52 @@ class GalleryService(private val context: Context) {
     )
 
     /**
-     * Runs all ML inference for one image on a dedicated thread with a hard
-     * 2-minute timeout.  Unlike coroutine `withTimeout`, this actually
-     * abandons a stuck native/JNI call by shutting down the thread.
+     * Creates a single-thread executor for ML inference.  The thread is
+     * marked as a daemon so that if the native call is permanently stuck,
+     * the abandoned thread won't prevent the JVM from exiting.
      */
-    private fun runInferenceWithHardTimeout(
+    private fun createInferenceExecutor(): java.util.concurrent.ExecutorService =
+        java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+            Thread(r, "ml-inference").apply { isDaemon = true }
+        }
+
+    /**
+     * Runs all ML inference for one image on the supplied [executor] with a
+     * hard 2-minute timeout.  Unlike coroutine `withTimeout`, this actually
+     * abandons a stuck native/JNI call.
+     *
+     * @return The inference result, or `null` if the call timed out.
+     *         When `null` is returned the caller **must** abandon [executor]
+     *         (call `shutdownNow()`) and create a fresh one, because the
+     *         stuck thread is still occupying the single-thread pool.
+     */
+    private fun runInferenceOnExecutor(
+        executor: java.util.concurrent.ExecutorService,
         bitmap: android.graphics.Bitmap,
         imageEncoder: ClipImageEncoder,
         ocrProcessor: OcrProcessor,
         faceDetector: FaceDetectionProcessor,
         faceEncoder: FaceEncoder
     ): InferenceResult? {
-        val executor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
-            Thread(r, "ml-inference").apply { isDaemon = true }
-        }
-        return try {
-            val future = executor.submit(java.util.concurrent.Callable {
-                runBlocking {
-                    // All ML work runs on this single dedicated thread.
-                    val features = imageEncoder.getImageFeatures(bitmap)
-                    val text = ocrProcessor.recognizeText(bitmap)
-                    val faces = faceDetector.detectFaces(bitmap)
+        val future = executor.submit(java.util.concurrent.Callable {
+            runBlocking {
+                // All ML work runs on the single dedicated thread.
+                val features = imageEncoder.getImageFeatures(bitmap)
+                val text = ocrProcessor.recognizeText(bitmap)
+                val faces = faceDetector.detectFaces(bitmap)
 
-                    // Encode each detected face while we're still on this thread.
-                    val faceData = faces.map { face ->
-                        val cropped = faceDetector.alignFace(bitmap, face)
-                        val embedding = faceEncoder.getFaceFeatures(cropped)
-                        val box = ImageUtils.scaleRect(face.boundingBox, 1.5f)
-                        Pair(embedding, box)
-                    }
-
-                    InferenceResult(features, text, faces, faceData)
+                // Encode each detected face while we're still on this thread.
+                val faceData = faces.map { face ->
+                    val cropped = faceDetector.alignFace(bitmap, face)
+                    val embedding = faceEncoder.getFaceFeatures(cropped)
+                    val box = ImageUtils.scaleRect(face.boundingBox, 1.5f)
+                    Pair(embedding, box)
                 }
-            })
+
+                InferenceResult(features, text, faces, faceData)
+            }
+        })
+        return try {
             // Hard timeout — if the native call is stuck, get() will throw.
             future.get(2, java.util.concurrent.TimeUnit.MINUTES)
         } catch (e: java.util.concurrent.TimeoutException) {
@@ -209,11 +222,6 @@ class GalleryService(private val context: Context) {
             null
         } catch (e: java.util.concurrent.ExecutionException) {
             throw e.cause ?: e
-        } finally {
-            // shutdownNow() interrupts the thread.  If the native call
-            // ignores the interrupt, the daemon thread is simply abandoned
-            // and will be cleaned up when the process exits.
-            executor.shutdownNow()
         }
     }
 
@@ -257,22 +265,75 @@ class GalleryService(private val context: Context) {
         progress.value = 0f
         var lastProgressMs = 0L
 
+        // Cache categories once — avoids repeated DB queries per image.
+        val allCategories = categoryDao.getAllCategories()
+
+        // Create a single reusable executor for ML inference.  The same thread
+        // is reused across all images; a new executor is only created if a
+        // timeout forces us to abandon a stuck native thread.
+        var inferenceExecutor = createInferenceExecutor()
+
         try {
-            imagesToProcess.forEach { (mediaId, timestamp) ->
+            // ── Pipeline: prefetch next bitmap while current image is in ML inference ──
+            // This overlaps I/O (bitmap decode) with compute (ML inference) so the CPU
+            // is never idle waiting for the storage subsystem between images.
+            var prefetchedBitmap: android.graphics.Bitmap? = null
+            var prefetchIdx = -1
+
+            for (i in imagesToProcess.indices) {
+                val (mediaId, timestamp) = imagesToProcess[i]
+
                 // Check if the worker's coroutine has been cancelled (e.g. by REPLACE)
                 coroutineContext.ensureActive()
 
                 try {
-                    val bitmap = ImageUtils.getBitmapFromUri(context, mediaId.toMediaUri())
+                    // Use prefetched bitmap if available for this index, otherwise load now
+                    val bitmap = if (prefetchIdx == i && prefetchedBitmap != null) {
+                        prefetchedBitmap
+                    } else {
+                        ImageUtils.getBitmapFromUri(context, mediaId.toMediaUri())
+                    }
+                    prefetchedBitmap = null
+                    prefetchIdx = -1
+
                     if (bitmap != null) {
-                        // Run all ML inference on a dedicated thread with a hard
-                        // 2-minute timeout that can't be blocked by native code.
-                        val result = runInferenceWithHardTimeout(
+                        // Kick off prefetch of the NEXT image's bitmap on the I/O
+                        // dispatcher while ML inference runs on its dedicated thread.
+                        val nextIndex = i + 1
+                        val prefetchJob = if (nextIndex < imagesToProcess.size) {
+                            CoroutineScope(coroutineContext).async(Dispatchers.IO) {
+                                try {
+                                    ImageUtils.getBitmapFromUri(
+                                        context,
+                                        imagesToProcess[nextIndex].first.toMediaUri()
+                                    )
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "Prefetch failed for index $nextIndex", e)
+                                    null
+                                }
+                            }
+                        } else null
+
+                        // Run all ML inference on the reusable dedicated thread with a
+                        // hard 2-minute timeout that can't be blocked by native code.
+                        val result = runInferenceOnExecutor(
+                            inferenceExecutor,
                             bitmap, imageEncoder, ocrProcessor, faceDetector, faceEncoder
                         )
 
+                        // Collect the prefetched bitmap (should be ready by now since
+                        // ML inference takes much longer than a bitmap decode).
+                        if (prefetchJob != null) {
+                            prefetchedBitmap = prefetchJob.await()
+                            prefetchIdx = nextIndex
+                        }
+
                         if (result == null) {
-                            // Timed out — skip this image
+                            // Timed out — the old thread is stuck in native code.
+                            // Abandon it and spin up a fresh executor for the next image.
+                            inferenceExecutor.shutdownNow()
+                            inferenceExecutor = createInferenceExecutor()
+
                             Log.e(TAG, "Skipping image $mediaId due to inference timeout")
                             counter++
                             val now = SystemClock.elapsedRealtime()
@@ -281,7 +342,7 @@ class GalleryService(private val context: Context) {
                                 progress.value = counter / totalCount.toFloat()
                                 onProgress(counter, totalCount)
                             }
-                            return@forEach
+                            continue
                         }
 
                         val (features, text, _, faceData) = result
@@ -305,7 +366,6 @@ class GalleryService(private val context: Context) {
                         }
 
                         // Process Categories (Auto-assignment logic)
-                        val allCategories = categoryDao.getAllCategories()
                         allCategories.forEach { category ->
                             val similarity = VectorUtils.dotProduct(features, category.embedding)
                             if (similarity > CATEGORY_MATCH_THRESHOLD) {
@@ -347,6 +407,9 @@ class GalleryService(private val context: Context) {
             }
         } finally {
             progress.value = null
+
+            // Shut down the inference thread (or abandon it if stuck).
+            inferenceExecutor.shutdownNow()
 
             imageEncoder.close()
             ocrProcessor.close()
