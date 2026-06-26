@@ -60,7 +60,7 @@ import com.example.gallery.components.CategoryFoldersScreen
 import com.example.gallery.components.GalleryScreen
 import com.example.gallery.components.PeopleFoldersScreen
 import com.example.gallery.db.AppDatabase
-import com.example.gallery.db.GalleryIndexerWorker
+import com.example.gallery.db.GalleryPeriodicTriggerWorker
 import com.example.gallery.folders.AlbumsFolderRepository
 import com.example.gallery.folders.CategoryFolderRepository
 import com.example.gallery.folders.PersonFolderRepository
@@ -109,7 +109,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        scheduleBackgroundIndexing()
         requestBatteryOptimizationExemptionOnce()
         setContent {
             GalleryTheme {
@@ -144,6 +143,7 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         if (hasAnyPermission(this)) {
             galleryService.startIndexingWorkManager()
+            scheduleBackgroundIndexing()
         }
     }
 
@@ -161,15 +161,18 @@ class MainActivity : ComponentActivity() {
             .setRequiresBatteryNotLow(true)
             .build()
 
-        val indexingRequest =
-            PeriodicWorkRequestBuilder<GalleryIndexerWorker>(12, TimeUnit.HOURS)
+        // Use the lightweight trigger worker — it enqueues the real
+        // GalleryIndexerWorker → FaceClusteringWorker chain as one-time work,
+        // avoiding conflicts with the mutex and ExistingWorkPolicy.KEEP.
+        val triggerRequest =
+            PeriodicWorkRequestBuilder<GalleryPeriodicTriggerWorker>(12, TimeUnit.HOURS)
                 .setConstraints(constraints)
                 .build()
 
         WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
-            "GalleryIndexing",
-            ExistingPeriodicWorkPolicy.UPDATE,
-            indexingRequest
+            "GalleryIndexing_Periodic",
+            ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE,
+            triggerRequest
         )
     }
 }
@@ -290,10 +293,10 @@ fun GalleryApp(
                             icon = {
                                 Icon(
                                     Icons.Default.CollectionsBookmark,
-                                    contentDescription = "Smart Albums"
+                                    contentDescription = "AI Albums"
                                 )
                             },
-                            label = { Text("Smart Albums") },
+                            label = { Text("AI Albums") },
                             colors = navColors
                         )
                         NavigationBarItem(

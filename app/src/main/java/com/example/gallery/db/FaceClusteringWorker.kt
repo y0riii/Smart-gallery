@@ -26,12 +26,22 @@ class FaceClusteringWorker(
     }
 
     override suspend fun doWork(): Result {
-        setForeground(createForegroundInfo())
+        try {
+            setForeground(createForegroundInfo())
+        } catch (e: Exception) {
+            Log.e(TAG, "setForeground failed (non-fatal)", e)
+        }
 
         return try {
             val galleryService = GalleryService(applicationContext)
-            galleryService.createClusters()
-            Result.success()
+            val didRun = galleryService.createClusters()
+            if (didRun) {
+                Result.success()
+            } else {
+                // Another clustering run is active — retry later.
+                Log.d(TAG, "Skipped: another clustering run is active, will retry")
+                Result.retry()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Clustering failed", e)
             Result.retry()
