@@ -9,6 +9,7 @@ import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 import androidx.room.Transaction
+import androidx.room.withTransaction
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
@@ -19,6 +20,7 @@ import com.example.gallery.db.entities.FaceEntity
 import com.example.gallery.db.entities.MediaCategoryCrossRef
 import com.example.gallery.db.entities.MediaEntity
 import com.example.gallery.db.entities.PersonEntity
+import com.example.gallery.db.previews.MediaDateInfo
 import com.example.gallery.ml.face.FaceDetectionProcessor
 import com.example.gallery.ml.face.FaceEncoder
 import com.example.gallery.ml.face.ChineseWhispers
@@ -202,44 +204,48 @@ class GalleryService(private val context: Context) {
                         )
                     }
 
-                    mediaDao.insertAll(
-                        listOf(MediaEntity(mediaId, timestamp, false, features, text))
-                    )
-
                     // 1. Save face embeddings + bounding box to FaceEntity (clustering happens offline later)
                     withContext(Dispatchers.Default) {
-                        faces.forEach { face ->
+                        val faceEntities = faces.map { face ->
                             val croppedImage = faceDetector.alignFace(bitmap, face)
                             val faceFeatures = faceEncoder.getFaceFeatures(croppedImage)
                             val box = ImageUtils.scaleRect(face.boundingBox, 1.5f)
 
-                            withContext(Dispatchers.IO) {
-                                faceDao.insertFace(
-                                    FaceEntity(
-                                        mediaId = mediaId,
-                                        embedding = faceFeatures,
-                                        boxLeft = box.left,
-                                        boxTop = box.top,
-                                        boxRight = box.right,
-                                        boxBottom = box.bottom
-                                    )
-                                )
-                            }
+                            FaceEntity(
+                                mediaId = mediaId,
+                                embedding = faceFeatures,
+                                boxLeft = box.left,
+                                boxTop = box.top,
+                                boxRight = box.right,
+                                boxBottom = box.bottom
+                            )
                         }
 
                         // 2. Process Categories (Auto-assignment logic)
                         val allCategories = categoryDao.getAllCategories()
-                        allCategories.forEach { category ->
+                        val crossRefs = allCategories.mapNotNull { category ->
                             val similarity = VectorUtils.dotProduct(features, category.embedding)
                             if (similarity > CATEGORY_MATCH_THRESHOLD) {
-                                withContext(Dispatchers.IO) {
-                                    categoryDao.insertCrossRef(
-                                        MediaCategoryCrossRef(
-                                            mediaId,
-                                            category.id,
-                                            similarity
-                                        )
-                                    )
+                                MediaCategoryCrossRef(
+                                    mediaId,
+                                    category.id,
+                                    similarity
+                                )
+                            } else {
+                                null
+                            }
+                        }
+
+                        withContext(Dispatchers.IO) {
+                            db.withTransaction {
+                                mediaDao.insertAll(listOf(MediaEntity(mediaId, timestamp, false, features, text)))
+
+                                if (faceEntities.isNotEmpty()) {
+                                    faceDao.insertFaces(faceEntities)
+                                }
+
+                                if (crossRefs.isNotEmpty()) {
+                                    categoryDao.insertCrossRefs(crossRefs)
                                 }
                             }
                         }
@@ -501,6 +507,22 @@ class GalleryService(private val context: Context) {
         }
     }
 
+    fun filterByDateInfo(
+        images: List<MediaDateInfo>,
+        fromDate: Long?,
+        toDate: Long?
+    ): List<MediaDateInfo> {
+        return if (fromDate == null && toDate == null) {
+            images
+        } else {
+            images.filter { entity ->
+                val afterFrom = fromDate == null || entity.timestampMs >= fromDate
+                val beforeTo = toDate == null || entity.timestampMs <= (toDate + 86400000 - 1)
+                afterFrom && beforeTo
+            }
+        }
+    }
+
     suspend fun search(prompt: String, fromDate: Long? = null, toDate: Long? = null): List<Uri> {
         return withContext(Dispatchers.IO) {
             val (names, cleanPrompt) = findNamesInPrompt(prompt)
@@ -568,8 +590,8 @@ class GalleryService(private val context: Context) {
                     val intersection = images.filter { it in originalSet }
                     return@withContext intersection.map { it.toMediaUri() }
                 }
-                val images = mediaDao.getMediaByIds(mediaIds)
-                val filtered = filterByDate(images, fromDate, toDate)
+                val images = mediaDao.getMediaDatesByIds(mediaIds)
+                val filtered = filterByDateInfo(images, fromDate, toDate)
 
                 if (sortMode == SortMode.DATE_DESC) {
                     filtered.sortedByDescending { it.timestampMs }
@@ -596,7 +618,10 @@ class GalleryService(private val context: Context) {
 
             if (targetIds.isEmpty()) return@withContext emptyList()
 
-            val images = mediaDao.getMediaByIds(targetIds)
+            val images = mutableListOf<MediaEntity>()
+            targetIds.chunked(200).forEach { chunk ->
+                images.addAll(mediaDao.getMediaByIds(chunk))
+            }
             var filtered = filterByDate(images, fromDate, toDate)
 
             if (filtered.isEmpty()) return@withContext emptyList()
@@ -738,7 +763,29 @@ class GalleryService(private val context: Context) {
      * by calling finalizeDeleteImage for each URI in the list.
      */
     suspend fun finalizeDeleteImages(uris: List<Uri>) {
-        uris.forEach { finalizeDeleteImage(it) }
+        db.withTransaction {
+            uris.forEach { uri ->
+                val mediaId = try {
+                    ContentUris.parseId(uri)
+                } catch (e: Exception) {
+                    null
+                }
+
+                if (mediaId != null) {
+                    deleteImageFromDb(mediaId)
+                }
+            }
+        }
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            uris.forEach { uri ->
+                try {
+                    context.contentResolver.delete(uri, null, null)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to delete image", e)
+                }
+            }
+        }
     }
 
     /**
