@@ -222,7 +222,7 @@ class GalleryService(private val context: Context) {
                         }
 
                         // 2. Process Categories (Auto-assignment logic)
-                        val allCategories = categoryDao.getAllCategories()
+                        val allCategories = withContext(Dispatchers.IO) { categoryDao.getAllCategories() }
                         val crossRefs = allCategories.mapNotNull { category ->
                             val similarity = VectorUtils.dotProduct(features, category.embedding)
                             if (similarity > CATEGORY_MATCH_THRESHOLD) {

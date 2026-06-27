@@ -112,9 +112,11 @@ class GalleryViewModel(
         }
     }
 
-    override suspend fun onDeleteSuccess(uri: Uri) {
-        val deletedIndex = images.indexOf(uri)
-        images = images - uri
+    override suspend fun onDeleteSuccess(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        val deletedIndex = images.indexOf(uris[0])
+        val deletedSet = uris.toSet()
+        images = images.filterNot { it in deletedSet }
         if (fullScreenIndex != null) {
             fullScreenIndex = when {
                 images.isEmpty() -> null

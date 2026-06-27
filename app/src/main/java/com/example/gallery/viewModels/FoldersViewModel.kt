@@ -129,10 +129,12 @@ abstract class FoldersViewModel(
         applyFilters(scrollToTop = true)
     }
 
-    override suspend fun onDeleteSuccess(uri: Uri) {
-        val deletedIndex = images.indexOf(uri)
+    override suspend fun onDeleteSuccess(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        val deletedIndex = images.indexOf(uris[0])
+        val deletedSet = uris.toSet()
         // Eagerly remove the URI so the pager never sees a stale index
-        images = images - uri
+        images = images.filterNot { it in deletedSet }
         // Adjust the fullscreen viewer
         if (fullScreenIndex != null) {
             fullScreenIndex = when {
