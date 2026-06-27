@@ -23,7 +23,7 @@ class GalleryPeriodicTriggerWorker(
         WorkManager.getInstance(applicationContext)
             .beginUniqueWork(
                 "GalleryIndexing_OneTime",
-                ExistingWorkPolicy.REPLACE,
+                ExistingWorkPolicy.KEEP,
                 indexRequest
             )
             .enqueue()

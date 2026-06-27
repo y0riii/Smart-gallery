@@ -28,8 +28,6 @@ import com.example.gallery.ml.text.ClipTextEncoder
 import com.example.gallery.utils.ImageUtils
 import com.example.gallery.utils.VectorUtils
 import com.example.gallery.utils.toMediaUri
-import com.example.gallery.db.FaceClusteringWorker
-import com.example.gallery.db.daos.FaceDao
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -38,11 +36,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
-import android.os.SystemClock
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.ensureActive
-import kotlin.coroutines.coroutineContext
-import kotlinx.coroutines.runBlocking
 
 class GalleryService(private val context: Context) {
 
@@ -67,7 +60,6 @@ class GalleryService(private val context: Context) {
         private const val TAG = "GalleryService"
         private const val CATEGORY_MATCH_THRESHOLD = 0.22f
         private const val ASSIGN_THRESHOLD = 0.45f
-        private const val PROGRESS_THROTTLE_MS = 500L
 
         val progress = MutableStateFlow<Float?>(null)
     }
@@ -89,7 +81,6 @@ class GalleryService(private val context: Context) {
 
     private var initJob: Deferred<Unit> = CoroutineScope(SupervisorJob() + Dispatchers.IO).async {
         textEncoder // triggers initialization immediately
-        Unit
     }
 
     private var ftsSupported: Boolean = false
@@ -100,49 +91,48 @@ class GalleryService(private val context: Context) {
      * Returns true if indexing ran, false if skipped because another invocation
      * was already in progress (callers should treat false as a no-op, not an error).
      */
-    suspend fun indexImagesBackground(onProgress: suspend (Int, Int) -> Unit): Boolean {
-        return withContext(Dispatchers.IO) {
-                // 1. Check FTS support
-                try {
-                    db.openHelper.readableDatabase
-                        .query("SELECT rowid FROM media_items_fts LIMIT 1")
-                        .use { _ -> ftsSupported = true }
-                } catch (_: Exception) {
-                    ftsSupported = false
-                }
-
-                // 2. Fetch IDs currently on the device
-                val deviceImages = ImageUtils.scanMediaStore(context)
-                val deviceImageIds = deviceImages.map { it.first }.toSet()
-
-                // 3. Fetch IDs currently in the database
-                val dbImageIds = mediaDao.getAllMediaIds().toSet()
-
-                // 4. Calculate the differences (The Diff)
-                val idsToDelete = dbImageIds - deviceImageIds // In DB, but missing from device
-                val idsToAdd = deviceImageIds - dbImageIds    // On device, but missing from DB
-
-                // 5. Delete removed images from the database and cleanup associations
-                if (idsToDelete.isNotEmpty()) {
-                    Log.d(TAG, "Sync: Deleting ${idsToDelete.size} obsolete images")
-                    idsToDelete.forEach { mediaId ->
-                        deleteImageFromDb(mediaId)
-                    }
-                }
-
-                // 6. Process and insert newly added images
-                if (idsToAdd.isNotEmpty()) {
-                    val newImagesToProcess = deviceImages.filter { it.first in idsToAdd }
-                    Log.d(TAG, "Sync: Found ${newImagesToProcess.size} new images to index.")
-                    processAndInsertImages(newImagesToProcess, onProgress)
-                } else {
-                    Log.d(TAG, "Sync: Database is fully synced. No new images to process.")
-                    progress.value = null
-                }
-
-                logDatabaseContent()
-                true
+    suspend fun indexImagesBackground(onProgress: suspend (Int, Int) -> Unit) {
+        withContext(Dispatchers.IO) {
+            // 1. Check FTS support
+            try {
+                db.openHelper.readableDatabase
+                    .query("SELECT rowid FROM media_items_fts LIMIT 1")
+                    .use { _ -> ftsSupported = true }
+            } catch (_: Exception) {
+                ftsSupported = false
             }
+
+            // 2. Fetch IDs currently on the device
+            val deviceImages = ImageUtils.scanMediaStore(context)
+            val deviceImageIds = deviceImages.map { it.first }.toSet()
+
+            // 3. Fetch IDs currently in the database
+            val dbImageIds = mediaDao.getAllMediaIds().toSet()
+
+            // 4. Calculate the differences (The Diff)
+            val idsToDelete = dbImageIds - deviceImageIds // In DB, but missing from device
+            val idsToAdd = deviceImageIds - dbImageIds    // On device, but missing from DB
+
+            // 5. Delete removed images from the database and cleanup associations
+            if (idsToDelete.isNotEmpty()) {
+                Log.d(TAG, "Sync: Deleting ${idsToDelete.size} obsolete images")
+                idsToDelete.forEach { mediaId ->
+                    deleteImageFromDb(mediaId)
+                }
+            }
+
+            // 6. Process and insert newly added images
+            if (idsToAdd.isNotEmpty()) {
+                val newImagesToProcess = deviceImages.filter { it.first in idsToAdd }
+                Log.d(TAG, "Sync: Found ${newImagesToProcess.size} new images to index.")
+                processAndInsertImages(newImagesToProcess, onProgress)
+            } else {
+                Log.d(TAG, "Sync: Database is fully synced. No new images to process.")
+                progress.value = null
+            }
+
+            logDatabaseContent()
+        }
     }
 
     private suspend fun logDatabaseContent() {
@@ -156,73 +146,6 @@ class GalleryService(private val context: Context) {
             )
         }
         Log.d("DB_DEBUG", "============================================")
-    }
-
-    /**
-     * Holds the result of ML inference for a single image.
-     */
-    private data class InferenceResult(
-        val features: FloatArray,
-        val text: String?,
-        val faces: List<com.google.mlkit.vision.face.Face>,
-        val faceData: List<Pair<FloatArray, android.graphics.Rect>> // (embedding, scaledBox)
-    )
-
-    /**
-     * Creates a single-thread executor for ML inference.  The thread is
-     * marked as a daemon so that if the native call is permanently stuck,
-     * the abandoned thread won't prevent the JVM from exiting.
-     */
-    private fun createInferenceExecutor(): java.util.concurrent.ExecutorService =
-        java.util.concurrent.Executors.newSingleThreadExecutor { r ->
-            Thread(r, "ml-inference").apply { isDaemon = true }
-        }
-
-    /**
-     * Runs all ML inference for one image on the supplied [executor] with a
-     * hard 2-minute timeout.  Unlike coroutine `withTimeout`, this actually
-     * abandons a stuck native/JNI call.
-     *
-     * @return The inference result, or `null` if the call timed out.
-     *         When `null` is returned the caller **must** abandon [executor]
-     *         (call `shutdownNow()`) and create a fresh one, because the
-     *         stuck thread is still occupying the single-thread pool.
-     */
-    private fun runInferenceOnExecutor(
-        executor: java.util.concurrent.ExecutorService,
-        bitmap: android.graphics.Bitmap,
-        imageEncoder: ClipImageEncoder,
-        ocrProcessor: OcrProcessor,
-        faceDetector: FaceDetectionProcessor,
-        faceEncoder: FaceEncoder
-    ): InferenceResult? {
-        val future = executor.submit(java.util.concurrent.Callable {
-            runBlocking {
-                // All ML work runs on the single dedicated thread.
-                val features = imageEncoder.getImageFeatures(bitmap)
-                val text = ocrProcessor.recognizeText(bitmap)
-                val faces = faceDetector.detectFaces(bitmap)
-
-                // Encode each detected face while we're still on this thread.
-                val faceData = faces.map { face ->
-                    val cropped = faceDetector.alignFace(bitmap, face)
-                    val embedding = faceEncoder.getFaceFeatures(cropped)
-                    val box = ImageUtils.scaleRect(face.boundingBox, 1.5f)
-                    Pair(embedding, box)
-                }
-
-                InferenceResult(features, text, faces, faceData)
-            }
-        })
-        return try {
-            // Hard timeout — if the native call is stuck, get() will throw.
-            future.get(2, java.util.concurrent.TimeUnit.MINUTES)
-        } catch (e: java.util.concurrent.TimeoutException) {
-            Log.e(TAG, "Hard timeout: ML inference exceeded 2 minutes, abandoning thread")
-            null
-        } catch (e: java.util.concurrent.ExecutionException) {
-            throw e.cause ?: e
-        }
     }
 
     private suspend fun processAndInsertImages(imagesToProcess: List<Pair<Long, Long>>, onProgress: suspend (Int, Int) -> Unit) {
@@ -263,159 +186,81 @@ class GalleryService(private val context: Context) {
         val totalCount = imagesToProcess.size
         var counter = 0
         progress.value = 0f
-        var lastProgressMs = 0L
 
-        // Cache categories once — avoids repeated DB queries per image.
-        val allCategories = categoryDao.getAllCategories()
-
-        // Create a single reusable executor for ML inference.  The same thread
-        // is reused across all images; a new executor is only created if a
-        // timeout forces us to abandon a stuck native thread.
-        var inferenceExecutor = createInferenceExecutor()
-
-        try {
-            // ── Pipeline: prefetch next bitmap while current image is in ML inference ──
-            // This overlaps I/O (bitmap decode) with compute (ML inference) so the CPU
-            // is never idle waiting for the storage subsystem between images.
-            var prefetchedBitmap: android.graphics.Bitmap? = null
-            var prefetchIdx = -1
-
-            for (i in imagesToProcess.indices) {
-                val (mediaId, timestamp) = imagesToProcess[i]
-
-                // Check if the worker's coroutine has been cancelled (e.g. by REPLACE)
-                coroutineContext.ensureActive()
-
-                try {
-                    // Use prefetched bitmap if available for this index, otherwise load now
-                    val bitmap = if (prefetchIdx == i && prefetchedBitmap != null) {
-                        prefetchedBitmap
-                    } else {
-                        ImageUtils.getBitmapFromUri(context, mediaId.toMediaUri())
+        imagesToProcess.forEach { (mediaId, timestamp) ->
+            try {
+                val bitmap = ImageUtils.getBitmapFromUri(context, mediaId.toMediaUri())
+                if (bitmap != null) {
+                    val (features, text, faces) = withContext(Dispatchers.Default) {
+                        val featuresDeferred = async { imageEncoder.getImageFeatures(bitmap) }
+                        val textDeferred = async { ocrProcessor.recognizeText(bitmap) }
+                        val facesDeferred = async { faceDetector.detectFaces(bitmap) }
+                        Triple(
+                            featuresDeferred.await(),
+                            textDeferred.await(),
+                            facesDeferred.await()
+                        )
                     }
-                    prefetchedBitmap = null
-                    prefetchIdx = -1
 
-                    if (bitmap != null) {
-                        // Kick off prefetch of the NEXT image's bitmap on the I/O
-                        // dispatcher while ML inference runs on its dedicated thread.
-                        val nextIndex = i + 1
-                        val prefetchJob = if (nextIndex < imagesToProcess.size) {
-                            CoroutineScope(coroutineContext).async(Dispatchers.IO) {
-                                try {
-                                    ImageUtils.getBitmapFromUri(
-                                        context,
-                                        imagesToProcess[nextIndex].first.toMediaUri()
+                    mediaDao.insertAll(
+                        listOf(MediaEntity(mediaId, timestamp, false, features, text))
+                    )
+
+                    // 1. Save face embeddings + bounding box to FaceEntity (clustering happens offline later)
+                    withContext(Dispatchers.Default) {
+                        faces.forEach { face ->
+                            val croppedImage = faceDetector.alignFace(bitmap, face)
+                            val faceFeatures = faceEncoder.getFaceFeatures(croppedImage)
+                            val box = ImageUtils.scaleRect(face.boundingBox, 1.5f)
+
+                            withContext(Dispatchers.IO) {
+                                faceDao.insertFace(
+                                    FaceEntity(
+                                        mediaId = mediaId,
+                                        embedding = faceFeatures,
+                                        boxLeft = box.left,
+                                        boxTop = box.top,
+                                        boxRight = box.right,
+                                        boxBottom = box.bottom
                                     )
-                                } catch (e: Exception) {
-                                    Log.w(TAG, "Prefetch failed for index $nextIndex", e)
-                                    null
-                                }
-                            }
-                        } else null
-
-                        // Run all ML inference on the reusable dedicated thread with a
-                        // hard 2-minute timeout that can't be blocked by native code.
-                        val result = runInferenceOnExecutor(
-                            inferenceExecutor,
-                            bitmap, imageEncoder, ocrProcessor, faceDetector, faceEncoder
-                        )
-
-                        // Collect the prefetched bitmap (should be ready by now since
-                        // ML inference takes much longer than a bitmap decode).
-                        if (prefetchJob != null) {
-                            prefetchedBitmap = prefetchJob.await()
-                            prefetchIdx = nextIndex
-                        }
-
-                        if (result == null) {
-                            // Timed out — the old thread is stuck in native code.
-                            // Abandon it and spin up a fresh executor for the next image.
-                            inferenceExecutor.shutdownNow()
-                            inferenceExecutor = createInferenceExecutor()
-
-                            Log.e(TAG, "Skipping image $mediaId due to inference timeout")
-                            counter++
-                            val now = SystemClock.elapsedRealtime()
-                            if (now - lastProgressMs >= PROGRESS_THROTTLE_MS || counter == totalCount) {
-                                lastProgressMs = now
-                                progress.value = counter / totalCount.toFloat()
-                                onProgress(counter, totalCount)
-                            }
-                            continue
-                        }
-
-                        val (features, text, _, faceData) = result
-
-                        mediaDao.insertAll(
-                            listOf(MediaEntity(mediaId, timestamp, false, features, text))
-                        )
-
-                        // Save face embeddings + bounding box
-                        faceData.forEach { (embedding, box) ->
-                            faceDao.insertFace(
-                                FaceEntity(
-                                    mediaId = mediaId,
-                                    embedding = embedding,
-                                    boxLeft = box.left,
-                                    boxTop = box.top,
-                                    boxRight = box.right,
-                                    boxBottom = box.bottom
                                 )
-                            )
+                            }
                         }
 
-                        // Process Categories (Auto-assignment logic)
+                        // 2. Process Categories (Auto-assignment logic)
+                        val allCategories = categoryDao.getAllCategories()
                         allCategories.forEach { category ->
                             val similarity = VectorUtils.dotProduct(features, category.embedding)
                             if (similarity > CATEGORY_MATCH_THRESHOLD) {
-                                categoryDao.insertCrossRef(
-                                    MediaCategoryCrossRef(
-                                        mediaId,
-                                        category.id,
-                                        similarity
+                                withContext(Dispatchers.IO) {
+                                    categoryDao.insertCrossRef(
+                                        MediaCategoryCrossRef(
+                                            mediaId,
+                                            category.id,
+                                            similarity
+                                        )
                                     )
-                                )
+                                }
                             }
                         }
                     }
 
-                    // If processing succeeds, increment counter and report progress
                     counter++
-                    Log.d(TAG, "Processed: $counter / $totalCount (ID: $mediaId)")
-
-                    val now = SystemClock.elapsedRealtime()
-                    if (now - lastProgressMs >= PROGRESS_THROTTLE_MS || counter == totalCount) {
-                        lastProgressMs = now
-                        progress.value = counter / totalCount.toFloat()
-                        onProgress(counter, totalCount)
-                    }
-                } catch (e: Exception) {
-                    if (e is CancellationException) {
-                        throw e
-                    }
-                    Log.e(TAG, "Error processing image $mediaId", e)
-                    counter++
-                    // Still update progress so the UI advances past the skipped image
-                    val now = SystemClock.elapsedRealtime()
-                    if (now - lastProgressMs >= PROGRESS_THROTTLE_MS || counter == totalCount) {
-                        lastProgressMs = now
-                        progress.value = counter / totalCount.toFloat()
-                        onProgress(counter, totalCount)
-                    }
+                    Log.d("GalleryService", "Processed: $counter / $totalCount (ID: $mediaId)")
+                    progress.value = counter / totalCount.toFloat()
+                    onProgress(counter, totalCount)
                 }
+            } catch (e: Exception) {
+                Log.e("GalleryService", "Error processing image $mediaId", e)
             }
-        } finally {
-            progress.value = null
-
-            // Shut down the inference thread (or abandon it if stuck).
-            inferenceExecutor.shutdownNow()
-
-            imageEncoder.close()
-            ocrProcessor.close()
-            faceDetector.close()
-            faceEncoder.close()
         }
+
+        progress.value = null
+
+        imageEncoder.close()
+        ocrProcessor.close()
+        faceDetector.close()
+        faceEncoder.close()
     }
 
     /**
@@ -603,58 +448,8 @@ class GalleryService(private val context: Context) {
                     Log.d(TAG, "Incremental run complete: $assignedCount assigned to existing, $newPersonCount new persons created")
                 }
             }
-
-            // ── Generate person thumbnails from face bounding boxes ──
-//            generatePersonThumbnails()
         }
         return true
-    }
-
-    /**
-     * For each person, finds the face with the largest bounding box area,
-     * loads the source bitmap, crops it, and creates a thumbnail.
-     */
-    private suspend fun generatePersonThumbnails() {
-        val allPersons = personDao.getAllPersons()
-        val allFaces = faceDao.getAllFaces()
-
-        // Group faces by personId
-        val facesByPerson = allFaces
-            .filter { it.personId != null }
-            .groupBy { it.personId!! }
-
-        for (person in allPersons) {
-            val faces = facesByPerson[person.id] ?: continue
-
-            // Pick the face with the largest bounding box area
-            val bestFace = faces.maxByOrNull {
-                (it.boxRight - it.boxLeft) * (it.boxBottom - it.boxTop)
-            } ?: continue
-
-            val boxArea = (bestFace.boxRight - bestFace.boxLeft) * (bestFace.boxBottom - bestFace.boxTop)
-
-            // Skip if person already has a thumbnail at least as large
-            if (person.thumbnailPath.isNotEmpty() && person.thumbnailSize >= boxArea) {
-                continue
-            }
-
-            // Delete old thumbnail if it exists
-            if (person.thumbnailPath.isNotEmpty()) {
-                ImageUtils.deleteThumbnail(person.thumbnailPath)
-            }
-
-            // Load bitmap from media, crop, and save thumbnail
-            val bitmap = ImageUtils.getBitmapFromUri(context, bestFace.mediaId.toMediaUri())
-            if (bitmap != null) {
-                val rect = Rect(bestFace.boxLeft, bestFace.boxTop, bestFace.boxRight, bestFace.boxBottom)
-                val cropped = ImageUtils.cropImage(bitmap, rect)
-                val thumbnailPath = ImageUtils.createThumbnail(context, cropped)
-                personDao.updatePersonThumbnail(person.id, thumbnailPath, boxArea)
-                Log.d(TAG, "Generated thumbnail for person ${person.id} (name=${person.name})")
-            } else {
-                Log.w(TAG, "Could not load bitmap for media ${bestFace.mediaId} to create thumbnail for person ${person.id}")
-            }
-        }
     }
 
     suspend fun getAllDeviceImages(): List<Uri> =
@@ -727,7 +522,7 @@ class GalleryService(private val context: Context) {
             // Filter by dates
             images = filterByDate(images, fromDate, toDate)
 
-            if (images.isEmpty()) return@withContext emptyList<Uri>()
+            if (images.isEmpty()) return@withContext emptyList()
 
             // If prompt is blank or encoder missing, just sort by date
             if (encoder == null) {
@@ -799,12 +594,12 @@ class GalleryService(private val context: Context) {
                 mediaIds.intersect(personMediaIds.toSet()).toList()
             }
 
-            if (targetIds.isEmpty()) return@withContext emptyList<Uri>()
+            if (targetIds.isEmpty()) return@withContext emptyList()
 
             val images = mediaDao.getMediaByIds(targetIds)
             var filtered = filterByDate(images, fromDate, toDate)
 
-            if (filtered.isEmpty()) return@withContext emptyList<Uri>()
+            if (filtered.isEmpty()) return@withContext emptyList()
 
             if (useClip) {
                 initJob.await()

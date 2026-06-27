@@ -59,7 +59,7 @@ class GalleryIndexerWorker(
                     createForegroundInfo(processed, total).notification
                 )
             }
-            
+
             // Indexing completed successfully. Enqueue clustering as a SEPARATE
             // unique work chain, so that if the indexer is replaced by a periodic
             // trigger later, it doesn't cancel the clustering run mid-flight.
@@ -69,7 +69,7 @@ class GalleryIndexerWorker(
                     5,
                     java.util.concurrent.TimeUnit.MINUTES
                 ).build()
-                
+
             WorkManager.getInstance(applicationContext)
                 .beginUniqueWork(
                     "GalleryClustering_OneTime",
@@ -77,7 +77,7 @@ class GalleryIndexerWorker(
                     clusterRequest
                 )
                 .enqueue()
-                
+
             Result.success()
         } catch (e: Throwable) {
             // Catch Throwable (not just Exception) so OutOfMemoryErrors also trigger retry.

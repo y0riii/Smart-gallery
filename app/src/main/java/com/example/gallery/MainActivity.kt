@@ -3,7 +3,6 @@ package com.example.gallery
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
@@ -60,7 +59,6 @@ import com.example.gallery.components.CategoryFoldersScreen
 import com.example.gallery.components.GalleryScreen
 import com.example.gallery.components.PeopleFoldersScreen
 import com.example.gallery.db.AppDatabase
-import com.example.gallery.db.GalleryPeriodicTriggerWorker
 import com.example.gallery.folders.AlbumsFolderRepository
 import com.example.gallery.folders.CategoryFolderRepository
 import com.example.gallery.folders.PersonFolderRepository
@@ -75,6 +73,9 @@ import com.example.gallery.viewModels.factories.CategoryViewModelFactory
 import com.example.gallery.viewModels.factories.GalleryViewModelFactory
 import com.example.gallery.viewModels.factories.PeopleViewModelFactory
 import java.util.concurrent.TimeUnit
+import androidx.core.content.edit
+import com.example.gallery.db.GalleryPeriodicTriggerWorker
+import androidx.core.net.toUri
 
 class MainActivity : ComponentActivity() {
 
@@ -130,13 +131,13 @@ class MainActivity : ComponentActivity() {
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         if (!pm.isIgnoringBatteryOptimizations(packageName)) {
             val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                data = Uri.parse("package:$packageName")
+                data = "package:$packageName".toUri()
             }
             startActivity(intent)
         }
 
         // Mark as asked regardless of user choice — we never ask again
-        prefs.edit().putBoolean("battery_opt_asked", true).apply()
+        prefs.edit { putBoolean("battery_opt_asked", true) }
     }
 
     override fun onStart() {
@@ -161,18 +162,15 @@ class MainActivity : ComponentActivity() {
             .setRequiresBatteryNotLow(true)
             .build()
 
-        // Use the lightweight trigger worker — it enqueues the real
-        // GalleryIndexerWorker → FaceClusteringWorker chain as one-time work,
-        // avoiding conflicts with the mutex and ExistingWorkPolicy.KEEP.
-        val triggerRequest =
-            PeriodicWorkRequestBuilder<GalleryPeriodicTriggerWorker>(12, TimeUnit.HOURS)
+        val indexingRequest =
+            PeriodicWorkRequestBuilder<GalleryPeriodicTriggerWorker>(6, TimeUnit.HOURS)
                 .setConstraints(constraints)
                 .build()
 
         WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
             "GalleryIndexing_Periodic",
-            ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE,
-            triggerRequest
+            ExistingPeriodicWorkPolicy.KEEP,
+            indexingRequest
         )
     }
 }
