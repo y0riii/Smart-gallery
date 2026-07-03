@@ -370,7 +370,7 @@ fun FoldersScreen(
                 }
             }
 
-            BackHandler { viewModel.clearSelectedFolder() }
+            BackHandler(enabled = fullScreenIndex == null && !viewModel.isSelecting) { viewModel.clearSelectedFolder() }
         }
     }
 

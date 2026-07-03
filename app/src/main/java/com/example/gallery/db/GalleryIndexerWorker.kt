@@ -7,7 +7,10 @@ import android.content.pm.ServiceInfo
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
+import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.example.gallery.GalleryService
@@ -56,6 +59,25 @@ class GalleryIndexerWorker(
                     createForegroundInfo(processed, total).notification
                 )
             }
+
+            // Indexing completed successfully. Enqueue clustering as a SEPARATE
+            // unique work chain, so that if the indexer is replaced by a periodic
+            // trigger later, it doesn't cancel the clustering run mid-flight.
+            val clusterRequest = OneTimeWorkRequestBuilder<FaceClusteringWorker>()
+                .setBackoffCriteria(
+                    androidx.work.BackoffPolicy.LINEAR,
+                    5,
+                    java.util.concurrent.TimeUnit.MINUTES
+                ).build()
+
+            WorkManager.getInstance(applicationContext)
+                .beginUniqueWork(
+                    "GalleryClustering_OneTime",
+                    ExistingWorkPolicy.KEEP,
+                    clusterRequest
+                )
+                .enqueue()
+
             Result.success()
         } catch (e: Throwable) {
             // Catch Throwable (not just Exception) so OutOfMemoryErrors also trigger retry.

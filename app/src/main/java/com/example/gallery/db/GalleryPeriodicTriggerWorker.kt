@@ -20,20 +20,12 @@ class GalleryPeriodicTriggerWorker(
                 java.util.concurrent.TimeUnit.MINUTES
             ).build()
             
-        val clusterRequest = OneTimeWorkRequestBuilder<FaceClusteringWorker>()
-            .setBackoffCriteria(
-                androidx.work.BackoffPolicy.LINEAR,
-                5,
-                java.util.concurrent.TimeUnit.MINUTES
-            ).build()
-            
         WorkManager.getInstance(applicationContext)
             .beginUniqueWork(
                 "GalleryIndexing_OneTime",
                 ExistingWorkPolicy.KEEP,
                 indexRequest
             )
-            .then(clusterRequest)
             .enqueue()
             
         return Result.success()

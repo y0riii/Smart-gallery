@@ -206,7 +206,7 @@ fun ImageGridScreen(
     }
 
     // Feature 1: pressing Back while selecting cancels selection mode
-    if (isSelecting) {
+    if (isSelecting && fullScreenIndex == null) {
         BackHandler { onCancelSelection() }
     }
 }

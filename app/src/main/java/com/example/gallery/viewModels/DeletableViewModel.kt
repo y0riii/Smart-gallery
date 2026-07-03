@@ -28,7 +28,7 @@ abstract class DeletableViewModel(protected val service: GalleryService) : ViewM
         private set
 
     var fullScreenIndex by mutableStateOf<Int?>(null)
-        private set
+        protected set
 
     // ── Single-delete pending URI ──────────────────────────────────────────────
     private var pendingDeleteUri: Uri? = null
@@ -144,14 +144,14 @@ abstract class DeletableViewModel(protected val service: GalleryService) : ViewM
                 // Finalize each deleted URI in the database
                 service.finalizeDeleteImages(bulkUris)
                 clearSelection() // exit selection mode after bulk delete
-                onDeleteSuccess(bulkUris.first()) // notify subclass to refresh
+                onDeleteSuccess(bulkUris) // notify subclass to refresh
             } else if (singleUri != null) {
                 service.finalizeDeleteImage(singleUri)
-                onDeleteSuccess(singleUri)
+                onDeleteSuccess(listOf(singleUri))
             }
         }
     }
 
     /** Called after a deletion is confirmed and finalized. Subclasses refresh their own state here. */
-    protected abstract suspend fun onDeleteSuccess(uri: Uri)
+    protected abstract suspend fun onDeleteSuccess(uris: List<Uri>)
 }
