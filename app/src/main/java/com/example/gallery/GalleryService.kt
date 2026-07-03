@@ -85,7 +85,16 @@ class GalleryService(private val context: Context) {
         textEncoder // triggers initialization immediately
     }
 
-    private var ftsSupported: Boolean = false
+    private val ftsSupported by lazy {
+        try {
+            db.openHelper.readableDatabase
+                .query("SELECT 1 FROM media_items_fts LIMIT 1")
+                .use { }
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
 
     /**
      * Compares the device's MediaStore with the Room Database and syncs them.
@@ -95,27 +104,18 @@ class GalleryService(private val context: Context) {
      */
     suspend fun indexImagesBackground(onProgress: suspend (Int, Int) -> Unit) {
         withContext(Dispatchers.IO) {
-            // 1. Check FTS support
-            try {
-                db.openHelper.readableDatabase
-                    .query("SELECT rowid FROM media_items_fts LIMIT 1")
-                    .use { _ -> ftsSupported = true }
-            } catch (_: Exception) {
-                ftsSupported = false
-            }
-
-            // 2. Fetch IDs currently on the device
+            // 1. Fetch IDs currently on the device
             val deviceImages = ImageUtils.scanMediaStore(context)
             val deviceImageIds = deviceImages.map { it.first }.toSet()
 
-            // 3. Fetch IDs currently in the database
+            // 2. Fetch IDs currently in the database
             val dbImageIds = mediaDao.getAllMediaIds().toSet()
 
-            // 4. Calculate the differences (The Diff)
+            // 3. Calculate the differences (The Diff)
             val idsToDelete = dbImageIds - deviceImageIds // In DB, but missing from device
             val idsToAdd = deviceImageIds - dbImageIds    // On device, but missing from DB
 
-            // 5. Delete removed images from the database and cleanup associations
+            // 4. Delete removed images from the database and cleanup associations
             if (idsToDelete.isNotEmpty()) {
                 Log.d(TAG, "Sync: Deleting ${idsToDelete.size} obsolete images")
                 idsToDelete.forEach { mediaId ->
@@ -123,7 +123,7 @@ class GalleryService(private val context: Context) {
                 }
             }
 
-            // 6. Process and insert newly added images
+            // 5. Process and insert newly added images
             if (idsToAdd.isNotEmpty()) {
                 val newImagesToProcess = deviceImages.filter { it.first in idsToAdd }
                 Log.d(TAG, "Sync: Found ${newImagesToProcess.size} new images to index.")
@@ -684,6 +684,7 @@ class GalleryService(private val context: Context) {
         toDate: Long? = null
     ): List<Uri> {
         return withContext(Dispatchers.IO) {
+            Log.d(TAG, "Is FTS supported: $ftsSupported")
             var results = if (ftsSupported) {
                 mediaDao.searchMediaFts(text)
             } else {

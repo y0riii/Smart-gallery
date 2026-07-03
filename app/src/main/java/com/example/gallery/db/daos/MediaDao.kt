@@ -45,9 +45,9 @@ interface MediaDao {
         if (trimmed.isEmpty()) return ""
 
         val escapedWords = trimmed.split("\\s+".toRegex())
-            .map { it.replace("\"", "\"\"") + "*" } // add * for prefix search
+            .map { it.replace("\"", "\"\"") } // add * for prefix search
 
-        return escapedWords.joinToString(" OR ")
+        return escapedWords.joinToString(" AND ")
     }
 
     suspend fun searchMediaFts(query: String): List<MediaEntity> {
