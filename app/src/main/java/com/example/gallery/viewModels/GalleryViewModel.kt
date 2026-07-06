@@ -58,7 +58,7 @@ class GalleryViewModel(
 
     fun onPermissionGranted() {
         viewModelScope.launch {
-            images = service.getAllDeviceImages()
+            images = service.getAllDeviceMedia()
             service.startIndexingWorkManager()
         }
     }
@@ -106,7 +106,7 @@ class GalleryViewModel(
         toDate = null
         useClip = true
         viewModelScope.launch {
-            images = service.getAllDeviceImages()
+            images = service.getAllDeviceMedia()
             // Set flag last so LaunchedEffect fires after images list is ready
             shouldScrollToTop = true
         }

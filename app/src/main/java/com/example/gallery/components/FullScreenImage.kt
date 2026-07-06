@@ -58,7 +58,24 @@ import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import android.widget.VideoView
+import androidx.compose.ui.viewinterop.AndroidView
 import coil3.compose.AsyncImage
+import com.example.gallery.utils.isVideoUri
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Text
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -297,26 +314,36 @@ fun FullScreenImage(
                             }
                         }
                 ) {
-                    AsyncImage(
-                        model = uri,
-                        onSuccess = { state ->
-                            val intrinsicSize = state.painter.intrinsicSize
-                            if (intrinsicSize.width > 0 && intrinsicSize.height > 0) {
-                                imageAspectRatio = intrinsicSize.width / intrinsicSize.height
-                            }
-                        },
-                        contentDescription = "Full screen image",
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer(
-                                scaleX = scale.value,
-                                scaleY = scale.value,
-                                translationX = offset.value.x,
-                                translationY = offset.value.y + dismissOffset.value,
-                                alpha = (1f - (dismissOffset.value / boxHeight)).coerceIn(0f, 1f)
-                            ),
-                        contentScale = ContentScale.Fit
-                    )
+                    if (uri.isVideoUri()) {
+                        // ── Custom Video Player with Bottom Controls ───────────
+                        VideoPlayer(
+                            uri = uri,
+                            dismissOffset = dismissOffset.value,
+                            boxHeight = boxHeight
+                        )
+                    } else {
+                        // ── Image viewer ───────────────────────────────────
+                        AsyncImage(
+                            model = uri,
+                            onSuccess = { state ->
+                                val intrinsicSize = state.painter.intrinsicSize
+                                if (intrinsicSize.width > 0 && intrinsicSize.height > 0) {
+                                    imageAspectRatio = intrinsicSize.width / intrinsicSize.height
+                                }
+                            },
+                            contentDescription = "Full screen image",
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer(
+                                    scaleX = scale.value,
+                                    scaleY = scale.value,
+                                    translationX = offset.value.x,
+                                    translationY = offset.value.y + dismissOffset.value,
+                                    alpha = (1f - (dismissOffset.value / boxHeight)).coerceIn(0f, 1f)
+                                ),
+                            contentScale = ContentScale.Fit
+                        )
+                    }
                 }
             }
         }
@@ -350,13 +377,14 @@ fun FullScreenImage(
                 if (!isPreviewMode) {
                     IconButton(onClick = {
                         val currentUri = images[pagerState.currentPage]
+                        val isVideo = currentUri.isVideoUri()
                         val shareIntent = Intent().apply {
                             action = Intent.ACTION_SEND
                             putExtra(Intent.EXTRA_STREAM, currentUri)
-                            type = "image/*"
+                            type = if (isVideo) "video/*" else "image/*"
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         }
-                        context.startActivity(Intent.createChooser(shareIntent, "Share Image"))
+                        context.startActivity(Intent.createChooser(shareIntent, if (isVideo) "Share Video" else "Share Image"))
                     }) {
                         Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White)
                     }
@@ -393,4 +421,196 @@ fun FullScreenImagePreview() {
             )
         }
     }
+}
+
+@Composable
+fun VideoPlayer(
+    uri: Uri,
+    dismissOffset: Float,
+    boxHeight: Float,
+    modifier: Modifier = Modifier
+) {
+    var isPlaying by remember { mutableStateOf(false) }
+    var currentPosition by remember { mutableStateOf(0) }
+    var duration by remember { mutableStateOf(0) }
+    var videoViewInstance by remember { mutableStateOf<VideoView?>(null) }
+
+    // Periodically update currentPosition when playing
+    LaunchedEffect(isPlaying) {
+        if (isPlaying) {
+            while (true) {
+                videoViewInstance?.let {
+                    currentPosition = it.currentPosition
+                    duration = it.duration
+                }
+                delay(200)
+            }
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .graphicsLayer(
+                translationY = dismissOffset,
+                alpha = (1f - (dismissOffset / boxHeight)).coerceIn(0f, 1f)
+            )
+            .background(Color.Black)
+    ) {
+        // 1. Video container (occupies all remaining space)
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    VideoView(ctx).apply {
+                        setVideoURI(uri)
+                        setOnPreparedListener { mp ->
+                            duration = mp.duration
+                            mp.isLooping = true
+                            start()
+                            isPlaying = true
+                        }
+                        videoViewInstance = this
+                    }
+                },
+                update = { videoView ->
+                    if (videoView.tag != uri) {
+                        videoView.tag = uri
+                        videoView.setVideoURI(uri)
+                        videoView.start()
+                        isPlaying = true
+                        videoViewInstance = videoView
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // 2. Beautiful Custom Controls Row (below the video!)
+        Surface(
+            color = Color.Black.copy(alpha = 0.85f),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+            ) {
+                // Slider (Seek bar)
+                val durationFloat = duration.toFloat().coerceAtLeast(1f)
+                val sliderPosition = currentPosition.toFloat().coerceIn(0f, durationFloat)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = formatTime(currentPosition),
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+
+                    Slider(
+                        value = sliderPosition,
+                        onValueChange = { newValue ->
+                            currentPosition = newValue.toInt()
+                            videoViewInstance?.seekTo(newValue.toInt())
+                        },
+                        valueRange = 0f..durationFloat,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 8.dp),
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary,
+                            inactiveTrackColor = Color.Gray
+                        )
+                    )
+
+                    Text(
+                        text = formatTime(duration),
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                // Buttons row (Play/Pause, Rewind, Fast Forward)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = {
+                        videoViewInstance?.let {
+                            val newPos = (it.currentPosition - 10000).coerceAtLeast(0)
+                            it.seekTo(newPos)
+                            currentPosition = newPos
+                        }
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.Replay10,
+                            contentDescription = "Rewind 10s",
+                            tint = Color.White
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(24.dp))
+
+                    IconButton(
+                        onClick = {
+                            videoViewInstance?.let {
+                                if (it.isPlaying) {
+                                    it.pause()
+                                    isPlaying = false
+                                } else {
+                                    it.start()
+                                    isPlaying = true
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .background(
+                                MaterialTheme.colorScheme.primary,
+                                shape = androidx.compose.foundation.shape.CircleShape
+                            )
+                    ) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (isPlaying) "Pause" else "Play",
+                            tint = Color.White
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(24.dp))
+
+                    IconButton(onClick = {
+                        videoViewInstance?.let {
+                            val newPos = (it.currentPosition + 10000).coerceAtMost(duration)
+                            it.seekTo(newPos)
+                            currentPosition = newPos
+                        }
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.Forward10,
+                            contentDescription = "Forward 10s",
+                            tint = Color.White
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatTime(ms: Int): String {
+    val totalSeconds = ms / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return String.format("%02d:%02d", minutes, seconds)
 }

@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.example.gallery.utils.isVideoUri
 
 /**
  * Base ViewModel that owns the image-deletion flow shared between
@@ -190,14 +191,26 @@ abstract class DeletableViewModel(protected val service: GalleryService) : ViewM
         val uris = selectedUris.toList()
         if (uris.isEmpty()) return
 
+        val hasVideo = uris.any { it.isVideoUri() }
+        val hasImage = uris.any { !it.isVideoUri() }
+
         val shareIntent = Intent().apply {
             action = Intent.ACTION_SEND_MULTIPLE
             // Pass all selected URIs as an ArrayList (required by ACTION_SEND_MULTIPLE)
             putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
-            type = "image/*"
+            type = when {
+                hasVideo && hasImage -> "*/*"
+                hasVideo -> "video/*"
+                else -> "image/*"
+            }
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(shareIntent, "Share Images"))
+        val title = when {
+            hasVideo && hasImage -> "Share Media"
+            hasVideo -> "Share Videos"
+            else -> "Share Images"
+        }
+        context.startActivity(Intent.createChooser(shareIntent, title))
     }
 
     // ── Deletion result callback ───────────────────────────────────────────────

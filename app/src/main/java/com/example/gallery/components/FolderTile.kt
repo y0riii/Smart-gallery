@@ -33,6 +33,8 @@ import com.example.gallery.ui.theme.AppConfig
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.graphics.Color
+import com.example.gallery.utils.isVideoUri
+import com.example.gallery.utils.rememberVideoThumbnail
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 
@@ -172,8 +174,11 @@ fun FolderTile(
 @Composable
 private fun ThumbCell(uri: Uri?, modifier: Modifier) {
     if (uri != null) {
+        val isVideo = uri.isVideoUri()
+        val videoThumbnail = if (isVideo) rememberVideoThumbnail(uri) else null
+
         AsyncImage(
-            model = uri,
+            model = if (isVideo) videoThumbnail else uri,
             contentDescription = null,
             modifier = modifier,
             contentScale = ContentScale.Crop,

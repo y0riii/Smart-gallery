@@ -30,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -56,6 +57,8 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.size.Size
 import com.example.gallery.ui.theme.AppConfig
+import com.example.gallery.utils.isVideoUri
+import com.example.gallery.utils.rememberVideoThumbnail
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.math.max
@@ -230,11 +233,14 @@ fun ImageGrid(
                     .padding(animatedCellPadding)
                     .aspectRatio(1f) // Square cell — image always fills correctly
             ) {
-                // ── Image ─────────────────────────────────────────────────
+                // ── Image/Video thumbnail ─────────────────────────────────
+                val isVideo = uri.isVideoUri()
+                val videoThumbnail = if (isVideo) rememberVideoThumbnail(uri) else null
+
                 val context = LocalContext.current
-                val imageRequest = remember(uri) {
+                val imageRequest = remember(uri, videoThumbnail) {
                     ImageRequest.Builder(context)
-                        .data(uri)
+                        .data(if (isVideo) videoThumbnail else uri)
                         // Decode at a capped resolution: no cell ever needs more
                         // than 256 px. This prevents Coil from loading full-res
                         // bitmaps into tiny grid cells, which causes GC pressure
@@ -297,6 +303,28 @@ fun ImageGrid(
                                 .align(Alignment.TopStart)
                                 .padding(4.dp)
                                 .size(AppConfig.SelectionIconSize)
+                        )
+                    }
+                }
+
+                // ── Video badge ───────────────────────────────────────────
+                if (uri.isVideoUri()) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(4.dp)
+                            .size(24.dp)
+                            .background(
+                                Color.Black.copy(alpha = 0.55f),
+                                shape = androidx.compose.foundation.shape.CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Video",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
                         )
                     }
                 }

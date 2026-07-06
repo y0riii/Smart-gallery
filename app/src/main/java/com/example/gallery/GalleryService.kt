@@ -28,8 +28,10 @@ import com.example.gallery.ml.image.ClipImageEncoder
 import com.example.gallery.ml.ocr.OcrProcessor
 import com.example.gallery.ml.text.ClipTextEncoder
 import com.example.gallery.utils.ImageUtils
+import com.example.gallery.utils.VideoUtils
 import com.example.gallery.utils.VectorUtils
 import com.example.gallery.utils.toMediaUri
+import com.example.gallery.utils.toVideoUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -506,6 +508,29 @@ class GalleryService(private val context: Context) {
             ImageUtils.scanMediaStore(context).map { (id, _) -> id.toMediaUri() }
         }
 
+    /**
+     * Returns all images AND videos merged and sorted by date descending.
+     * Videos are included only when no semantic/text search is active.
+     */
+    suspend fun getAllDeviceMedia(): List<Uri> =
+        withContext(Dispatchers.IO) {
+            val images = ImageUtils.scanMediaStore(context).map { (id, ts) -> ts to id.toMediaUri() }
+            val videos = VideoUtils.scanMediaStore(context).map { (id, ts) -> ts to id.toVideoUri() }
+            (images + videos)
+                .sortedByDescending { it.first }
+                .map { it.second }
+        }
+
+    /**
+     * Returns video URIs filtered by an optional date range.
+     * Used when a search is date-only (no text/name filters).
+     */
+    suspend fun getDeviceVideosWithDateFilter(fromDate: Long?, toDate: Long?): List<Uri> =
+        withContext(Dispatchers.IO) {
+            VideoUtils.scanMediaStoreWithDateFilter(context, fromDate, toDate)
+                .map { it.toVideoUri() }
+        }
+
     suspend fun createCategory(prompt: String) {
         try {
             initJob.await()
@@ -575,36 +600,41 @@ class GalleryService(private val context: Context) {
         return withContext(Dispatchers.IO) {
             val (names, cleanPrompt) = findNamesInPrompt(prompt)
 
+            // Date-only search: no text, no names — include videos merged with images
             if (cleanPrompt.isBlank() && names.isEmpty()) {
-                return@withContext getDeviceImagesWithDateFilter(fromDate, toDate).map { it.toMediaUri() }
+                val imageIds = getDeviceImagesWithDateFilter(fromDate, toDate).map { it.toMediaUri() }
+                val videoUris = getDeviceVideosWithDateFilter(fromDate, toDate)
+                // Merge images and videos, sorted by timestamp descending
+                return@withContext mergeMediaByDate(
+                    imageIds = getDeviceImagesWithDateFilter(fromDate, toDate),
+                    videoIds = VideoUtils.scanMediaStoreWithDateFilter(context, fromDate, toDate),
+                    fromDate = fromDate,
+                    toDate = toDate
+                )
             }
 
+            // Semantic/text/name search: images only, no videos
             initJob.await()
             val encoder = textEncoder
 
-            // Filter by names first if there are any
             var images = if (names.isEmpty()) {
                 mediaDao.getAllMedia()
             } else {
                 personDao.getImagesByNames(names, names.size)
             }
 
-            // Filter by dates
             images = filterByDate(images, fromDate, toDate)
 
             if (images.isEmpty()) return@withContext emptyList()
 
-            // If prompt is blank or encoder missing, just sort by date
             if (encoder == null) {
                 return@withContext images.sortedByDescending { it.timestampMs }
                     .map { it.mediaId.toMediaUri() }
             }
 
-            // Provide CLIP with the clean prompt where "@name" is replaced by "a person"
             val textFeatures =
                 withContext(Dispatchers.Default) { encoder.getTextFeatures(cleanPrompt) }
 
-            // Sort the filtered images by their similarity to the modified text prompt
             val cores = Runtime.getRuntime().availableProcessors()
             val chunkSize = images.size / cores + 1
 
@@ -620,6 +650,82 @@ class GalleryService(private val context: Context) {
 
             sortedImages.map { it.first.toMediaUri() }
         }
+    }
+
+    /**
+     * Merges image and video IDs sorted by their MediaStore timestamps (date descending).
+     * Used for date-only browsing so videos interleave naturally with images.
+     */
+    private suspend fun mergeMediaByDate(
+        imageIds: List<Long>,
+        videoIds: List<Long>,
+        fromDate: Long?,
+        toDate: Long?
+    ): List<Uri> = withContext(Dispatchers.IO) {
+        // Build timestamp maps from MediaStore
+        val imageEntries = mutableListOf<Pair<Long, Uri>>() // timestamp to uri
+        if (imageIds.isNotEmpty()) {
+            val clauses = mutableListOf<String>()
+            val args = mutableListOf<String>()
+            if (fromDate != null) {
+                clauses.add("${MediaStore.Images.Media.DATE_ADDED} >= ?")
+                args.add((fromDate / 1000).toString())
+            }
+            if (toDate != null) {
+                clauses.add("${MediaStore.Images.Media.DATE_ADDED} <= ?")
+                args.add(((toDate + 86400000 - 1) / 1000).toString())
+            }
+            val selection = if (clauses.isEmpty()) null else clauses.joinToString(" AND ")
+            val sort = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+
+            context.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_ADDED),
+                selection, if (args.isEmpty()) null else args.toTypedArray(), sort
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idCol)
+                    val ts = cursor.getLong(dateCol) * 1000L
+                    imageEntries.add(ts to id.toMediaUri())
+                }
+            }
+        }
+
+        val videoEntries = mutableListOf<Pair<Long, Uri>>()
+        if (videoIds.isNotEmpty()) {
+            val clauses = mutableListOf<String>()
+            val args = mutableListOf<String>()
+            if (fromDate != null) {
+                clauses.add("${MediaStore.Video.Media.DATE_ADDED} >= ?")
+                args.add((fromDate / 1000).toString())
+            }
+            if (toDate != null) {
+                clauses.add("${MediaStore.Video.Media.DATE_ADDED} <= ?")
+                args.add(((toDate + 86400000 - 1) / 1000).toString())
+            }
+            val selection = if (clauses.isEmpty()) null else clauses.joinToString(" AND ")
+            val sort = "${MediaStore.Video.Media.DATE_ADDED} DESC"
+
+            context.contentResolver.query(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.DATE_ADDED),
+                selection, if (args.isEmpty()) null else args.toTypedArray(), sort
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+                val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idCol)
+                    val ts = cursor.getLong(dateCol) * 1000L
+                    videoEntries.add(ts to id.toVideoUri())
+                }
+            }
+        }
+
+        (imageEntries + videoEntries)
+            .sortedByDescending { it.first }
+            .map { it.second }
     }
 
     suspend fun searchWithin(
@@ -733,6 +839,15 @@ class GalleryService(private val context: Context) {
     ): List<Uri> {
         return withContext(Dispatchers.IO) {
             Log.d(TAG, "Is FTS supported: $ftsSupported")
+            if (text.isBlank()) {
+                return@withContext mergeMediaByDate(
+                    imageIds = getDeviceImagesWithDateFilter(fromDate, toDate),
+                    videoIds = VideoUtils.scanMediaStoreWithDateFilter(context, fromDate, toDate),
+                    fromDate = fromDate,
+                    toDate = toDate
+                )
+            }
+
             var results = if (ftsSupported) {
                 mediaDao.searchMediaFts(text)
             } else {
