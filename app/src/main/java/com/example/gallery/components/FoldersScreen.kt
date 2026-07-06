@@ -4,12 +4,17 @@ import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Intent
+import android.speech.RecognizerIntent
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -35,9 +40,15 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PhotoAlbum
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,15 +56,19 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -100,10 +115,15 @@ fun FoldersScreen(
         viewModel.onDeletionResult(result.resultCode == Activity.RESULT_OK)
     }
 
-    LaunchedEffect(viewModel.intentSenderRequest) {
-        viewModel.intentSenderRequest?.let {
-            intentSenderLauncher.launch(it)
-        }
+    LaunchedEffect(Unit) {
+        snapshotFlow { viewModel.intentSenderVersion }
+            .collect { version ->
+                if (version > 0) {
+                    viewModel.intentSenderRequest?.let {
+                        intentSenderLauncher.launch(it)
+                    }
+                }
+            }
     }
 
     // Scroll the IMAGE grid to the top when the ViewModel signals it (after filters change).
@@ -115,6 +135,7 @@ fun FoldersScreen(
         }
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     AnimatedContent(
         targetState = selectedFolder,
         transitionSpec = {
@@ -195,29 +216,98 @@ fun FoldersScreen(
                         }
                     }
                 } else {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
-                        state = foldersGridState,   // Feature 3: dedicated state, never shared with image grid
+                    val voiceFoldersLauncher = rememberLauncherForActivityResult(
+                        contract = ActivityResultContracts.StartActivityForResult()
+                    ) { result ->
+                        if (result.resultCode == Activity.RESULT_OK) {
+                            val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+                            if (!spokenText.isNullOrBlank()) {
+                                viewModel.folderSearchQuery = spokenText
+                            }
+                        }
+                    }
+
+                    TextField(
+                        value = viewModel.folderSearchQuery,
+                        onValueChange = { viewModel.folderSearchQuery = it },
+                        placeholder = { Text("Search folders...") },
+                        singleLine = true,
                         modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        shape = RoundedCornerShape(AppConfig.SearchFieldCornerRadius),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent
+                        ),
+                        trailingIcon = {
+                            if (viewModel.folderSearchQuery.isNotEmpty()) {
+                                IconButton(onClick = { viewModel.folderSearchQuery = "" }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                                }
+                            } else {
+                                IconButton(onClick = {
+                                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
+                                        putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak folder name...")
+                                    }
+                                    voiceFoldersLauncher.launch(intent)
+                                }) {
+                                    Icon(Icons.Default.Mic, contentDescription = "Voice search")
+                                }
+                            }
+                        }
+                    )
+
+                    if (viewModel.filteredFolders.isEmpty()) {
+                        Box(Modifier
                             .weight(1f)
-                            .fillMaxWidth(),
-                        contentPadding = PaddingValues(AppConfig.FolderGridPadding),
-                        verticalArrangement = Arrangement.spacedBy(AppConfig.FolderGridSpacing),
-                        horizontalArrangement = Arrangement.spacedBy(AppConfig.FolderGridSpacing)
-                    ) {
-                        items(viewModel.folders, key = { it.bucketId }) { folder ->
-                            FolderTile(
-                                folder = folder,
-                                onClick = {
-                                    // Feature 3: save foldersGridState position before opening a folder
-                                    viewModel.savedGridFirstIndex =
-                                        foldersGridState.firstVisibleItemIndex
-                                    viewModel.savedGridFirstScrollOffset =
-                                        foldersGridState.firstVisibleItemScrollOffset
-                                    viewModel.loadFolder(folder.bucketId)
-                                },
-                                modifier = Modifier.animateItem()
+                            .fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            Text(
+                                "No folders match your search",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        }
+                    } else {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(2),
+                            state = foldersGridState,   // Feature 3: dedicated state, never shared with image grid
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            contentPadding = PaddingValues(AppConfig.FolderGridPadding),
+                            verticalArrangement = Arrangement.spacedBy(AppConfig.FolderGridSpacing),
+                            horizontalArrangement = Arrangement.spacedBy(AppConfig.FolderGridSpacing)
+                        ) {
+                            items(viewModel.filteredFolders, key = { it.bucketId }) { folder ->
+                                val isSelected = viewModel.selectedFolderBucketIds.contains(folder.bucketId)
+                                FolderTile(
+                                    folder = folder,
+                                    isSelecting = viewModel.isSelectingFolders,
+                                    isSelected = isSelected,
+                                    onClick = {
+                                        if (viewModel.isSelectingFolders) {
+                                            viewModel.toggleFolderSelection(folder.bucketId)
+                                        } else {
+                                            // Feature 3: save foldersGridState position before opening a folder
+                                            viewModel.savedGridFirstIndex =
+                                                foldersGridState.firstVisibleItemIndex
+                                            viewModel.savedGridFirstScrollOffset =
+                                                foldersGridState.firstVisibleItemScrollOffset
+                                            viewModel.loadFolder(folder.bucketId)
+                                        }
+                                    },
+                                    onLongClick = {
+                                        viewModel.toggleFolderSelection(folder.bucketId)
+                                    },
+                                    modifier = Modifier.animateItem()
+                                )
+                            }
                         }
                     }
                 }
@@ -370,7 +460,7 @@ fun FoldersScreen(
                 }
             }
 
-            BackHandler { viewModel.clearSelectedFolder() }
+            BackHandler(enabled = fullScreenIndex == null && !viewModel.isSelecting) { viewModel.clearSelectedFolder() }
         }
     }
 
@@ -388,4 +478,82 @@ fun FoldersScreen(
             viewModel.closeFullScreen()
         }
     }
+
+    if (viewModel.isSelectingFolders && selectedFolder == null) {
+        BackHandler {
+            viewModel.clearFolderSelection()
+        }
+    }
+
+    AnimatedVisibility(
+        visible = viewModel.isSelectingFolders && selectedFolder == null,
+        enter = slideInVertically(
+            initialOffsetY = { it },
+            animationSpec = tween(
+                AppConfig.SelectionBarDuration,
+                easing = AppConfig.EmphasizedEasing
+            )
+        ) + fadeIn(tween(AppConfig.SelectionBarDuration)),
+        exit = slideOutVertically(
+            targetOffsetY = { it },
+            animationSpec = tween(AppConfig.SelectionBarDuration)
+        ) + fadeOut(tween(AppConfig.SelectionBarDuration)),
+        modifier = Modifier.align(Alignment.BottomCenter)
+    ) {
+        BottomAppBar(
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            Text(
+                text = "${viewModel.selectedFolderBucketIds.size} selected",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 16.dp)
+            )
+
+            var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+            val isDeleteEnabled = viewModel.canDeleteFolders
+
+            IconButton(
+                onClick = { showDeleteConfirmDialog = true },
+                enabled = isDeleteEnabled
+            ) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "Delete selected folders",
+                    tint = if (isDeleteEnabled) MaterialTheme.colorScheme.error else Color.Gray.copy(alpha = 0.5f)
+                )
+            }
+
+            if (showDeleteConfirmDialog && isDeleteEnabled) {
+                AlertDialog(
+                    onDismissRequest = { showDeleteConfirmDialog = false },
+                    title = { Text("Delete ${viewModel.selectedFolderBucketIds.size} folder(s)?") },
+                    text = { Text("Are you sure you want to delete the selected folders? The physical photos inside the folders will NOT be deleted from your device, but the folders/data will be removed from the app.") },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                showDeleteConfirmDialog = false
+                                viewModel.deleteSelectedFolders(context)
+                            }
+                        ) {
+                            Text("Delete", color = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDeleteConfirmDialog = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.width(4.dp))
+
+            TextButton(onClick = { viewModel.clearFolderSelection() }) {
+                Text("Cancel", color = MaterialTheme.colorScheme.primary)
+            }
+        }
+    }
+}
 }

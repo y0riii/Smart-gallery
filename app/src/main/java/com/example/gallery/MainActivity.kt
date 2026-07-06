@@ -3,7 +3,6 @@ package com.example.gallery
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
@@ -22,6 +21,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.exclude
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
@@ -38,6 +38,8 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScaffoldDefaults
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -46,11 +48,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.launch
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
@@ -60,7 +64,6 @@ import com.example.gallery.components.CategoryFoldersScreen
 import com.example.gallery.components.GalleryScreen
 import com.example.gallery.components.PeopleFoldersScreen
 import com.example.gallery.db.AppDatabase
-import com.example.gallery.db.GalleryIndexerWorker
 import com.example.gallery.folders.AlbumsFolderRepository
 import com.example.gallery.folders.CategoryFolderRepository
 import com.example.gallery.folders.PersonFolderRepository
@@ -75,6 +78,9 @@ import com.example.gallery.viewModels.factories.CategoryViewModelFactory
 import com.example.gallery.viewModels.factories.GalleryViewModelFactory
 import com.example.gallery.viewModels.factories.PeopleViewModelFactory
 import java.util.concurrent.TimeUnit
+import androidx.core.content.edit
+import com.example.gallery.db.GalleryPeriodicTriggerWorker
+import androidx.core.net.toUri
 
 class MainActivity : ComponentActivity() {
 
@@ -109,7 +115,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        scheduleBackgroundIndexing()
         requestBatteryOptimizationExemptionOnce()
         setContent {
             GalleryTheme {
@@ -131,19 +136,20 @@ class MainActivity : ComponentActivity() {
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         if (!pm.isIgnoringBatteryOptimizations(packageName)) {
             val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                data = Uri.parse("package:$packageName")
+                data = "package:$packageName".toUri()
             }
             startActivity(intent)
         }
 
         // Mark as asked regardless of user choice — we never ask again
-        prefs.edit().putBoolean("battery_opt_asked", true).apply()
+        prefs.edit { putBoolean("battery_opt_asked", true) }
     }
 
     override fun onStart() {
         super.onStart()
         if (hasAnyPermission(this)) {
             galleryService.startIndexingWorkManager()
+            scheduleBackgroundIndexing()
         }
     }
 
@@ -162,13 +168,13 @@ class MainActivity : ComponentActivity() {
             .build()
 
         val indexingRequest =
-            PeriodicWorkRequestBuilder<GalleryIndexerWorker>(12, TimeUnit.HOURS)
+            PeriodicWorkRequestBuilder<GalleryPeriodicTriggerWorker>(6, TimeUnit.HOURS)
                 .setConstraints(constraints)
                 .build()
 
         WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
-            "GalleryIndexing",
-            ExistingPeriodicWorkPolicy.UPDATE,
+            "GalleryIndexing_Periodic",
+            ExistingPeriodicWorkPolicy.KEEP,
             indexingRequest
         )
     }
@@ -202,7 +208,9 @@ fun GalleryApp(
 ) {
 
     var hasPermission by remember { mutableStateOf(false) }
-    var currentTab by remember { mutableIntStateOf(0) }
+    val pagerState = rememberPagerState(pageCount = { 4 })
+    val coroutineScope = rememberCoroutineScope()
+    val currentTab = if (hasPermission) pagerState.currentPage else 0
 
     val permissionsToRequest = remember { getPermissionsToRequest() }
 
@@ -247,10 +255,27 @@ fun GalleryApp(
         else -> false
     }
 
+    val isSelectingFolders = when {
+        !hasPermission -> false
+        currentTab == 1 -> peopleViewModel.isSelectingFolders
+        currentTab == 2 -> categoryViewModel.isSelectingFolders
+        currentTab == 3 -> albumsViewModel.isSelectingFolders
+        else -> false
+    }
+
+    val isFolderOpen = when (currentTab) {
+        1 -> peopleViewModel.selectedFolder != null
+        2 -> categoryViewModel.selectedFolder != null
+        3 -> albumsViewModel.selectedFolder != null
+        else -> false
+    }
+
+    val pagerScrollEnabled = !isFullScreen && !isSelecting && !isFolderOpen && !isSelectingFolders
+
     Scaffold(
         contentWindowInsets = ScaffoldDefaults.contentWindowInsets.exclude(WindowInsets.navigationBars),
         bottomBar = {
-            if (!isFullScreen && !isSelecting) {
+            if (!isFullScreen && !isSelecting && !isSelectingFolders) {
                 Column {
                     progress?.let {
                         LinearProgressIndicator(
@@ -272,33 +297,49 @@ fun GalleryApp(
                         )
                         NavigationBarItem(
                             selected = currentTab == 0,
-                            onClick = { currentTab = 0 },
+                            onClick = {
+                                coroutineScope.launch {
+                                    pagerState.animateScrollToPage(0)
+                                }
+                            },
                             icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
                             label = { Text("Home") },
                             colors = navColors
                         )
                         NavigationBarItem(
                             selected = currentTab == 1,
-                            onClick = { currentTab = 1 },
+                            onClick = {
+                                coroutineScope.launch {
+                                    pagerState.animateScrollToPage(1)
+                                }
+                            },
                             icon = { Icon(Icons.Default.People, contentDescription = "People") },
                             label = { Text("People") },
                             colors = navColors
                         )
                         NavigationBarItem(
                             selected = currentTab == 2,
-                            onClick = { currentTab = 2 },
+                            onClick = {
+                                coroutineScope.launch {
+                                    pagerState.animateScrollToPage(2)
+                                }
+                            },
                             icon = {
                                 Icon(
                                     Icons.Default.CollectionsBookmark,
-                                    contentDescription = "Smart Albums"
+                                    contentDescription = "AI Albums"
                                 )
                             },
-                            label = { Text("Smart Albums") },
+                            label = { Text("AI Albums") },
                             colors = navColors
                         )
                         NavigationBarItem(
                             selected = currentTab == 3,
-                            onClick = { currentTab = 3 },
+                            onClick = {
+                                coroutineScope.launch {
+                                    pagerState.animateScrollToPage(3)
+                                }
+                            },
                             icon = {
                                 Icon(
                                     Icons.Default.PhotoAlbum,
@@ -317,25 +358,12 @@ fun GalleryApp(
             if (!hasPermission) {
                 GalleryScreen(galleryViewModel)
             } else {
-                AnimatedContent(
-                    targetState = currentTab,
-                    transitionSpec = {
-                        fadeIn(
-                            tween(
-                                AppConfig.TabTransitionDuration,
-                                easing = AppConfig.StandardEasing
-                            )
-                        ) togetherWith
-                                fadeOut(
-                                    tween(
-                                        AppConfig.TabTransitionDuration,
-                                        easing = AppConfig.StandardEasing
-                                    )
-                                )
-                    },
-                    label = "TabTransition"
-                ) { tab ->
-                    when (tab) {
+                HorizontalPager(
+                    state = pagerState,
+                    userScrollEnabled = pagerScrollEnabled,
+                    modifier = Modifier.fillMaxSize()
+                ) { page ->
+                    when (page) {
                         0 -> GalleryScreen(galleryViewModel)
                         1 -> PeopleFoldersScreen(peopleViewModel, allNames)
                         2 -> CategoryFoldersScreen(categoryViewModel, allNames)

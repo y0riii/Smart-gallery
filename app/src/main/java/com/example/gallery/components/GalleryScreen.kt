@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -81,10 +82,15 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
         viewModel.onDeletionResult(result.resultCode == Activity.RESULT_OK)
     }
 
-    LaunchedEffect(viewModel.intentSenderRequest) {
-        viewModel.intentSenderRequest?.let {
-            intentSenderLauncher.launch(it)
-        }
+    LaunchedEffect(Unit) {
+        snapshotFlow { viewModel.intentSenderVersion }
+            .collect { version ->
+                if (version > 0) {
+                    viewModel.intentSenderRequest?.let {
+                        intentSenderLauncher.launch(it)
+                    }
+                }
+            }
     }
 
     // Scroll to top when the ViewModel signals it (after images are fully updated)

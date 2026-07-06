@@ -25,6 +25,9 @@ interface CategoryDao {
     @Query("SELECT * FROM category WHERE name = :name LIMIT 1")
     suspend fun getCategoryByName(name: String): CategoryEntity?
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCrossRefs(refs: List<MediaCategoryCrossRef>)
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertCrossRef(ref: MediaCategoryCrossRef)
 

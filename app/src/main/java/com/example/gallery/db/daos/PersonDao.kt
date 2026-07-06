@@ -142,6 +142,9 @@ interface PersonDao {
     @Query("DELETE FROM person WHERE id = :personId")
     suspend fun deletePerson(personId: Long)
 
+    @Query("UPDATE faces SET personId = NULL WHERE personId = :personId")
+    suspend fun clearFacesForPerson(personId: Long)
+
     @Query(
         """
         SELECT

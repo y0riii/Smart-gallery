@@ -1,6 +1,11 @@
 package com.example.gallery.components
 
+import android.app.Activity
+import android.content.Intent
+import android.speech.RecognizerIntent
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -39,7 +44,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.example.gallery.ui.theme.AppConfig
@@ -73,6 +80,18 @@ fun SearchBar(
 
     var showFromPicker by remember { mutableStateOf(false) }
     var showToPicker by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    val voiceLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            if (!spokenText.isNullOrBlank()) {
+                onPromptChange(TextFieldValue(text = spokenText, selection = TextRange(spokenText.length)))
+            }
+        }
+    }
 
     BackHandler(enabled = isFocused) {
         focusManager.clearFocus()
@@ -90,7 +109,15 @@ fun SearchBar(
                 modifier = Modifier.weight(1f),
                 onFocusChanged = { isFocused = it },
                 // Feature 5: pass through so dropdown can show person avatars
-                nameThumbnails = nameThumbnails
+                nameThumbnails = nameThumbnails,
+                onVoiceClick = {
+                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                        putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak search terms...")
+                    }
+                    voiceLauncher.launch(intent)
+                }
             )
             Spacer(modifier = Modifier.width(8.dp))
 

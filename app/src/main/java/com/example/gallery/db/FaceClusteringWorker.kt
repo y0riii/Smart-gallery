@@ -5,7 +5,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.ServiceInfo
-import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
@@ -26,12 +25,22 @@ class FaceClusteringWorker(
     }
 
     override suspend fun doWork(): Result {
-        setForeground(createForegroundInfo())
+        try {
+            setForeground(createForegroundInfo())
+        } catch (e: Exception) {
+            Log.e(TAG, "setForeground failed (non-fatal)", e)
+        }
 
         return try {
             val galleryService = GalleryService(applicationContext)
-            galleryService.createClusters()
-            Result.success()
+            val didRun = galleryService.createClusters()
+            if (didRun) {
+                Result.success()
+            } else {
+                // Another clustering run is active — retry later.
+                Log.d(TAG, "Skipped: another clustering run is active, will retry")
+                Result.retry()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Clustering failed", e)
             Result.retry()
@@ -41,11 +50,7 @@ class FaceClusteringWorker(
     private fun createForegroundInfo(): ForegroundInfo {
         createNotificationChannel()
         val notification = buildNotification()
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ForegroundInfo(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            ForegroundInfo(NOTIFICATION_ID, notification)
-        }
+        return ForegroundInfo(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
     }
 
     private fun buildNotification(): Notification {

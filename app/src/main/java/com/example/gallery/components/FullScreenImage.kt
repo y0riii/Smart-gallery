@@ -72,6 +72,33 @@ fun FullScreenImage(
     isPreviewMode: Boolean = false,
 ) {
     val pagerState = rememberPagerState(initialPage = initialIndex) { images.size }
+
+    // Feature: stabilize pager when list mutates (e.g. background indexing or deletions)
+    var activeUri by remember { mutableStateOf<Uri?>(images.getOrNull(initialIndex)) }
+
+    LaunchedEffect(pagerState.currentPage) {
+        images.getOrNull(pagerState.currentPage)?.let {
+            activeUri = it
+        }
+    }
+
+    LaunchedEffect(images) {
+        val uri = activeUri ?: return@LaunchedEffect
+        val newIndex = images.indexOf(uri)
+        if (newIndex != -1) {
+            if (newIndex != pagerState.currentPage) {
+                pagerState.scrollToPage(newIndex)
+            }
+        } else {
+            if (images.isEmpty()) {
+                onClose()
+            } else {
+                val fallbackIndex = pagerState.currentPage.coerceAtMost(images.size - 1)
+                pagerState.scrollToPage(fallbackIndex)
+                activeUri = images[fallbackIndex]
+            }
+        }
+    }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val view = LocalView.current

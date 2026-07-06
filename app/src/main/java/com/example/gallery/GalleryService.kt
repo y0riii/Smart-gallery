@@ -9,6 +9,7 @@ import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 import androidx.room.Transaction
+import androidx.room.withTransaction
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
@@ -19,6 +20,7 @@ import com.example.gallery.db.entities.FaceEntity
 import com.example.gallery.db.entities.MediaCategoryCrossRef
 import com.example.gallery.db.entities.MediaEntity
 import com.example.gallery.db.entities.PersonEntity
+import com.example.gallery.db.previews.MediaDateInfo
 import com.example.gallery.ml.face.FaceDetectionProcessor
 import com.example.gallery.ml.face.FaceEncoder
 import com.example.gallery.ml.face.ChineseWhispers
@@ -28,8 +30,6 @@ import com.example.gallery.ml.text.ClipTextEncoder
 import com.example.gallery.utils.ImageUtils
 import com.example.gallery.utils.VectorUtils
 import com.example.gallery.utils.toMediaUri
-import com.example.gallery.db.FaceClusteringWorker
-import com.example.gallery.db.daos.FaceDao
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -41,6 +41,15 @@ import kotlinx.coroutines.withContext
 
 class GalleryService(private val context: Context) {
 
+    fun isUriDeleted(uri: Uri): Boolean {
+        return try {
+            context.contentResolver.openInputStream(uri)?.use { }
+            false
+        } catch (e: Exception) {
+            true
+        }
+    }
+
     fun startIndexingWorkManager() {
         val indexRequest = OneTimeWorkRequestBuilder<GalleryIndexerWorker>()
             .setBackoffCriteria(
@@ -48,19 +57,13 @@ class GalleryService(private val context: Context) {
                 5,
                 java.util.concurrent.TimeUnit.MINUTES
             ).build()
-        val clusterRequest = OneTimeWorkRequestBuilder<FaceClusteringWorker>()
-            .setBackoffCriteria(
-                androidx.work.BackoffPolicy.LINEAR,
-                5,
-                java.util.concurrent.TimeUnit.MINUTES
-            ).build()
+
         WorkManager.getInstance(context)
             .beginUniqueWork(
                 "GalleryIndexing_OneTime",
                 ExistingWorkPolicy.KEEP,
                 indexRequest
             )
-            .then(clusterRequest)
             .enqueue()
     }
 
@@ -70,6 +73,43 @@ class GalleryService(private val context: Context) {
         private const val ASSIGN_THRESHOLD = 0.45f
 
         val progress = MutableStateFlow<Float?>(null)
+
+        @Volatile
+        private var textEncoderInstance: ClipTextEncoder? = null
+        private var textEncoderInitJob: Deferred<Unit>? = null
+        private val initLock = Any()
+
+        fun getTextEncoder(context: Context): ClipTextEncoder? {
+            return synchronized(initLock) {
+                if (textEncoderInstance == null) {
+                    try {
+                        textEncoderInstance = ClipTextEncoder(context.applicationContext)
+                    } catch (e: Throwable) {
+                        Log.e(TAG, "Failed to init TextEncoder", e)
+                    }
+                }
+                textEncoderInstance
+            }
+        }
+
+        fun ensureTextEncoderInitialized(context: Context): Deferred<Unit> {
+            return synchronized(initLock) {
+                var job = textEncoderInitJob
+                val shouldRecreate = job == null || (job.isCompleted && textEncoderInstance == null)
+                if (shouldRecreate) {
+                    val appContext = context.applicationContext
+                    job = CoroutineScope(SupervisorJob() + Dispatchers.IO).async {
+                        try {
+                            getTextEncoder(appContext)
+                        } catch (t: Throwable) {
+                            Log.e(TAG, "TextEncoder pre-load failed", t)
+                        }
+                    }
+                    textEncoderInitJob = job
+                }
+                job
+            }
+        }
     }
 
     private val db = AppDatabase.getDatabase(context)
@@ -78,65 +118,61 @@ class GalleryService(private val context: Context) {
     private val categoryDao = db.categoryDao()
     private val faceDao = db.faceDao()
 
-    private val textEncoder: ClipTextEncoder? by lazy {
+    private val textEncoder: ClipTextEncoder?
+        get() = getTextEncoder(context)
+
+    private val initJob: Deferred<Unit>
+        get() = ensureTextEncoderInitialized(context)
+
+    /** True once the text encoder has finished loading (or failed). */
+    val isModelReady: Boolean get() = initJob.isCompleted
+
+    private val ftsSupported by lazy {
         try {
-            ClipTextEncoder(context)
+            db.openHelper.readableDatabase
+                .query("SELECT 1 FROM media_items_fts LIMIT 1")
+                .use { }
+            true
         } catch (e: Exception) {
-            Log.e("GalleryService", "Failed to init TextEncoder", e)
-            null
+            false
         }
     }
 
-    private var initJob: Deferred<Unit> = CoroutineScope(SupervisorJob() + Dispatchers.IO).async {
-        textEncoder // triggers initialization immediately
-        Unit
-    }
-
-    private var ftsSupported: Boolean = false
-
     /**
      * Compares the device's MediaStore with the Room Database and syncs them.
+     *
+     * Returns true if indexing ran, false if skipped because another invocation
+     * was already in progress (callers should treat false as a no-op, not an error).
      */
     suspend fun indexImagesBackground(onProgress: suspend (Int, Int) -> Unit) {
         withContext(Dispatchers.IO) {
-            // 1. Check FTS support
-            try {
-                db.openHelper.readableDatabase
-                    .query("SELECT rowid FROM media_items_fts LIMIT 1")
-                    .use { _ -> ftsSupported = true }
-            } catch (_: Exception) {
-                ftsSupported = false
-            }
-
-            // 2. Fetch IDs currently on the device
+            // 1. Fetch IDs currently on the device
             val deviceImages = ImageUtils.scanMediaStore(context)
             val deviceImageIds = deviceImages.map { it.first }.toSet()
 
-            // 3. Fetch IDs currently in the database
+            // 2. Fetch IDs currently in the database
             val dbImageIds = mediaDao.getAllMediaIds().toSet()
 
-            // 4. Calculate the differences (The Diff)
+            // 3. Calculate the differences (The Diff)
             val idsToDelete = dbImageIds - deviceImageIds // In DB, but missing from device
             val idsToAdd = deviceImageIds - dbImageIds    // On device, but missing from DB
 
-            // 5. Delete removed images from the database and cleanup associations
+            // 4. Delete removed images from the database and cleanup associations
             if (idsToDelete.isNotEmpty()) {
-                Log.d("GalleryService", "Sync: Deleting ${idsToDelete.size} obsolete images")
+                Log.d(TAG, "Sync: Deleting ${idsToDelete.size} obsolete images")
                 idsToDelete.forEach { mediaId ->
                     deleteImageFromDb(mediaId)
                 }
             }
 
-            // 6. Process and insert newly added images
+            // 5. Process and insert newly added images
             if (idsToAdd.isNotEmpty()) {
                 val newImagesToProcess = deviceImages.filter { it.first in idsToAdd }
-                Log.d(
-                    "GalleryService",
-                    "Sync: Found ${newImagesToProcess.size} new images to index."
-                )
+                Log.d(TAG, "Sync: Found ${newImagesToProcess.size} new images to index.")
                 processAndInsertImages(newImagesToProcess, onProgress)
             } else {
-                Log.d("GalleryService", "Sync: Database is fully synced. No new images to process.")
+                Log.d(TAG, "Sync: Database is fully synced. No new images to process.")
+                progress.value = null
             }
 
             logDatabaseContent()
@@ -159,25 +195,25 @@ class GalleryService(private val context: Context) {
     private suspend fun processAndInsertImages(imagesToProcess: List<Pair<Long, Long>>, onProgress: suspend (Int, Int) -> Unit) {
         val imageEncoder = try {
             ClipImageEncoder(context)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e("GalleryService", "Failed to init ImageEncoder", e)
             null
         }
         val ocrProcessor = try {
             OcrProcessor()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e("GalleryService", "Failed to init OcrProcessor", e)
             null
         }
         val faceDetector = try {
             FaceDetectionProcessor()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e("GalleryService", "Failed to init FaceDetector", e)
             null
         }
         val faceEncoder = try {
             FaceEncoder(context)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e("GalleryService", "Failed to init FaceEncoder", e)
             null
         }
@@ -191,37 +227,33 @@ class GalleryService(private val context: Context) {
             throw IllegalStateException("Processors failed to initialize")
         }
 
-        val totalCount = imagesToProcess.size
-        var counter = 0
-        progress.value = 0f
+        try {
+            val totalCount = imagesToProcess.size
+            var counter = 0
+            progress.value = 0f
 
-        imagesToProcess.forEach { (mediaId, timestamp) ->
-            try {
-                val bitmap = ImageUtils.getBitmapFromUri(context, mediaId.toMediaUri())
-                if (bitmap != null) {
-                    val (features, text, faces) = withContext(Dispatchers.Default) {
-                        val featuresDeferred = async { imageEncoder.getImageFeatures(bitmap) }
-                        val textDeferred = async { ocrProcessor.recognizeText(bitmap) }
-                        val facesDeferred = async { faceDetector.detectFaces(bitmap) }
-                        Triple(
-                            featuresDeferred.await(),
-                            textDeferred.await(),
-                            facesDeferred.await()
-                        )
-                    }
+            imagesToProcess.forEach { (mediaId, timestamp) ->
+                try {
+                    val bitmap = ImageUtils.getBitmapFromUri(context, mediaId.toMediaUri())
+                    if (bitmap != null) {
+                        val (features, text, faces) = withContext(Dispatchers.Default) {
+                            val featuresDeferred = async { imageEncoder.getImageFeatures(bitmap) }
+                            val textDeferred = async { ocrProcessor.recognizeText(bitmap) }
+                            val facesDeferred = async { faceDetector.detectFaces(bitmap) }
+                            Triple(
+                                featuresDeferred.await(),
+                                textDeferred.await(),
+                                facesDeferred.await()
+                            )
+                        }
 
-                    mediaDao.insertAll(
-                        listOf(MediaEntity(mediaId, timestamp, false, features, text))
-                    )
+                        // 1. Save face embeddings + bounding box to FaceEntity (clustering happens offline later)
+                        withContext(Dispatchers.Default) {
+                            val faceEntities = faces.map { face ->
+                                val croppedImage = faceDetector.alignFace(bitmap, face)
+                                val faceFeatures = faceEncoder.getFaceFeatures(croppedImage)
+                                val box = ImageUtils.scaleRect(face.boundingBox, 1.5f)
 
-                    // 1. Save face embeddings + bounding box to FaceEntity (clustering happens offline later)
-                    withContext(Dispatchers.Default) {
-                        faces.forEach { face ->
-                            val croppedImage = faceDetector.alignFace(bitmap, face)
-                            val faceFeatures = faceEncoder.getFaceFeatures(croppedImage)
-                            val box = ImageUtils.scaleRect(face.boundingBox, 1.5f)
-
-                            faceDao.insertFace(
                                 FaceEntity(
                                     mediaId = mediaId,
                                     embedding = faceFeatures,
@@ -230,41 +262,54 @@ class GalleryService(private val context: Context) {
                                     boxRight = box.right,
                                     boxBottom = box.bottom
                                 )
-                            )
-                        }
+                            }
 
-                        // 2. Process Categories (Auto-assignment logic)
-                        val allCategories = categoryDao.getAllCategories()
-                        allCategories.forEach { category ->
-                            val similarity = VectorUtils.dotProduct(features, category.embedding)
-                            if (similarity > CATEGORY_MATCH_THRESHOLD) {
-                                categoryDao.insertCrossRef(
+                            // 2. Process Categories (Auto-assignment logic)
+                            val allCategories = withContext(Dispatchers.IO) { categoryDao.getAllCategories() }
+                            val crossRefs = allCategories.mapNotNull { category ->
+                                val similarity = VectorUtils.dotProduct(features, category.embedding)
+                                if (similarity > CATEGORY_MATCH_THRESHOLD) {
                                     MediaCategoryCrossRef(
                                         mediaId,
                                         category.id,
                                         similarity
                                     )
-                                )
+                                } else {
+                                    null
+                                }
+                            }
+
+                            withContext(Dispatchers.IO) {
+                                db.withTransaction {
+                                    mediaDao.insertAll(listOf(MediaEntity(mediaId, timestamp, false, features, text)))
+
+                                    if (faceEntities.isNotEmpty()) {
+                                        faceDao.insertFaces(faceEntities)
+                                    }
+
+                                    if (crossRefs.isNotEmpty()) {
+                                        categoryDao.insertCrossRefs(crossRefs)
+                                    }
+                                }
                             }
                         }
+
+                        counter++
+                        Log.d("GalleryService", "Processed: $counter / $totalCount (ID: $mediaId)")
+                        progress.value = counter / totalCount.toFloat()
+                        onProgress(counter, totalCount)
                     }
-
-                    counter++
-                    Log.d("GalleryService", "Processed: $counter / $totalCount (ID: $mediaId)")
-                    progress.value = counter / totalCount.toFloat()
-                    onProgress(counter, totalCount)
+                } catch (e: Exception) {
+                    Log.e("GalleryService", "Error processing image $mediaId", e)
                 }
-            } catch (e: Exception) {
-                Log.e("GalleryService", "Error processing image $mediaId", e)
             }
+        } finally {
+            progress.value = null
+            imageEncoder.close()
+            ocrProcessor.close()
+            faceDetector.close()
+            faceEncoder.close()
         }
-
-        progress.value = null
-
-        imageEncoder.close()
-        ocrProcessor.close()
-        faceDetector.close()
-        faceEncoder.close()
     }
 
     /**
@@ -314,7 +359,7 @@ class GalleryService(private val context: Context) {
      *   via sequential centroid comparison, or creates new singleton persons.
      * - After clustering, generates person thumbnails from face bounding boxes.
      */
-    suspend fun createClusters() {
+    suspend fun createClusters(): Boolean {
         withContext(Dispatchers.IO) {
             val allFaces = faceDao.getAllFaces()
             Log.d(TAG, "Loaded ${allFaces.size} faces for clustering")
@@ -452,57 +497,8 @@ class GalleryService(private val context: Context) {
                     Log.d(TAG, "Incremental run complete: $assignedCount assigned to existing, $newPersonCount new persons created")
                 }
             }
-
-            // ── Generate person thumbnails from face bounding boxes ──
-//            generatePersonThumbnails()
         }
-    }
-
-    /**
-     * For each person, finds the face with the largest bounding box area,
-     * loads the source bitmap, crops it, and creates a thumbnail.
-     */
-    private suspend fun generatePersonThumbnails() {
-        val allPersons = personDao.getAllPersons()
-        val allFaces = faceDao.getAllFaces()
-
-        // Group faces by personId
-        val facesByPerson = allFaces
-            .filter { it.personId != null }
-            .groupBy { it.personId!! }
-
-        for (person in allPersons) {
-            val faces = facesByPerson[person.id] ?: continue
-
-            // Pick the face with the largest bounding box area
-            val bestFace = faces.maxByOrNull {
-                (it.boxRight - it.boxLeft) * (it.boxBottom - it.boxTop)
-            } ?: continue
-
-            val boxArea = (bestFace.boxRight - bestFace.boxLeft) * (bestFace.boxBottom - bestFace.boxTop)
-
-            // Skip if person already has a thumbnail at least as large
-            if (person.thumbnailPath.isNotEmpty() && person.thumbnailSize >= boxArea) {
-                continue
-            }
-
-            // Delete old thumbnail if it exists
-            if (person.thumbnailPath.isNotEmpty()) {
-                ImageUtils.deleteThumbnail(person.thumbnailPath)
-            }
-
-            // Load bitmap from media, crop, and save thumbnail
-            val bitmap = ImageUtils.getBitmapFromUri(context, bestFace.mediaId.toMediaUri())
-            if (bitmap != null) {
-                val rect = Rect(bestFace.boxLeft, bestFace.boxTop, bestFace.boxRight, bestFace.boxBottom)
-                val cropped = ImageUtils.cropImage(bitmap, rect)
-                val thumbnailPath = ImageUtils.createThumbnail(context, cropped)
-                personDao.updatePersonThumbnail(person.id, thumbnailPath, boxArea)
-                Log.d(TAG, "Generated thumbnail for person ${person.id} (name=${person.name})")
-            } else {
-                Log.w(TAG, "Could not load bitmap for media ${bestFace.mediaId} to create thumbnail for person ${person.id}")
-            }
-        }
+        return true
     }
 
     suspend fun getAllDeviceImages(): List<Uri> =
@@ -511,7 +507,12 @@ class GalleryService(private val context: Context) {
         }
 
     suspend fun createCategory(prompt: String) {
-        initJob.await()
+        try {
+            initJob.await()
+        } catch (e: Exception) {
+            Log.e(TAG, "Model init failed during createCategory, retrying", e)
+            initJob.await()
+        }
         val encoder = textEncoder ?: return
         val textFeatures =
             withContext(Dispatchers.Default) { encoder.getTextFeatures("An image of $prompt") }
@@ -554,6 +555,22 @@ class GalleryService(private val context: Context) {
         }
     }
 
+    fun filterByDateInfo(
+        images: List<MediaDateInfo>,
+        fromDate: Long?,
+        toDate: Long?
+    ): List<MediaDateInfo> {
+        return if (fromDate == null && toDate == null) {
+            images
+        } else {
+            images.filter { entity ->
+                val afterFrom = fromDate == null || entity.timestampMs >= fromDate
+                val beforeTo = toDate == null || entity.timestampMs <= (toDate + 86400000 - 1)
+                afterFrom && beforeTo
+            }
+        }
+    }
+
     suspend fun search(prompt: String, fromDate: Long? = null, toDate: Long? = null): List<Uri> {
         return withContext(Dispatchers.IO) {
             val (names, cleanPrompt) = findNamesInPrompt(prompt)
@@ -575,7 +592,7 @@ class GalleryService(private val context: Context) {
             // Filter by dates
             images = filterByDate(images, fromDate, toDate)
 
-            if (images.isEmpty()) return@withContext emptyList<Uri>()
+            if (images.isEmpty()) return@withContext emptyList()
 
             // If prompt is blank or encoder missing, just sort by date
             if (encoder == null) {
@@ -621,8 +638,8 @@ class GalleryService(private val context: Context) {
                     val intersection = images.filter { it in originalSet }
                     return@withContext intersection.map { it.toMediaUri() }
                 }
-                val images = mediaDao.getMediaByIds(mediaIds)
-                val filtered = filterByDate(images, fromDate, toDate)
+                val images = mediaDao.getMediaDatesByIds(mediaIds)
+                val filtered = filterByDateInfo(images, fromDate, toDate)
 
                 if (sortMode == SortMode.DATE_DESC) {
                     filtered.sortedByDescending { it.timestampMs }
@@ -647,12 +664,15 @@ class GalleryService(private val context: Context) {
                 mediaIds.intersect(personMediaIds.toSet()).toList()
             }
 
-            if (targetIds.isEmpty()) return@withContext emptyList<Uri>()
+            if (targetIds.isEmpty()) return@withContext emptyList()
 
-            val images = mediaDao.getMediaByIds(targetIds)
+            val images = mutableListOf<MediaEntity>()
+            targetIds.chunked(200).forEach { chunk ->
+                images.addAll(mediaDao.getMediaByIds(chunk))
+            }
             var filtered = filterByDate(images, fromDate, toDate)
 
-            if (filtered.isEmpty()) return@withContext emptyList<Uri>()
+            if (filtered.isEmpty()) return@withContext emptyList()
 
             if (useClip) {
                 initJob.await()
@@ -712,6 +732,7 @@ class GalleryService(private val context: Context) {
         toDate: Long? = null
     ): List<Uri> {
         return withContext(Dispatchers.IO) {
+            Log.d(TAG, "Is FTS supported: $ftsSupported")
             var results = if (ftsSupported) {
                 mediaDao.searchMediaFts(text)
             } else {
@@ -791,7 +812,34 @@ class GalleryService(private val context: Context) {
      * by calling finalizeDeleteImage for each URI in the list.
      */
     suspend fun finalizeDeleteImages(uris: List<Uri>) {
-        uris.forEach { finalizeDeleteImage(it) }
+        withContext(Dispatchers.IO) {
+            // Process in smaller chunks to avoid long-running transactions that block the DB
+            val mediaIds = uris.mapNotNull { uri ->
+                try {
+                    ContentUris.parseId(uri)
+                } catch (e: Exception) {
+                    null
+                }
+            }
+
+            mediaIds.chunked(50).forEach { chunk ->
+                db.withTransaction {
+                    chunk.forEach { mediaId ->
+                        deleteImageFromDb(mediaId)
+                    }
+                }
+            }
+
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                uris.forEach { uri ->
+                    try {
+                        context.contentResolver.delete(uri, null, null)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to delete image", e)
+                    }
+                }
+            }
+        }
     }
 
     /**

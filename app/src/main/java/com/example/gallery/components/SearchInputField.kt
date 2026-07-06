@@ -8,8 +8,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -125,7 +129,8 @@ fun SearchInputField(
     onFocusChanged: (Boolean) -> Unit,
     // Feature 5: optional map of name → thumbnail URI; when provided, shows a circular
     // avatar to the left of each name in the @mention dropdown.
-    nameThumbnails: Map<String, Uri?> = emptyMap()
+    nameThumbnails: Map<String, Uri?> = emptyMap(),
+    onVoiceClick: (() -> Unit)? = null
 ) {
     var mentionQuery by remember { mutableStateOf<MentionQuery?>(null) }
     var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -162,6 +167,16 @@ fun SearchInputField(
                 .fillMaxWidth()
                 .onFocusChanged { onFocusChanged(it.isFocused) },
             shape = RoundedCornerShape(AppConfig.SearchFieldCornerRadius),
+            trailingIcon = if (onVoiceClick != null) {
+                {
+                    IconButton(onClick = onVoiceClick) {
+                        Icon(
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = "Voice input"
+                        )
+                    }
+                }
+            } else null,
             colors = TextFieldDefaults.colors(
                 focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                 unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,

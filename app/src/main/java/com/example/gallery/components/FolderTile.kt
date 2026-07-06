@@ -30,14 +30,31 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.example.gallery.folders.FolderItem
 import com.example.gallery.ui.theme.AppConfig
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun FolderTile(folder: FolderItem, modifier: Modifier = Modifier, onClick: () -> Unit) {
+fun FolderTile(
+    folder: FolderItem,
+    modifier: Modifier = Modifier,
+    isSelecting: Boolean = false,
+    isSelected: Boolean = false,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null
+) {
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            ),
         shape = RoundedCornerShape(AppConfig.FolderTileCornerRadius),
+        border = if (isSelected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary) else null,
         elevation = CardDefaults.cardElevation(
             defaultElevation = AppConfig.FolderTileElevation,
             pressedElevation = AppConfig.FolderTileElevationPressed
@@ -85,6 +102,20 @@ fun FolderTile(folder: FolderItem, modifier: Modifier = Modifier, onClick: () ->
                                 .fillMaxWidth()
                         )
                     }
+                }
+
+                if (isSelecting) {
+                    Checkbox(
+                        checked = isSelected,
+                        onCheckedChange = { onClick() },
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(8.dp),
+                        colors = CheckboxDefaults.colors(
+                            checkedColor = MaterialTheme.colorScheme.primary,
+                            uncheckedColor = Color.White.copy(alpha = 0.7f)
+                        )
+                    )
                 }
             }
 

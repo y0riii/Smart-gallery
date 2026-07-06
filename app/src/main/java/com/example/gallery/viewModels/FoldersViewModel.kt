@@ -19,6 +19,15 @@ abstract class FoldersViewModel(
     var folders by mutableStateOf<List<FolderItem>>(emptyList())
     var isLoading by mutableStateOf(true)
 
+    var folderSearchQuery by mutableStateOf("")
+
+    val filteredFolders: List<FolderItem>
+        get() {
+            val query = folderSearchQuery.trim()
+            if (query.isEmpty()) return folders
+            return folders.filter { it.name.contains(query, ignoreCase = true) }
+        }
+
     var images by mutableStateOf<List<Uri>>(emptyList())
 
     var selectedFolder by mutableStateOf<FolderItem?>(null)
@@ -35,6 +44,39 @@ abstract class FoldersViewModel(
     // navigates back from an open folder.
     var savedGridFirstIndex by mutableStateOf(0)
     var savedGridFirstScrollOffset by mutableStateOf(0)
+
+    // Folder selection state
+    var selectedFolderBucketIds by mutableStateOf<Set<Long>>(emptySet())
+        private set
+
+    val isSelectingFolders: Boolean
+        get() = selectedFolderBucketIds.isNotEmpty()
+
+    open val canDeleteFolders: Boolean
+        get() = true
+
+    fun toggleFolderSelection(bucketId: Long) {
+        selectedFolderBucketIds = if (selectedFolderBucketIds.contains(bucketId)) {
+            selectedFolderBucketIds - bucketId
+        } else {
+            selectedFolderBucketIds + bucketId
+        }
+    }
+
+    fun clearFolderSelection() {
+        selectedFolderBucketIds = emptySet()
+    }
+
+    fun deleteSelectedFolders(context: android.content.Context) {
+        val bucketIdsToDelete = selectedFolderBucketIds.toList()
+        if (bucketIdsToDelete.isEmpty()) return
+        viewModelScope.launch {
+            performDeleteFolders(context, bucketIdsToDelete)
+            clearFolderSelection()
+        }
+    }
+
+    abstract suspend fun performDeleteFolders(context: android.content.Context, bucketIds: List<Long>)
 
     private var foldersJob: kotlinx.coroutines.Job? = null
     private var imagesCollectionJob: kotlinx.coroutines.Job? = null
@@ -129,7 +171,20 @@ abstract class FoldersViewModel(
         applyFilters(scrollToTop = true)
     }
 
-    override suspend fun onDeleteSuccess(uri: Uri) {
+    override suspend fun onDeleteSuccess(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        val deletedIndex = images.indexOf(uris[0])
+        val deletedSet = uris.toSet()
+        // Eagerly remove the URI so the pager never sees a stale index
+        images = images.filterNot { it in deletedSet }
+        // Adjust the fullscreen viewer
+        if (fullScreenIndex != null) {
+            fullScreenIndex = when {
+                images.isEmpty() -> null
+                deletedIndex >= images.size -> images.size - 1
+                else -> deletedIndex
+            }
+        }
         applyFilters()
     }
 }

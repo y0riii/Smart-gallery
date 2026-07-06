@@ -6,6 +6,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.example.gallery.db.entities.MediaEntity
+import com.example.gallery.db.previews.MediaDateInfo
 
 @Dao
 interface MediaDao {
@@ -18,6 +19,9 @@ interface MediaDao {
 
     @Delete
     suspend fun delete(entity: MediaEntity)
+
+    @Query("DELETE FROM media_items WHERE mediaId IN (:ids)")
+    suspend fun deleteByIds(ids: List<Long>)
 
     @Query("UPDATE media_items SET ocrText = :text WHERE mediaId = :mediaId")
     suspend fun updateOcrText(mediaId: Long, text: String)
@@ -34,6 +38,9 @@ interface MediaDao {
     @Query("SELECT * FROM media_items WHERE mediaId IN (:ids)")
     suspend fun getMediaByIds(ids: List<Long>): List<MediaEntity>
 
+    @Query("SELECT mediaId, timestampMs FROM media_items WHERE mediaId IN (:ids)")
+    suspend fun getMediaDatesByIds(ids: List<Long>): List<MediaDateInfo>
+
     // ===== REGULAR FTS SEARCH =====
 
     private fun formatForFts(query: String): String {
@@ -41,9 +48,9 @@ interface MediaDao {
         if (trimmed.isEmpty()) return ""
 
         val escapedWords = trimmed.split("\\s+".toRegex())
-            .map { it.replace("\"", "\"\"") + "*" } // add * for prefix search
+            .map { it.replace("\"", "\"\"") } // add * for prefix search
 
-        return escapedWords.joinToString(" OR ")
+        return escapedWords.joinToString(" AND ")
     }
 
     suspend fun searchMediaFts(query: String): List<MediaEntity> {

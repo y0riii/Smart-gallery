@@ -32,11 +32,11 @@ fun CategoryFoldersScreen(categoryViewModel: CategoryViewModel, allNames: List<S
         allNames = allNames,
         canSort = true,
         emptyStateIcon = Icons.Default.AutoAwesome,
-        emptyStateTitle = "Create Smart Albums",
+        emptyStateTitle = "Create AI Albums",
         emptyStateDescription = "Automatically group photos by prompt.\nTry 'gym exercises', 'food', or 'nature'.",
         emptyStateAction = {
             Button(onClick = { showCreateDialog = true }) {
-                Text("Create Smart Album")
+                Text("Create AI Album")
             }
         },
         folderGridHeader = {
@@ -48,7 +48,7 @@ fun CategoryFoldersScreen(categoryViewModel: CategoryViewModel, allNames: List<S
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Smart Albums",
+                    text = "AI Albums",
                     style = MaterialTheme.typography.titleLarge
                 )
                 Spacer(modifier = Modifier.weight(1f))

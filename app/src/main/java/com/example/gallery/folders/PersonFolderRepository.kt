@@ -17,7 +17,7 @@ class PersonFolderRepository(
     private val personDao: PersonDao,
     private val service: GalleryService
 ) : FolderSource {
-    private val MIN_IMAGES = 10
+    private val MIN_IMAGES = 5
 
     // Matches auto-generated placeholder names like "#p1", "#p2", "#p10", etc.
     private val PLACEHOLDER_REGEX = Regex("^#p\\d+$", RegexOption.IGNORE_CASE)
@@ -73,6 +73,11 @@ class PersonFolderRepository(
 
     suspend fun renameFolder(bucketId: Long, name: String) = withContext(Dispatchers.IO) {
         personDao.updatePersonName(bucketId, name)
+    }
+
+    suspend fun deleteFolder(bucketId: Long) = withContext(Dispatchers.IO) {
+        personDao.clearFacesForPerson(bucketId)
+        personDao.deletePerson(bucketId)
     }
 
     suspend fun getFolders(): List<FolderItem> = withContext(Dispatchers.IO) {

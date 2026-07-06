@@ -14,4 +14,10 @@ class PeopleViewModel(
             personFolderRepository.renameFolder(bucketId, name)
         }
     }
+
+    override suspend fun performDeleteFolders(context: android.content.Context, bucketIds: List<Long>) {
+        bucketIds.forEach { personId ->
+            personFolderRepository.deleteFolder(personId)
+        }
+    }
 }
