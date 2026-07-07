@@ -2,6 +2,7 @@ package com.example.gallery.components
 
 import android.net.Uri
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -37,6 +39,10 @@ import com.example.gallery.utils.isVideoUri
 import com.example.gallery.utils.rememberVideoThumbnail
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -45,8 +51,10 @@ fun FolderTile(
     modifier: Modifier = Modifier,
     isSelecting: Boolean = false,
     isSelected: Boolean = false,
+    isFavorite: Boolean = false,
     onClick: () -> Unit,
-    onLongClick: (() -> Unit)? = null
+    onLongClick: (() -> Unit)? = null,
+    onFavoriteClick: () -> Unit
 ) {
     Card(
         modifier = modifier
@@ -119,11 +127,29 @@ fun FolderTile(
                         )
                     )
                 }
+
+                // Favorite Star Button (Modern semi-transparent round background overlay)
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.4f))
+                        .clickable { onFavoriteClick() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
+                        contentDescription = "Toggle favorite",
+                        tint = if (isFavorite) Color(0xFFFFD700) else Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
 
             // Caption row: name + photo count on the left,
             // Feature 1: person thumbnail (square, rounded corners) on the right.
-            // The thumbnail is only shown when insideFolderThumbnail is non-null (People folders only).
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -147,15 +173,14 @@ fun FolderTile(
                 }
 
                 // Feature 1: square person thumbnail with rounded corners pinned to the right
-                // of the caption row. Null = album tile → no image and no reserved space.
                 if (folder.insideFolderThumbnail != null) {
                     Spacer(modifier = Modifier.width(8.dp))
                     AsyncImage(
                         model = folder.insideFolderThumbnail,
                         contentDescription = "Person thumbnail",
                         modifier = Modifier
-                            .size(AppConfig.FolderPersonThumbSize)           // size from AppConfig
-                            .clip(RoundedCornerShape(AppConfig.FolderPersonThumbCornerRadius)) // rounded square
+                            .size(AppConfig.FolderPersonThumbSize)
+                            .clip(RoundedCornerShape(AppConfig.FolderPersonThumbCornerRadius))
                             .border(
                                 BorderStroke(
                                     AppConfig.AvatarOutlineWidth,

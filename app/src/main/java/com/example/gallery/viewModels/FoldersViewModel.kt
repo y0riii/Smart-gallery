@@ -1,5 +1,6 @@
 package com.example.gallery.viewModels
 
+import android.content.Context
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -21,11 +22,21 @@ abstract class FoldersViewModel(
 
     var folderSearchQuery by mutableStateOf("")
 
-    val filteredFolders: List<FolderItem>
+    var favoriteFolderIds by mutableStateOf<Set<Long>>(emptySet())
+        private set
+
+    open val filteredFolders: List<FolderItem>
         get() {
             val query = folderSearchQuery.trim()
-            if (query.isEmpty()) return folders
-            return folders.filter { it.name.contains(query, ignoreCase = true) }
+            val baseList = if (query.isEmpty()) {
+                folders
+            } else {
+                folders.filter { it.name.contains(query, ignoreCase = true) }
+            }
+            return baseList.sortedWith(
+                compareByDescending<FolderItem> { favoriteFolderIds.contains(it.bucketId) }
+                    .thenBy { it.name.lowercase() }
+            )
         }
 
     var images by mutableStateOf<List<Uri>>(emptyList())
@@ -82,7 +93,24 @@ abstract class FoldersViewModel(
     private var imagesCollectionJob: kotlinx.coroutines.Job? = null
 
     init {
+        val prefs = service.context.getSharedPreferences("gallery_prefs", Context.MODE_PRIVATE)
+        val key = "fav_folders_${this::class.java.simpleName}"
+        val savedSet = prefs.getStringSet(key, emptySet()) ?: emptySet()
+        favoriteFolderIds = savedSet.mapNotNull { it.toLongOrNull() }.toSet()
         startCollectingFolders()
+    }
+
+    fun toggleFavoriteFolder(bucketId: Long) {
+        val updated = if (favoriteFolderIds.contains(bucketId)) {
+            favoriteFolderIds - bucketId
+        } else {
+            favoriteFolderIds + bucketId
+        }
+        favoriteFolderIds = updated
+
+        val prefs = service.context.getSharedPreferences("gallery_prefs", Context.MODE_PRIVATE)
+        val key = "fav_folders_${this::class.java.simpleName}"
+        prefs.edit().putStringSet(key, updated.map { it.toString() }.toSet()).apply()
     }
 
     fun startCollectingFolders() {

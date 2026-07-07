@@ -44,6 +44,15 @@
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
 
+        <receiver
+            android:name=".db.GalleryIndexerReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.gallery.ACTION_PAUSE_INDEXING" />
+                <action android:name="com.example.gallery.ACTION_START_INDEXING" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

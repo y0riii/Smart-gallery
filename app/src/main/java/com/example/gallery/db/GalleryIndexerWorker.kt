@@ -1,11 +1,14 @@
 package com.example.gallery.db
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.drawable.Icon
 import android.util.Log
-import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
@@ -24,14 +27,64 @@ class GalleryIndexerWorker(
 ) : CoroutineWorker(appContext, workerParams) {
 
     companion object {
-        private const val NOTIFICATION_ID = 1001
-        private const val CHANNEL_ID = "gallery_indexing_channel"
+        const val NOTIFICATION_ID = 1001
+        const val CHANNEL_ID = "gallery_indexing_channel"
+
+        @Volatile
+        var isPaused = false
+
+        /**
+         * Immediately post the "paused" notification, reusing the same
+         * NOTIFICATION_ID so it replaces the active one in-place.
+         */
+        fun showPausedNotification(context: Context) {
+            ensureChannel(context)
+
+            val resumeIntent = Intent(context, GalleryIndexerReceiver::class.java).apply {
+                action = "com.example.gallery.ACTION_START_INDEXING"
+            }
+            val resumePendingIntent = PendingIntent.getBroadcast(
+                context, 1, resumeIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val playIcon = Icon.createWithResource(context, R.drawable.ic_notif_play)
+            val playAction = Notification.Action.Builder(playIcon, "", resumePendingIntent).build()
+
+            val notification = Notification.Builder(context, CHANNEL_ID)
+                .setContentTitle("Smart Gallery")
+                .setContentText("Photo indexing is paused")
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setOngoing(true)
+                .addAction(playAction)
+                .setStyle(
+                    Notification.MediaStyle()
+                        .setShowActionsInCompactView(0)
+                )
+                .build()
+
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(NOTIFICATION_ID, notification)
+        }
+
+        private fun ensureChannel(context: Context) {
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE)
+                    as NotificationManager
+            if (manager.getNotificationChannel(CHANNEL_ID) == null) {
+                val channel = NotificationChannel(
+                    CHANNEL_ID,
+                    "Gallery Indexing",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Shown while Smart Gallery indexes your photos in the background."
+                    setShowBadge(false)
+                }
+                manager.createNotificationChannel(channel)
+            }
+        }
     }
 
     override suspend fun doWork(): Result {
-        // Promote to a foreground worker so Android doesn't kill it mid-index.
-        // Wrapped in try-catch: on some devices setForeground throws if the OS
-        // hasn't allocated the foreground service slot yet.
         try {
             setForeground(createForegroundInfo(0, 0))
         } catch (e: Exception) {
@@ -44,25 +97,24 @@ class GalleryIndexerWorker(
         return try {
             val service = GalleryService(applicationContext)
             service.indexImagesBackground { processed, total ->
-                withContext(Dispatchers.Main) {
-                    setProgress(
-                        workDataOf(
-                            "processed" to processed,
-                            "total" to total
+                // ── KEY FIX: never overwrite the "paused" notification ──
+                if (!isPaused) {
+                    withContext(Dispatchers.Main) {
+                        setProgress(
+                            workDataOf(
+                                "processed" to processed,
+                                "total" to total
+                            )
                         )
+                    }
+                    notificationManager.notify(
+                        NOTIFICATION_ID,
+                        createForegroundInfo(processed, total).notification
                     )
                 }
-                // Update the notification directly — much cheaper than calling setForeground
-                // in a loop (avoids repeated IPC round-trips).
-                notificationManager.notify(
-                    NOTIFICATION_ID,
-                    createForegroundInfo(processed, total).notification
-                )
             }
 
-            // Indexing completed successfully. Enqueue clustering as a SEPARATE
-            // unique work chain, so that if the indexer is replaced by a periodic
-            // trigger later, it doesn't cancel the clustering run mid-flight.
+            // Indexing completed successfully — enqueue face clustering
             val clusterRequest = OneTimeWorkRequestBuilder<FaceClusteringWorker>()
                 .setBackoffCriteria(
                     androidx.work.BackoffPolicy.LINEAR,
@@ -80,26 +132,8 @@ class GalleryIndexerWorker(
 
             Result.success()
         } catch (e: Throwable) {
-            // Catch Throwable (not just Exception) so OutOfMemoryErrors also trigger retry.
             Log.e("GalleryIndexerWorker", "Indexing failed, will retry", e)
             Result.retry()
-        }
-    }
-
-    private fun createNotificationChannel() {
-        Log.d("GalleryWorker", "Creating notification channel")
-        val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE)
-                as NotificationManager
-        if (manager.getNotificationChannel(CHANNEL_ID) == null) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Gallery Indexing",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Shown while Smart Gallery indexes your photos in the background."
-                setShowBadge(false)
-            }
-            manager.createNotificationChannel(channel)
         }
     }
 
@@ -107,28 +141,40 @@ class GalleryIndexerWorker(
         processed: Int,
         total: Int
     ): ForegroundInfo {
-        createNotificationChannel()
+        ensureChannel(applicationContext)
 
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+        val pauseIntent = Intent(applicationContext, GalleryIndexerReceiver::class.java).apply {
+            action = "com.example.gallery.ACTION_PAUSE_INDEXING"
+        }
+        val pausePendingIntent = PendingIntent.getBroadcast(
+            applicationContext, 0, pauseIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val pauseIcon = Icon.createWithResource(applicationContext, R.drawable.ic_notif_pause)
+        val pauseAction = Notification.Action.Builder(pauseIcon, "", pausePendingIntent).build()
+
+        val contentText = if (total == 0) {
+            "Preparing photo indexing…"
+        } else {
+            "Indexed $processed of $total photos"
+        }
+
+        val notification = Notification.Builder(applicationContext, CHANNEL_ID)
             .setContentTitle("Smart Gallery")
+            .setContentText(contentText)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
-            .setSilent(true)
-            .setOnlyAlertOnce(true)
-
-        if (total == 0) {
-            notification
-                .setContentText("Preparing photo indexing...")
-                .setProgress(0, 0, true)
-        } else {
-            notification
-                .setContentText("Indexed $processed of $total photos")
-                .setProgress(total, processed, false)
-        }
+            .addAction(pauseAction)
+            .setStyle(
+                Notification.MediaStyle()
+                    .setShowActionsInCompactView(0)
+            )
+            .build()
 
         return ForegroundInfo(
             NOTIFICATION_ID,
-            notification.build(),
+            notification,
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         )
     }

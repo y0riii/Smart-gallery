@@ -65,6 +65,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -106,6 +108,7 @@ fun FoldersScreen(
     val foldersGridState = rememberLazyGridState()  // for the folders tile grid
     val imagesGridState = rememberLazyGridState()  // for the images inside an open folder
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
 
     var showSortMenu by remember { mutableStateOf(false) }
 
@@ -286,10 +289,12 @@ fun FoldersScreen(
                         ) {
                             items(viewModel.filteredFolders, key = { it.bucketId }) { folder ->
                                 val isSelected = viewModel.selectedFolderBucketIds.contains(folder.bucketId)
+                                val isFavorite = viewModel.favoriteFolderIds.contains(folder.bucketId)
                                 FolderTile(
                                     folder = folder,
                                     isSelecting = viewModel.isSelectingFolders,
                                     isSelected = isSelected,
+                                    isFavorite = isFavorite,
                                     onClick = {
                                         if (viewModel.isSelectingFolders) {
                                             viewModel.toggleFolderSelection(folder.bucketId)
@@ -304,6 +309,14 @@ fun FoldersScreen(
                                     },
                                     onLongClick = {
                                         viewModel.toggleFolderSelection(folder.bucketId)
+                                    },
+                                    onFavoriteClick = {
+                                        val firstIndex = foldersGridState.firstVisibleItemIndex
+                                        val firstOffset = foldersGridState.firstVisibleItemScrollOffset
+                                        viewModel.toggleFavoriteFolder(folder.bucketId)
+                                        coroutineScope.launch {
+                                            foldersGridState.scrollToItem(firstIndex, firstOffset)
+                                        }
                                     },
                                     modifier = Modifier.animateItem()
                                 )

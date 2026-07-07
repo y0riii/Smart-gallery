@@ -80,6 +80,7 @@ import com.example.gallery.viewModels.factories.PeopleViewModelFactory
 import java.util.concurrent.TimeUnit
 import androidx.core.content.edit
 import com.example.gallery.db.GalleryPeriodicTriggerWorker
+import com.example.gallery.db.GalleryIndexerWorker
 import androidx.core.net.toUri
 
 class MainActivity : ComponentActivity() {
@@ -148,7 +149,8 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         if (hasAnyPermission(this)) {
-            galleryService.startIndexingWorkManager()
+            GalleryIndexerWorker.isPaused = false
+            galleryService.startIndexingWorkManager(force = true)
             scheduleBackgroundIndexing()
         }
     }

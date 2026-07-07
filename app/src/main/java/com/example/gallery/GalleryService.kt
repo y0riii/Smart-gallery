@@ -39,9 +39,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
-class GalleryService(private val context: Context) {
+class GalleryService(val context: Context) {
 
     fun isUriDeleted(uri: Uri): Boolean {
         return try {
@@ -52,7 +53,7 @@ class GalleryService(private val context: Context) {
         }
     }
 
-    fun startIndexingWorkManager() {
+    fun startIndexingWorkManager(force: Boolean = false) {
         val indexRequest = OneTimeWorkRequestBuilder<GalleryIndexerWorker>()
             .setBackoffCriteria(
                 androidx.work.BackoffPolicy.LINEAR,
@@ -63,7 +64,7 @@ class GalleryService(private val context: Context) {
         WorkManager.getInstance(context)
             .beginUniqueWork(
                 "GalleryIndexing_OneTime",
-                ExistingWorkPolicy.KEEP,
+                if (force) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
                 indexRequest
             )
             .enqueue()
@@ -195,38 +196,33 @@ class GalleryService(private val context: Context) {
     }
 
     private suspend fun processAndInsertImages(imagesToProcess: List<Pair<Long, Long>>, onProgress: suspend (Int, Int) -> Unit) {
-        val imageEncoder = try {
-            ClipImageEncoder(context)
-        } catch (e: Throwable) {
-            Log.e("GalleryService", "Failed to init ImageEncoder", e)
-            null
-        }
-        val ocrProcessor = try {
-            OcrProcessor()
-        } catch (e: Throwable) {
-            Log.e("GalleryService", "Failed to init OcrProcessor", e)
-            null
-        }
-        val faceDetector = try {
-            FaceDetectionProcessor()
-        } catch (e: Throwable) {
-            Log.e("GalleryService", "Failed to init FaceDetector", e)
-            null
-        }
-        val faceEncoder = try {
-            FaceEncoder(context)
-        } catch (e: Throwable) {
-            Log.e("GalleryService", "Failed to init FaceEncoder", e)
-            null
+        var imageEncoder: ClipImageEncoder? = null
+        var ocrProcessor: OcrProcessor? = null
+        var faceDetector: FaceDetectionProcessor? = null
+        var faceEncoder: FaceEncoder? = null
+
+        fun initProcessors(): Boolean {
+            try {
+                if (imageEncoder == null) imageEncoder = ClipImageEncoder(context)
+                if (ocrProcessor == null) ocrProcessor = OcrProcessor()
+                if (faceDetector == null) faceDetector = FaceDetectionProcessor()
+                if (faceEncoder == null) faceEncoder = FaceEncoder(context)
+                return true
+            } catch (e: Throwable) {
+                Log.e("GalleryService", "Failed to init processors", e)
+                imageEncoder?.close(); imageEncoder = null
+                ocrProcessor?.close(); ocrProcessor = null
+                faceDetector?.close(); faceDetector = null
+                faceEncoder?.close(); faceEncoder = null
+                return false
+            }
         }
 
-        if (imageEncoder == null || ocrProcessor == null || faceDetector == null || faceEncoder == null) {
-            Log.e("GalleryService", "Aborting indexing because processors failed to initialize.")
-            imageEncoder?.close()
-            ocrProcessor?.close()
-            faceDetector?.close()
-            faceEncoder?.close()
-            throw IllegalStateException("Processors failed to initialize")
+        fun closeProcessors() {
+            imageEncoder?.close(); imageEncoder = null
+            ocrProcessor?.close(); ocrProcessor = null
+            faceDetector?.close(); faceDetector = null
+            faceEncoder?.close(); faceEncoder = null
         }
 
         try {
@@ -234,14 +230,56 @@ class GalleryService(private val context: Context) {
             var counter = 0
             progress.value = 0f
 
-            imagesToProcess.forEach { (mediaId, timestamp) ->
+            for (item in imagesToProcess) {
+                if (!kotlinx.coroutines.currentCoroutineContext().isActive) {
+                    Log.d("GalleryService", "Indexing loop cancelled, breaking.")
+                    break
+                }
+
+                // Check if we are paused!
+                if (GalleryIndexerWorker.isPaused) {
+                    Log.d("GalleryService", "Indexing is paused. Releasing ML models and waiting...")
+                    closeProcessors()
+                    progress.value = null
+
+                    // Wait loop
+                    while (GalleryIndexerWorker.isPaused) {
+                        if (!kotlinx.coroutines.currentCoroutineContext().isActive) {
+                            break
+                        }
+                        kotlinx.coroutines.delay(100)
+                    }
+
+                    // Check if cancelled during wait
+                    if (!kotlinx.coroutines.currentCoroutineContext().isActive) {
+                        break
+                    }
+
+                    Log.d("GalleryService", "Indexing resumed. Reinitializing ML models...")
+                    progress.value = counter / totalCount.toFloat()
+                }
+
+                // Initialize processors if they are null
+                val encoder1 = imageEncoder
+                val processor1 = ocrProcessor
+                val detector1 = faceDetector
+                val encoder2 = faceEncoder
+                if (encoder1 == null || processor1 == null || detector1 == null || encoder2 == null) {
+                    if (!initProcessors()) {
+                        Log.e("GalleryService", "Aborting indexing because processors failed to initialize.")
+                        throw IllegalStateException("Processors failed to initialize")
+                    }
+                }
+
+                val mediaId = item.first
+                val timestamp = item.second
                 try {
                     val bitmap = ImageUtils.getBitmapFromUri(context, mediaId.toMediaUri())
                     if (bitmap != null) {
                         val (features, text, faces) = withContext(Dispatchers.Default) {
-                            val featuresDeferred = async { imageEncoder.getImageFeatures(bitmap) }
-                            val textDeferred = async { ocrProcessor.recognizeText(bitmap) }
-                            val facesDeferred = async { faceDetector.detectFaces(bitmap) }
+                            val featuresDeferred = async { imageEncoder!!.getImageFeatures(bitmap) }
+                            val textDeferred = async { ocrProcessor!!.recognizeText(bitmap) }
+                            val facesDeferred = async { faceDetector!!.detectFaces(bitmap) }
                             Triple(
                                 featuresDeferred.await(),
                                 textDeferred.await(),
@@ -252,8 +290,8 @@ class GalleryService(private val context: Context) {
                         // 1. Save face embeddings + bounding box to FaceEntity (clustering happens offline later)
                         withContext(Dispatchers.Default) {
                             val faceEntities = faces.map { face ->
-                                val croppedImage = faceDetector.alignFace(bitmap, face)
-                                val faceFeatures = faceEncoder.getFaceFeatures(croppedImage)
+                                val croppedImage = faceDetector!!.alignFace(bitmap, face)
+                                val faceFeatures = faceEncoder!!.getFaceFeatures(croppedImage)
                                 val box = ImageUtils.scaleRect(face.boundingBox, 1.5f)
 
                                 FaceEntity(
@@ -307,10 +345,7 @@ class GalleryService(private val context: Context) {
             }
         } finally {
             progress.value = null
-            imageEncoder.close()
-            ocrProcessor.close()
-            faceDetector.close()
-            faceEncoder.close()
+            closeProcessors()
         }
     }
 
