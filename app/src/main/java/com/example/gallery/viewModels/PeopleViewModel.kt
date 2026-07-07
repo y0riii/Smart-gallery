@@ -16,6 +16,15 @@ class PeopleViewModel(
         }
     }
 
+    fun mergeSelectedFolders(newName: String) {
+        val selectedIds = selectedFolderBucketIds.toList()
+        if (selectedIds.size < 2) return
+        viewModelScope.launch {
+            personFolderRepository.mergePeople(selectedIds, newName)
+            clearFolderSelection()
+        }
+    }
+
     override suspend fun performDeleteFolders(context: android.content.Context, bucketIds: List<Long>) {
         bucketIds.forEach { personId ->
             personFolderRepository.deleteFolder(personId)

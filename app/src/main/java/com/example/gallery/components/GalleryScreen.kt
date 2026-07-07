@@ -2,6 +2,7 @@ package com.example.gallery.components
 
 import android.app.Activity
 import android.content.Context
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomAppBar
@@ -57,7 +59,7 @@ private const val GALLERY_MAX_COLUMNS = 6
 private const val GALLERY_PREVIEW_HIDE_THRESHOLD = 5
 
 @Composable
-fun GalleryScreen(viewModel: GalleryViewModel) {
+fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> Unit = {}) {
     val allNames by viewModel.allNames.collectAsState()
     // Feature 5: person name → thumbnail URI for the @mention dropdown avatars
     val nameThumbnails by viewModel.nameThumbnails.collectAsState()
@@ -203,6 +205,14 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
                         Icon(
                             Icons.Default.Share,
                             contentDescription = "Share selected",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    IconButton(onClick = { onAddToCollection(viewModel.selectedUris) }) {
+                        Icon(
+                            Icons.Default.LibraryAdd,
+                            contentDescription = "Add to collection",
                             tint = MaterialTheme.colorScheme.primary
                         )
                     }

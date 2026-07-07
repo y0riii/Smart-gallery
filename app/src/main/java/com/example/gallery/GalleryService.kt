@@ -6,6 +6,7 @@ import android.content.Context
 import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.MediaStore
 import android.util.Log
 import androidx.room.Transaction
@@ -14,6 +15,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.example.gallery.db.AppDatabase
+import com.example.gallery.db.FaceClusteringWorker
 import com.example.gallery.db.GalleryIndexerWorker
 import com.example.gallery.db.entities.CategoryEntity
 import com.example.gallery.db.entities.FaceEntity
@@ -70,12 +72,48 @@ class GalleryService(val context: Context) {
             .enqueue()
     }
 
+    /**
+     * Triggers a full Chinese Whispers re-clustering by resetting the
+     * first-run flag and enqueuing a one-time FaceClusteringWorker.
+     * Any existing clustering work is replaced.
+     */
+    fun forceRecluster() {
+        val now = System.currentTimeMillis()
+        if (now - lastReclusterTime < 5000) {
+            Log.d(TAG, "forceRecluster: Ignored due to spam prevention")
+            return
+        }
+        lastReclusterTime = now
+
+        if (isIndexingRunning || isClusteringRunning) {
+            Log.d(TAG, "forceRecluster: Indexing or Clustering is already running. Ignoring to prevent race condition.")
+            return
+        }
+
+        Log.d(TAG, "forceRecluster: resetting clustering flag and triggering full indexing + clustering pass")
+        val prefs = context.getSharedPreferences("gallery_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("first_clustering_run_completed", false).apply()
+
+        startIndexingWorkManager(force = true)
+    }
+
     companion object {
         private const val TAG = "GalleryService"
         private const val CATEGORY_MATCH_THRESHOLD = 0.22f
         private const val ASSIGN_THRESHOLD = 0.45f
 
         val progress = MutableStateFlow<Float?>(null)
+
+        @Volatile
+        var isIndexingRunning = false
+
+        @Volatile
+        var isClusteringRunning = false
+
+        val mlExecutionLock = kotlinx.coroutines.sync.Mutex()
+
+        @Volatile
+        private var lastReclusterTime = 0L
 
         @Volatile
         private var textEncoderInstance: ClipTextEncoder? = null
@@ -115,7 +153,7 @@ class GalleryService(val context: Context) {
         }
     }
 
-    private val db = AppDatabase.getDatabase(context)
+    val db = AppDatabase.getDatabase(context)
     private val mediaDao = db.mediaDao()
     private val personDao = db.personDao()
     private val categoryDao = db.categoryDao()
@@ -236,18 +274,40 @@ class GalleryService(val context: Context) {
                     break
                 }
 
-                // Check if we are paused!
-                if (GalleryIndexerWorker.isPaused) {
-                    Log.d("GalleryService", "Indexing is paused. Releasing ML models and waiting...")
+                // Check if the device gets hot
+                var isThermalPaused = false
+                val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && powerManager != null) {
+                    val status = powerManager.currentThermalStatus
+                    if (status >= PowerManager.THERMAL_STATUS_SEVERE) {
+                        isThermalPaused = true
+                        Log.w("GalleryService", "Device is hot (thermal status: $status). Pausing indexing.")
+                    }
+                }
+
+                // Check if we are paused (either manually or due to thermal throttling)!
+                if (GalleryIndexerWorker.isPaused || isThermalPaused) {
+                    Log.d("GalleryService", "Indexing is paused (Manual/Thermal). Releasing ML models and waiting...")
                     closeProcessors()
                     progress.value = null
 
                     // Wait loop
-                    while (GalleryIndexerWorker.isPaused) {
+                    while (GalleryIndexerWorker.isPaused || isThermalPaused) {
                         if (!kotlinx.coroutines.currentCoroutineContext().isActive) {
                             break
                         }
-                        kotlinx.coroutines.delay(100)
+                        kotlinx.coroutines.delay(1000) // check every 1 second
+                        
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && powerManager != null) {
+                            val status = powerManager.currentThermalStatus
+                            // Resume only when cooled down below moderate (i.e. to light or none)
+                            isThermalPaused = status >= PowerManager.THERMAL_STATUS_MODERATE
+                            if (isThermalPaused) {
+                                Log.w("GalleryService", "Device is still warm (thermal status: $status). Waiting to cool down...")
+                            }
+                        } else {
+                            isThermalPaused = false
+                        }
                     }
 
                     // Check if cancelled during wait

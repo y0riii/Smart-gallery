@@ -96,6 +96,7 @@ interface CategoryDao {
         SELECT
             *
         FROM media_category_join
+        ORDER BY similarity DESC
         """
     )
     suspend fun getCategoryMediaRefs(): List<MediaCategoryCrossRef>
@@ -133,6 +134,7 @@ interface CategoryDao {
         SELECT
             *
         FROM media_category_join
+        ORDER BY similarity DESC
         """
     )
     fun getCategoryMediaRefsFlow(): Flow<List<MediaCategoryCrossRef>>

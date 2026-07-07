@@ -1,6 +1,7 @@
 package com.example.gallery.components
 
 import android.app.Activity
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -92,6 +93,7 @@ fun FoldersScreen(
     showDates: Boolean = true,
     folderGridHeader: @Composable ColumnScope.() -> Unit = {},
     selectedFolderActions: @Composable RowScope.(FolderItem) -> Unit = {},
+    additionalSelectionActions: @Composable RowScope.() -> Unit = {},
     // Feature: customizable empty state
     emptyStateIcon: ImageVector = Icons.Default.PhotoAlbum,
     emptyStateTitle: String = "No items yet",
@@ -99,7 +101,8 @@ fun FoldersScreen(
     emptyStateAction: @Composable (() -> Unit)? = null,
     // Feature 5: optional name→thumbnail map passed down to the SearchBar inside an open folder,
     // so @mention suggestions can display circular person avatars. Defaults to empty.
-    nameThumbnails: Map<String, android.net.Uri?> = emptyMap()
+    nameThumbnails: Map<String, android.net.Uri?> = emptyMap(),
+    onAddToCollection: (Set<Uri>) -> Unit = {}
 ) {
     val selectedFolder = viewModel.selectedFolder
     val fullScreenIndex = viewModel.fullScreenIndex
@@ -278,7 +281,7 @@ fun FoldersScreen(
                         }
                     } else {
                         LazyVerticalGrid(
-                            columns = GridCells.Fixed(2),
+                            columns = GridCells.Adaptive(minSize = 160.dp),
                             state = foldersGridState,   // Feature 3: dedicated state, never shared with image grid
                             modifier = Modifier
                                 .weight(1f)
@@ -457,7 +460,8 @@ fun FoldersScreen(
                         onCancelSelection = { viewModel.clearSelection() },
                         onDeleteSelected = { viewModel.deleteSelectedImages() },
                         // Feature 1: share — pass context available in this composable scope
-                        onShareSelected = { viewModel.shareSelectedImages(context) }
+                        onShareSelected = { viewModel.shareSelectedImages(context) },
+                        onAddToCollectionSelected = { onAddToCollection(viewModel.selectedUris) }
                     )
 
                     if (viewModel.isLoading) {
@@ -523,6 +527,8 @@ fun FoldersScreen(
                     .weight(1f)
                     .padding(start = 16.dp)
             )
+
+            additionalSelectionActions()
 
             var showDeleteConfirmDialog by remember { mutableStateOf(false) }
             val isDeleteEnabled = viewModel.canDeleteFolders

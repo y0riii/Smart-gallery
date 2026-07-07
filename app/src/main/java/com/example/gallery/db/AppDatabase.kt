@@ -16,6 +16,10 @@ import com.example.gallery.db.entities.MediaCategoryCrossRef
 import com.example.gallery.db.entities.MediaEntity
 import com.example.gallery.db.entities.PersonEntity
 
+import com.example.gallery.db.daos.CollectionDao
+import com.example.gallery.db.entities.CollectionEntity
+import com.example.gallery.db.entities.CollectionMediaCrossRef
+
 @Database(
     entities = [
         MediaEntity::class,
@@ -23,9 +27,11 @@ import com.example.gallery.db.entities.PersonEntity
         PersonEntity::class,
         CategoryEntity::class,
         MediaCategoryCrossRef::class,
-        FaceEntity::class
+        FaceEntity::class,
+        CollectionEntity::class,
+        CollectionMediaCrossRef::class
     ],
-    version = 20,
+    version = 21,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -34,6 +40,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun personDao(): PersonDao
     abstract fun categoryDao(): CategoryDao
     abstract fun faceDao(): FaceDao
+    abstract fun collectionDao(): CollectionDao
 
     companion object {
         @Volatile

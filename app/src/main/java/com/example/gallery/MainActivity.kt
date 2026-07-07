@@ -2,6 +2,7 @@ package com.example.gallery
 
 import android.Manifest
 import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -81,7 +82,14 @@ import java.util.concurrent.TimeUnit
 import androidx.core.content.edit
 import com.example.gallery.db.GalleryPeriodicTriggerWorker
 import com.example.gallery.db.GalleryIndexerWorker
+import com.example.gallery.db.FaceClusteringWorker
 import androidx.core.net.toUri
+import com.example.gallery.db.previews.CollectionPreview
+import com.example.gallery.components.CollectionPickerDialog
+import com.example.gallery.components.CollectionsFoldersScreen
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 
 class MainActivity : ComponentActivity() {
 
@@ -114,12 +122,20 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private val collectionsViewModel: com.example.gallery.viewModels.CollectionsViewModel by viewModels {
+        com.example.gallery.viewModels.factories.CollectionsViewModelFactory(
+            com.example.gallery.folders.CollectionFolderRepository(db.collectionDao(), galleryService),
+            db.collectionDao(),
+            galleryService
+        )
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestBatteryOptimizationExemptionOnce()
         setContent {
             GalleryTheme {
-                GalleryApp(galleryViewModel, peopleViewModel, categoryViewModel, albumsViewModel)
+                GalleryApp(galleryViewModel, peopleViewModel, categoryViewModel, albumsViewModel, collectionsViewModel, galleryService)
             }
         }
     }
@@ -179,6 +195,9 @@ class MainActivity : ComponentActivity() {
             ExistingPeriodicWorkPolicy.KEEP,
             indexingRequest
         )
+
+        // Cancel the weekly clustering work if it was previously scheduled
+        WorkManager.getInstance(applicationContext).cancelUniqueWork("GalleryClustering_Weekly")
     }
 }
 
@@ -207,11 +226,13 @@ fun GalleryApp(
     galleryViewModel: GalleryViewModel,
     peopleViewModel: PeopleViewModel,
     categoryViewModel: CategoryViewModel,
-    albumsViewModel: AlbumsViewModel
+    albumsViewModel: AlbumsViewModel,
+    collectionsViewModel: com.example.gallery.viewModels.CollectionsViewModel,
+    galleryService: GalleryService
 ) {
 
     var hasPermission by remember { mutableStateOf(false) }
-    val pagerState = rememberPagerState(pageCount = { 4 })
+    val pagerState = rememberPagerState(pageCount = { 5 })
     val coroutineScope = rememberCoroutineScope()
     val currentTab = if (hasPermission) pagerState.currentPage else 0
 
@@ -237,6 +258,7 @@ fun GalleryApp(
             peopleViewModel.onPermissionGranted()
             categoryViewModel.onPermissionGranted()
             albumsViewModel.onPermissionGranted()
+            collectionsViewModel.onPermissionGranted()
         }
     }
 
@@ -246,6 +268,7 @@ fun GalleryApp(
         currentTab == 1 -> peopleViewModel.fullScreenIndex != null
         currentTab == 2 -> categoryViewModel.fullScreenIndex != null
         currentTab == 3 -> albumsViewModel.fullScreenIndex != null
+        currentTab == 4 -> collectionsViewModel.fullScreenIndex != null
         else -> false
     }
 
@@ -255,6 +278,7 @@ fun GalleryApp(
         currentTab == 1 -> peopleViewModel.isSelecting
         currentTab == 2 -> categoryViewModel.isSelecting
         currentTab == 3 -> albumsViewModel.isSelecting
+        currentTab == 4 -> collectionsViewModel.isSelecting
         else -> false
     }
 
@@ -263,6 +287,7 @@ fun GalleryApp(
         currentTab == 1 -> peopleViewModel.isSelectingFolders
         currentTab == 2 -> categoryViewModel.isSelectingFolders
         currentTab == 3 -> albumsViewModel.isSelectingFolders
+        currentTab == 4 -> collectionsViewModel.isSelectingFolders
         else -> false
     }
 
@@ -270,10 +295,24 @@ fun GalleryApp(
         1 -> peopleViewModel.selectedFolder != null
         2 -> categoryViewModel.selectedFolder != null
         3 -> albumsViewModel.selectedFolder != null
+        4 -> collectionsViewModel.selectedFolder != null
         else -> false
     }
 
     val pagerScrollEnabled = !isFullScreen && !isSelecting && !isFolderOpen && !isSelectingFolders
+
+    // Collection picker dialog state
+    var showCollectionPicker by remember { mutableStateOf(false) }
+    var pendingUrisForCollection by remember { mutableStateOf<Set<Uri>>(emptySet()) }
+    var availableCollections by remember { mutableStateOf<List<CollectionPreview>>(emptyList()) }
+
+    val onAddToCollection: (Set<Uri>) -> Unit = { uris ->
+        pendingUrisForCollection = uris
+        coroutineScope.launch {
+            availableCollections = collectionsViewModel.getCollectionsList()
+            showCollectionPicker = true
+        }
+    }
 
     Scaffold(
         contentWindowInsets = ScaffoldDefaults.contentWindowInsets.exclude(WindowInsets.navigationBars),
@@ -306,8 +345,9 @@ fun GalleryApp(
                                 }
                             },
                             icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
-                            label = { Text("Home") },
-                            colors = navColors
+                            label = { Text("Home", textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            colors = navColors,
+                            alwaysShowLabel = true
                         )
                         NavigationBarItem(
                             selected = currentTab == 1,
@@ -317,8 +357,9 @@ fun GalleryApp(
                                 }
                             },
                             icon = { Icon(Icons.Default.People, contentDescription = "People") },
-                            label = { Text("People") },
-                            colors = navColors
+                            label = { Text("People", textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            colors = navColors,
+                            alwaysShowLabel = true
                         )
                         NavigationBarItem(
                             selected = currentTab == 2,
@@ -333,8 +374,9 @@ fun GalleryApp(
                                     contentDescription = "AI Albums"
                                 )
                             },
-                            label = { Text("AI Albums") },
-                            colors = navColors
+                            label = { Text("AI Albums", textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            colors = navColors,
+                            alwaysShowLabel = true
                         )
                         NavigationBarItem(
                             selected = currentTab == 3,
@@ -349,8 +391,26 @@ fun GalleryApp(
                                     contentDescription = "Albums"
                                 )
                             },
-                            label = { Text("Albums") },
-                            colors = navColors
+                            label = { Text("Albums", textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            colors = navColors,
+                            alwaysShowLabel = true
+                        )
+                        NavigationBarItem(
+                            selected = currentTab == 4,
+                            onClick = {
+                                coroutineScope.launch {
+                                    pagerState.animateScrollToPage(4)
+                                }
+                            },
+                            icon = {
+                                Icon(
+                                    Icons.Default.Folder,
+                                    contentDescription = "Collections"
+                                )
+                            },
+                            label = { Text("Collections", textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            colors = navColors,
+                            alwaysShowLabel = true
                         )
                     }
                 }
@@ -367,13 +427,44 @@ fun GalleryApp(
                     modifier = Modifier.fillMaxSize()
                 ) { page ->
                     when (page) {
-                        0 -> GalleryScreen(galleryViewModel)
-                        1 -> PeopleFoldersScreen(peopleViewModel, allNames)
-                        2 -> CategoryFoldersScreen(categoryViewModel, allNames)
-                        3 -> AlbumsFoldersScreen(albumsViewModel, allNames)
+                        0 -> GalleryScreen(galleryViewModel, onAddToCollection = onAddToCollection)
+                        1 -> PeopleFoldersScreen(
+                            peopleViewModel,
+                            allNames,
+                            onAddToCollection = onAddToCollection,
+                            onRecluster = { galleryService.forceRecluster() }
+                        )
+                        2 -> CategoryFoldersScreen(categoryViewModel, allNames, onAddToCollection = onAddToCollection)
+                        3 -> AlbumsFoldersScreen(albumsViewModel, allNames, onAddToCollection = onAddToCollection)
+                        4 -> CollectionsFoldersScreen(collectionsViewModel, allNames, onAddToCollection = onAddToCollection)
                     }
                 }
             }
         }
+    }
+
+    // Collection picker dialog
+    if (showCollectionPicker) {
+        CollectionPickerDialog(
+            collections = availableCollections,
+            favoriteCollectionIds = collectionsViewModel.favoriteFolderIds,
+            onDismiss = {
+                showCollectionPicker = false
+                pendingUrisForCollection = emptySet()
+            },
+            onSelect = { collection ->
+                collectionsViewModel.addMediaToCollection(pendingUrisForCollection, collection.id)
+                showCollectionPicker = false
+                pendingUrisForCollection = emptySet()
+                // Clear selection on the active view model
+                when (currentTab) {
+                    0 -> galleryViewModel.clearSelection()
+                    1 -> peopleViewModel.clearSelection()
+                    2 -> categoryViewModel.clearSelection()
+                    3 -> albumsViewModel.clearSelection()
+                    4 -> collectionsViewModel.clearSelection()
+                }
+            }
+        )
     }
 }

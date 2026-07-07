@@ -41,7 +41,20 @@ class ClipImageEncoder(context: Context) : AutoCloseable {
 
     init {
         val modelBytes = context.assets.open("image_model.ort").readBytes()
-        session = env.createSession(modelBytes)
+        var tempSession: OrtSession? = null
+        try {
+            val options = OrtSession.SessionOptions().apply {
+                addNnapi()
+                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+            }
+            options.use {
+                tempSession = env.createSession(modelBytes, it)
+            }
+        } catch (e: Throwable) {
+            android.util.Log.e("ClipImageEncoder", "Failed to initialize with NNAPI, falling back to CPU", e)
+            tempSession = env.createSession(modelBytes)
+        }
+        session = tempSession!!
     }
 
     private fun preprocessImage(bitmap: Bitmap): OnnxTensor {

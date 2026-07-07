@@ -20,6 +20,7 @@ import com.example.gallery.GalleryService
 import com.example.gallery.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 
 class GalleryIndexerWorker(
     appContext: Context,
@@ -96,21 +97,28 @@ class GalleryIndexerWorker(
 
         return try {
             val service = GalleryService(applicationContext)
-            service.indexImagesBackground { processed, total ->
-                // ── KEY FIX: never overwrite the "paused" notification ──
-                if (!isPaused) {
-                    withContext(Dispatchers.Main) {
-                        setProgress(
-                            workDataOf(
-                                "processed" to processed,
-                                "total" to total
+            GalleryService.mlExecutionLock.withLock {
+                GalleryService.isIndexingRunning = true
+                try {
+                    service.indexImagesBackground { processed, total ->
+                        // ── KEY FIX: never overwrite the "paused" notification ──
+                        if (!isPaused) {
+                            withContext(Dispatchers.Main) {
+                                setProgress(
+                                    workDataOf(
+                                        "processed" to processed,
+                                        "total" to total
+                                    )
+                                )
+                            }
+                            notificationManager.notify(
+                                NOTIFICATION_ID,
+                                createForegroundInfo(processed, total).notification
                             )
-                        )
+                        }
                     }
-                    notificationManager.notify(
-                        NOTIFICATION_ID,
-                        createForegroundInfo(processed, total).notification
-                    )
+                } finally {
+                    GalleryService.isIndexingRunning = false
                 }
             }
 

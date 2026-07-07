@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomAppBar
@@ -63,6 +64,7 @@ fun ImageGridScreen(
     onCancelSelection: () -> Unit = {},
     onDeleteSelected: () -> Unit = {},
     onShareSelected: () -> Unit = {},
+    onAddToCollectionSelected: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
 
@@ -161,6 +163,18 @@ fun ImageGridScreen(
                 }
 
                 Spacer(modifier = Modifier.width(4.dp))
+
+                // Add to collection
+                if (onAddToCollectionSelected != null) {
+                    IconButton(onClick = onAddToCollectionSelected) {
+                        Icon(
+                            Icons.Default.LibraryAdd,
+                            contentDescription = "Add to collection",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
 
                 // Delete selected images (shows confirmation dialog first)
                 IconButton(onClick = { showDeleteConfirmDialog = true }) {

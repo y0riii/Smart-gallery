@@ -319,7 +319,8 @@ fun FullScreenImage(
                         VideoPlayer(
                             uri = uri,
                             dismissOffset = dismissOffset.value,
-                            boxHeight = boxHeight
+                            boxHeight = boxHeight,
+                            showControls = showControls
                         )
                     } else {
                         // ── Image viewer ───────────────────────────────────
@@ -428,6 +429,7 @@ fun VideoPlayer(
     uri: Uri,
     dismissOffset: Float,
     boxHeight: Float,
+    showControls: Boolean,
     modifier: Modifier = Modifier
 ) {
     var isPlaying by remember { mutableStateOf(false) }
@@ -448,7 +450,7 @@ fun VideoPlayer(
         }
     }
 
-    Column(
+    Box(
         modifier = modifier
             .fillMaxSize()
             .graphicsLayer(
@@ -457,150 +459,160 @@ fun VideoPlayer(
             )
             .background(Color.Black)
     ) {
-        // 1. Video container (occupies all remaining space)
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            contentAlignment = Alignment.Center
-        ) {
-            AndroidView(
-                factory = { ctx ->
-                    VideoView(ctx).apply {
-                        setVideoURI(uri)
-                        setOnPreparedListener { mp ->
-                            duration = mp.duration
-                            mp.isLooping = true
-                            start()
-                            isPlaying = true
-                        }
-                        videoViewInstance = this
-                    }
-                },
-                update = { videoView ->
-                    if (videoView.tag != uri) {
-                        videoView.tag = uri
-                        videoView.setVideoURI(uri)
-                        videoView.start()
+        // 1. Video container (occupies all space)
+        AndroidView(
+            factory = { ctx ->
+                VideoView(ctx).apply {
+                    setVideoURI(uri)
+                    setOnPreparedListener { mp ->
+                        duration = mp.duration
+                        mp.isLooping = true
+                        start()
                         isPlaying = true
-                        videoViewInstance = videoView
                     }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-
-        // 2. Beautiful Custom Controls Row (below the video!)
-        Surface(
-            color = Color.Black.copy(alpha = 0.85f),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                    .windowInsetsPadding(WindowInsets.navigationBars)
-            ) {
-                // Slider (Seek bar)
-                val durationFloat = duration.toFloat().coerceAtLeast(1f)
-                val sliderPosition = currentPosition.toFloat().coerceIn(0f, durationFloat)
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = formatTime(currentPosition),
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-
-                    Slider(
-                        value = sliderPosition,
-                        onValueChange = { newValue ->
-                            currentPosition = newValue.toInt()
-                            videoViewInstance?.seekTo(newValue.toInt())
-                        },
-                        valueRange = 0f..durationFloat,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 8.dp),
-                        colors = SliderDefaults.colors(
-                            thumbColor = MaterialTheme.colorScheme.primary,
-                            activeTrackColor = MaterialTheme.colorScheme.primary,
-                            inactiveTrackColor = Color.Gray
-                        )
-                    )
-
-                    Text(
-                        text = formatTime(duration),
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    videoViewInstance = this
                 }
+            },
+            update = { videoView ->
+                if (videoView.tag != uri) {
+                    videoView.tag = uri
+                    videoView.setVideoURI(uri)
+                    videoView.start()
+                    isPlaying = true
+                    videoViewInstance = videoView
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
 
-                // Buttons row (Play/Pause, Rewind, Fast Forward)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = {
-                        videoViewInstance?.let {
-                            val newPos = (it.currentPosition - 10000).coerceAtLeast(0)
-                            it.seekTo(newPos)
-                            currentPosition = newPos
-                        }
-                    }) {
-                        Icon(
-                            imageVector = Icons.Default.Replay10,
-                            contentDescription = "Rewind 10s",
-                            tint = Color.White
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(24.dp))
-
-                    IconButton(
-                        onClick = {
-                            videoViewInstance?.let {
-                                if (it.isPlaying) {
-                                    it.pause()
-                                    isPlaying = false
-                                } else {
-                                    it.start()
-                                    isPlaying = true
-                                }
-                            }
-                        },
-                        modifier = Modifier
-                            .size(48.dp)
-                            .background(
-                                MaterialTheme.colorScheme.primary,
-                                shape = androidx.compose.foundation.shape.CircleShape
+        // 2. Beautiful Custom Controls Row (overlaying at the bottom!)
+        AnimatedVisibility(
+            visible = showControls,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
+            Surface(
+                color = Color.Transparent,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
                             )
+                        )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                            .windowInsetsPadding(WindowInsets.navigationBars)
                     ) {
-                        Icon(
-                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (isPlaying) "Pause" else "Play",
-                            tint = Color.White
-                        )
-                    }
+                        // Slider (Seek bar)
+                        val durationFloat = duration.toFloat().coerceAtLeast(1f)
+                        val sliderPosition = currentPosition.toFloat().coerceIn(0f, durationFloat)
 
-                    Spacer(modifier = Modifier.width(24.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = formatTime(currentPosition),
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodySmall
+                            )
 
-                    IconButton(onClick = {
-                        videoViewInstance?.let {
-                            val newPos = (it.currentPosition + 10000).coerceAtMost(duration)
-                            it.seekTo(newPos)
-                            currentPosition = newPos
+                            Slider(
+                                value = sliderPosition,
+                                onValueChange = { newValue ->
+                                    currentPosition = newValue.toInt()
+                                    videoViewInstance?.seekTo(newValue.toInt())
+                                },
+                                valueRange = 0f..durationFloat,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(horizontal = 8.dp),
+                                colors = SliderDefaults.colors(
+                                    thumbColor = MaterialTheme.colorScheme.primary,
+                                    activeTrackColor = MaterialTheme.colorScheme.primary,
+                                    inactiveTrackColor = Color.Gray
+                                )
+                            )
+
+                            Text(
+                                text = formatTime(duration),
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodySmall
+                            )
                         }
-                    }) {
-                        Icon(
-                            imageVector = Icons.Default.Forward10,
-                            contentDescription = "Forward 10s",
-                            tint = Color.White
-                        )
+
+                        // Buttons row (Play/Pause, Rewind, Fast Forward)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(onClick = {
+                                videoViewInstance?.let {
+                                    val newPos = (it.currentPosition - 10000).coerceAtLeast(0)
+                                    it.seekTo(newPos)
+                                    currentPosition = newPos
+                                }
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.Replay10,
+                                    contentDescription = "Rewind 10s",
+                                    tint = Color.White
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(24.dp))
+
+                            IconButton(
+                                onClick = {
+                                    videoViewInstance?.let {
+                                        if (it.isPlaying) {
+                                            it.pause()
+                                            isPlaying = false
+                                        } else {
+                                            it.start()
+                                            isPlaying = true
+                                        }
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(
+                                        MaterialTheme.colorScheme.primary,
+                                        shape = androidx.compose.foundation.shape.CircleShape
+                                    )
+                            ) {
+                                Icon(
+                                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = if (isPlaying) "Pause" else "Play",
+                                    tint = Color.White
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(24.dp))
+
+                            IconButton(onClick = {
+                                videoViewInstance?.let {
+                                    val newPos = (it.currentPosition + 10000).coerceAtMost(duration)
+                                    it.seekTo(newPos)
+                                    currentPosition = newPos
+                                }
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.Forward10,
+                                    contentDescription = "Forward 10s",
+                                    tint = Color.White
+                                )
+                            }
+                        }
                     }
                 }
             }

@@ -145,6 +145,9 @@ interface PersonDao {
     @Query("UPDATE faces SET personId = NULL WHERE personId = :personId")
     suspend fun clearFacesForPerson(personId: Long)
 
+    @Query("UPDATE faces SET personId = :newPersonId WHERE personId = :oldPersonId")
+    suspend fun reassignFaces(oldPersonId: Long, newPersonId: Long)
+
     @Query(
         """
         SELECT
@@ -163,6 +166,7 @@ interface PersonDao {
             mediaId
         FROM faces
         WHERE personId IS NOT NULL
+        ORDER BY (boxRight - boxLeft) * (boxBottom - boxTop) DESC
         """
     )
     suspend fun getPersonMediaRefs(): List<PersonMediaRef>
@@ -203,6 +207,7 @@ interface PersonDao {
             mediaId
         FROM faces
         WHERE personId IS NOT NULL
+        ORDER BY (boxRight - boxLeft) * (boxBottom - boxTop) DESC
         """
     )
     fun getPersonMediaRefsFlow(): Flow<List<PersonMediaRef>>

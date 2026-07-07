@@ -6,10 +6,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import android.net.Uri
 import com.example.gallery.viewModels.AlbumsViewModel
 
 @Composable
-fun AlbumsFoldersScreen(albumsViewModel: AlbumsViewModel, allNames: List<String>) {
+fun AlbumsFoldersScreen(albumsViewModel: AlbumsViewModel, allNames: List<String>, onAddToCollection: (Set<Uri>) -> Unit = {}) {
     FoldersScreen(
         viewModel = albumsViewModel,
         allNames = allNames,
@@ -21,6 +22,7 @@ fun AlbumsFoldersScreen(albumsViewModel: AlbumsViewModel, allNames: List<String>
                     .padding(horizontal = 16.dp)
                     .padding(top = 16.dp, bottom = 4.dp)
             )
-        }
+        },
+        onAddToCollection = onAddToCollection
     )
 }

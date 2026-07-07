@@ -1,12 +1,13 @@
 package com.example.gallery.components
 
+import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -20,24 +21,27 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import android.net.Uri
-import com.example.gallery.viewModels.CategoryViewModel
+import com.example.gallery.viewModels.CollectionsViewModel
 
 @Composable
-fun CategoryFoldersScreen(categoryViewModel: CategoryViewModel, allNames: List<String>, onAddToCollection: (Set<Uri>) -> Unit = {}) {
+fun CollectionsFoldersScreen(
+    collectionsViewModel: CollectionsViewModel,
+    allNames: List<String>,
+    onAddToCollection: (Set<Uri>) -> Unit = {}
+) {
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showCreateDialog by remember { mutableStateOf(false) }
 
     FoldersScreen(
-        viewModel = categoryViewModel,
+        viewModel = collectionsViewModel,
         allNames = allNames,
-        canSort = true,
-        emptyStateIcon = Icons.Default.AutoAwesome,
-        emptyStateTitle = "Create AI Albums",
-        emptyStateDescription = "Automatically group photos by prompt.\nTry 'gym exercises', 'food', or 'nature'.",
+        canSort = false,
+        emptyStateIcon = Icons.Default.CollectionsBookmark,
+        emptyStateTitle = "Create Collections",
+        emptyStateDescription = "Create your own collections and add specific photos and videos to them manually.",
         emptyStateAction = {
             Button(onClick = { showCreateDialog = true }) {
-                Text("Create AI Album")
+                Text("Create Collection")
             }
         },
         folderGridHeader = {
@@ -49,7 +53,7 @@ fun CategoryFoldersScreen(categoryViewModel: CategoryViewModel, allNames: List<S
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "AI Albums",
+                    text = "Collections",
                     style = MaterialTheme.typography.titleLarge
                 )
                 Spacer(modifier = Modifier.weight(1f))
@@ -78,34 +82,38 @@ fun CategoryFoldersScreen(categoryViewModel: CategoryViewModel, allNames: List<S
     )
 
     if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        categoryViewModel.deleteCategory()
-                        showDeleteDialog = false
+        val selectedFolder = collectionsViewModel.selectedFolder
+        if (selectedFolder != null) {
+            AlertDialog(
+                onDismissRequest = { showDeleteDialog = false },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            collectionsViewModel.deleteCollection()
+                            showDeleteDialog = false
+                        }
+                    ) {
+                        Text("Delete")
                     }
-                ) {
-                    Text("Delete")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) {
-                    Text("Cancel")
-                }
-            },
-            text = { Text("Are you sure?") }
-        )
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteDialog = false }) {
+                        Text("Cancel")
+                    }
+                },
+                title = { Text("Delete Collection") },
+                text = { Text("Are you sure you want to delete this collection? Media items will NOT be deleted.") }
+            )
+        }
     }
 
     if (showCreateDialog) {
         CustomDialog(
-            placeholder = "Prompt (e.g. gym, food)",
+            placeholder = "Collection name",
             confirmText = "Create",
             onDismiss = { showCreateDialog = false },
             onConfirm = { name ->
-                categoryViewModel.createCategory(name)
+                collectionsViewModel.createCollection(name)
                 showCreateDialog = false
             }
         )
