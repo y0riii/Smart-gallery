@@ -44,7 +44,7 @@ class PersonFolderRepository(
             persons.mapNotNull { (person, mediaIds) ->
                 if (mediaIds.size < MIN_IMAGES) return@mapNotNull null
 
-                val thumbnails = mediaIds.take(4).map { it.toMediaUri() }
+                val thumbnails = mediaIds.map { it.toMediaUri() }.padToFour()
 
                 FolderItem(
                     bucketId = person.id,
@@ -85,7 +85,7 @@ class PersonFolderRepository(
         persons.mapNotNull { (person, mediaIds) ->
             if (mediaIds.size < MIN_IMAGES) return@mapNotNull null
 
-            val thumbnails = mediaIds.take(4).map { it.toMediaUri() }
+            val thumbnails = mediaIds.map { it.toMediaUri() }.padToFour()
 
             FolderItem(
                 bucketId = person.id,

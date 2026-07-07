@@ -19,7 +19,7 @@ class CategoryFolderRepository(
     override fun getFoldersFlow(): Flow<List<FolderItem>> {
         return categoryDao.getCategoriesWithMediaIdsFlow().map { categories ->
             categories.map { (category, mediaIds) ->
-                val thumbnails = mediaIds.take(4).map { it.toMediaUri() }
+                val thumbnails = mediaIds.map { it.toMediaUri() }.padToFour()
 
                 FolderItem(
                     bucketId = category.id,
@@ -52,7 +52,7 @@ class CategoryFolderRepository(
     suspend fun getFolders(): List<FolderItem> = withContext(Dispatchers.IO) {
         val categories = categoryDao.getCategoriesWithMediaIds()
         categories.map { (category, mediaIds) ->
-            val thumbnails = mediaIds.take(4).map { it.toMediaUri() }
+            val thumbnails = mediaIds.map { it.toMediaUri() }.padToFour()
 
             FolderItem(
                 bucketId = category.id,

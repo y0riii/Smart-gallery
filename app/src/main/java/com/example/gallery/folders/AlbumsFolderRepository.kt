@@ -133,9 +133,9 @@ class AlbumsFolderRepository(
 
         grouped.map { (bucketId, entries) ->
             val name = entries.first().second
-            val thumbUris = entries.take(4).map { (id, _, isVideo) ->
+            val thumbUris = entries.map { (id, _, isVideo) ->
                 if (isVideo) id.toVideoUri() else id.toMediaUri()
-            }
+            }.padToFour()
             FolderItem(
                 bucketId = bucketId,
                 name = name,
