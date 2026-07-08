@@ -285,6 +285,12 @@ cleans up the DB (which cascades faces and adjusts person counts).
 - `SearchBar.kt`, `SearchInputField.kt` (@mention autocomplete), `SearchModeToggle.kt`.
 - `FolderTile.kt`, `CustomDialog.kt`, `CollectionPickerDialog.kt`, `CreateButton.kt`, and the
   per-tab folder screens.
+- `components/tutorial/` — **first-time tutorial**. `Tutorial.kt` holds the per-tab copy
+  (`TutorialTab` enum, `tutorialContentFor`) and `TutorialPrefs` (per-tab "seen" flags in a
+  `tutorial_prefs` SharedPreferences file). `TutorialOverlay.kt` is the modal explainer card.
+  `MainActivity.GalleryApp` shows the overlay the first time (per install) the user lands on each
+  navbar tab, keyed off `currentTab`; dismissing marks that tab seen so it never repeats.
+  `TutorialPrefs.resetAll()` re-arms every tutorial (useful for QA or a future "replay" option).
 
 ### `utils/`
 - `ImageUtils.kt` — MediaStore image scan, bitmap decode/downsample, crop, thumbnail create/delete.

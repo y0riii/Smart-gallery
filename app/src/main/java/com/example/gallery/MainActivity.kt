@@ -88,8 +88,13 @@ import com.example.gallery.db.previews.CollectionPreview
 import com.example.gallery.components.CollectionPickerDialog
 import com.example.gallery.components.CollectionsFoldersScreen
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import com.example.gallery.components.tutorial.TutorialOverlay
+import com.example.gallery.components.tutorial.TutorialPrefs
+import com.example.gallery.components.tutorial.TutorialTab
+import com.example.gallery.components.tutorial.tutorialContentFor
 
 class MainActivity : ComponentActivity() {
 
@@ -235,6 +240,20 @@ fun GalleryApp(
     val pagerState = rememberPagerState(pageCount = { 5 })
     val coroutineScope = rememberCoroutineScope()
     val currentTab = if (hasPermission) pagerState.currentPage else 0
+
+    // ── First-time tutorial ──────────────────────────────────────────────────
+    // Show a one-time explainer overlay the first time the user lands on each navbar tab.
+    // "Seen" state is persisted per-tab in TutorialPrefs, so each overlay appears exactly once.
+    // Gated on hasPermission so tips (which describe searching/browsing) only appear once the
+    // pager is actually usable. TutorialTab order matches the pager page indices (0..4).
+    val tutorialContext = LocalContext.current
+    val tutorialPrefs = remember { TutorialPrefs(tutorialContext) }
+    var activeTutorial by remember { mutableStateOf<TutorialTab?>(null) }
+    LaunchedEffect(hasPermission, currentTab) {
+        if (!hasPermission) return@LaunchedEffect
+        val tab = TutorialTab.entries.getOrNull(currentTab) ?: return@LaunchedEffect
+        if (!tutorialPrefs.hasSeen(tab)) activeTutorial = tab
+    }
 
     val permissionsToRequest = remember { getPermissionsToRequest() }
 
@@ -464,6 +483,18 @@ fun GalleryApp(
                     3 -> albumsViewModel.clearSelection()
                     4 -> collectionsViewModel.clearSelection()
                 }
+            }
+        )
+    }
+
+    // First-time tutorial overlay for the current tab (see the LaunchedEffect above).
+    // Dismissing marks this tab as seen so it won't show again.
+    activeTutorial?.let { tab ->
+        TutorialOverlay(
+            content = tutorialContentFor(tab),
+            onDismiss = {
+                tutorialPrefs.markSeen(tab)
+                activeTutorial = null
             }
         )
     }
