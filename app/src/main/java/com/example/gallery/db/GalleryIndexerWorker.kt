@@ -100,6 +100,8 @@ class GalleryIndexerWorker(
 
         return try {
             val service = GalleryService(applicationContext)
+            // Indexing shares the ML lock with clustering: if a clustering pass is already running,
+            // this simply waits for it to finish, then runs.
             GalleryService.mlExecutionLock.withLock {
                 GalleryService.isIndexingRunning = true
                 // Throttle progress/notification updates: firing setProgress() (a WorkManager DB

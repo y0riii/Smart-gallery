@@ -21,7 +21,10 @@ import kotlin.random.Random
  */
 object ChineseWhispers {
 
-    private const val EDGE_THRESHOLD = 0.55f
+    // Pairwise cosine-similarity cutoff for two faces to be considered the "same person". Public
+    // so the incremental assignment in GalleryService uses the exact same face↔face threshold
+    // (a single source of truth instead of a separate, looser centroid threshold).
+    const val EDGE_THRESHOLD = 0.55f
     private const val MAX_ITERATIONS = 20
 
     // Fixed seed so that clustering the same set of faces yields the same result across runs.

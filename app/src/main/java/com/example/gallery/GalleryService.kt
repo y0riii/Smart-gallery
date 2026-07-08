@@ -123,7 +123,12 @@ class GalleryService(val context: Context) {
     companion object {
         private const val TAG = "GalleryService"
         private const val CATEGORY_MATCH_THRESHOLD = 0.22f
-        private const val ASSIGN_THRESHOLD = 0.45f
+
+        // After this many new faces have been assigned incrementally, run a full re-cluster to
+        // correct any drift (name-preserving — see runFullClustering). Prevents incremental
+        // mistakes from accumulating forever.
+        private const val FULL_RECLUSTER_THRESHOLD = 300
+        private const val PREF_FACES_SINCE_FULL = "faces_since_full_cluster"
 
         // Minimum CLIP text↔image similarity for a search hit to count as a "strong" match.
         // Results at/above this appear before the "less relevant" separator; below it, after.
@@ -480,8 +485,12 @@ class GalleryService(val context: Context) {
 
             val prefs = context.getSharedPreferences("gallery_prefs", Context.MODE_PRIVATE)
             val firstRunCompleted = prefs.getBoolean("first_clustering_run_completed", false)
+            val facesSinceFull = prefs.getInt(PREF_FACES_SINCE_FULL, 0)
             val allPersons = personDao.getAllPersons()
-            val shouldRunFirstRun = !firstRunCompleted || allPersons.isEmpty()
+            // Run a full (re)cluster on the first ever run, when there are no persons yet, or once
+            // enough new faces have accumulated that incremental drift should be corrected.
+            val shouldRunFirstRun = !firstRunCompleted || allPersons.isEmpty() ||
+                facesSinceFull >= FULL_RECLUSTER_THRESHOLD
 
             if (shouldRunFirstRun) {
                 // ── FIRST RUN: Full Chinese Whispers on all faces ──
@@ -495,28 +504,49 @@ class GalleryService(val context: Context) {
                 val facesToCluster = faceDao.getAllFaces()
                 if (facesToCluster.isEmpty()) {
                     Log.d(TAG, "No faces to cluster, skipping first run")
-                    prefs.edit().putBoolean("first_clustering_run_completed", true).apply()
+                    prefs.edit()
+                        .putBoolean("first_clustering_run_completed", true)
+                        .putInt(PREF_FACES_SINCE_FULL, 0)
+                        .apply()
                     return@withContext true
                 }
 
                 val normalizedFaces = facesToCluster.map { VectorUtils.normalize(it.embedding) }
                 val clusters = ChineseWhispers.cluster(normalizedFaces)
 
+                // Preserve person identity across the re-cluster: each old person's id + name is
+                // carried to the new cluster that inherited the most of that person's faces, so
+                // user-assigned names AND favorites (which are keyed by person id) survive. Clusters
+                // that don't inherit an identity get fresh ids above the current max.
+                val carriedIdentity = computeCarriedIdentity(clusters, facesToCluster)
+                val oldNameById = allPersons.associate { it.id to it.name }
+                val maxOldId = allPersons.maxOfOrNull { it.id } ?: 0L
+
                 val personsToInsert = mutableListOf<PersonEntity>()
                 val faceUpdates = mutableListOf<Pair<Long, Long>>() // faceId to personId
 
-                var personCounter = 0
+                var freshId = maxOldId
 
-                for (cluster in clusters) {
+                for ((clusterIndex, cluster) in clusters.withIndex()) {
                     if (!kotlinx.coroutines.currentCoroutineContext().isActive) {
                         Log.d(TAG, "First run clustering loop cancelled, aborting.")
                         return@withContext false
                     }
 
-                    personCounter++
                     if (cluster.isEmpty()) continue
 
-                    val personName = "#p$personCounter"
+                    // Carry the old person's id + name if this cluster owns one; else a fresh id.
+                    val carriedOldId = carriedIdentity[clusterIndex]
+                    val personId: Long
+                    val personName: String
+                    if (carriedOldId != null) {
+                        personId = carriedOldId
+                        personName = oldNameById[carriedOldId] ?: "#p$carriedOldId"
+                    } else {
+                        freshId++
+                        personId = freshId
+                        personName = "#p$personId"
+                    }
 
                     // Compute sum of normalized embeddings for this cluster
                     val dim = facesToCluster.first().embedding.size
@@ -551,7 +581,6 @@ class GalleryService(val context: Context) {
                         }
                     }
 
-                    val personId = personCounter.toLong()
                     personsToInsert.add(
                         PersonEntity(
                             id = personId,
@@ -581,9 +610,12 @@ class GalleryService(val context: Context) {
                     }
                 }
 
-                // Set first run completed preference ONLY after successful commit
-                prefs.edit().putBoolean("first_clustering_run_completed", true).apply()
-                Log.d(TAG, "First run complete: ${personsToInsert.size} persons created and ${faceUpdates.size} faces assigned.")
+                // Set first-run flag + reset the drift counter ONLY after successful commit.
+                prefs.edit()
+                    .putBoolean("first_clustering_run_completed", true)
+                    .putInt(PREF_FACES_SINCE_FULL, 0)
+                    .apply()
+                Log.d(TAG, "Full cluster complete: ${personsToInsert.size} persons created and ${faceUpdates.size} faces assigned.")
             } else {
                 // ── SUBSEQUENT RUNS: Incremental centroid assignment ──
                 val newFaces = allFaces.filter { it.personId == null }
@@ -597,11 +629,21 @@ class GalleryService(val context: Context) {
                     val personUpdates = mutableListOf<PersonEntity>()
                     val faceUpdates = mutableListOf<Pair<Long, Long>>() // faceId to personId
 
-                    // We need a local cache of person embeddings to update them as we iterate,
+                    // We need a local cache of person entities to update them as we iterate,
                     // since multiple new faces might be assigned to the same person.
                     val personCache = allPersons.associateBy { it.id }.toMutableMap()
                     val maxId = personCache.keys.maxOrNull() ?: 0L
                     var currentPersonCount = maxId
+
+                    // Per-person normalized member-face embeddings. New faces are matched against
+                    // these ACTUAL members (nearest-neighbour), not a single drifting centroid.
+                    // Grown in-loop so faces assigned earlier in this run are matchable by later ones.
+                    val memberEmbeddings = HashMap<Long, MutableList<FloatArray>>()
+                    for (f in allFaces) {
+                        val pid = f.personId ?: continue
+                        memberEmbeddings.getOrPut(pid) { mutableListOf() }
+                            .add(VectorUtils.normalize(f.embedding))
+                    }
 
                     var assignedCount = 0
                     var newPersonCount = 0
@@ -615,24 +657,34 @@ class GalleryService(val context: Context) {
                         val normEmb = VectorUtils.normalize(face.embedding)
                         val boxArea = (face.boxRight - face.boxLeft) * (face.boxBottom - face.boxTop)
 
-                        val bestMatch = personCache.values.maxByOrNull { person ->
-                            val avgVec = VectorUtils.normalize(
-                                VectorUtils.divide(person.Embedding, person.count.toFloat())
-                            )
-                            VectorUtils.dotProduct(normEmb, avgVec)
+                        // Nearest-neighbour match: score each person by the MEAN of its top-3
+                        // member-face similarities to this face. Robust to a single lucky match and
+                        // to centroid drift. Uses the same face↔face cutoff as Chinese Whispers.
+                        var bestPersonId: Long? = null
+                        var bestScore = Float.NEGATIVE_INFINITY
+                        for ((pid, embs) in memberEmbeddings) {
+                            var s1 = Float.NEGATIVE_INFINITY
+                            var s2 = Float.NEGATIVE_INFINITY
+                            var s3 = Float.NEGATIVE_INFINITY
+                            for (e in embs) {
+                                val sim = VectorUtils.dotProduct(normEmb, e)
+                                when {
+                                    sim > s1 -> { s3 = s2; s2 = s1; s1 = sim }
+                                    sim > s2 -> { s3 = s2; s2 = sim }
+                                    sim > s3 -> { s3 = sim }
+                                }
+                            }
+                            val top = listOf(s1, s2, s3).filter { it.isFinite() }
+                            if (top.isEmpty()) continue
+                            val score = top.sum() / top.size
+                            if (score > bestScore) {
+                                bestScore = score
+                                bestPersonId = pid
+                            }
                         }
 
                         val personId: Long
-                        if (bestMatch == null || VectorUtils.dotProduct(
-                                normEmb,
-                                VectorUtils.normalize(
-                                    VectorUtils.divide(
-                                        bestMatch.Embedding,
-                                        bestMatch.count.toFloat()
-                                    )
-                                )
-                            ) < ASSIGN_THRESHOLD
-                        ) {
+                        if (bestPersonId == null || bestScore < ChineseWhispers.EDGE_THRESHOLD) {
                             // Create a new person
                             currentPersonCount++
                             personId = currentPersonCount
@@ -664,11 +716,13 @@ class GalleryService(val context: Context) {
                                 count = 1
                             )
                             personCache[personId] = newPerson
+                            memberEmbeddings[personId] = mutableListOf(normEmb)
                             personsToInsert.add(newPerson)
                             newPersonCount++
                             Log.d(TAG, "Prepared new person '#p$personId' (id=$personId) for face ${face.faceId}")
                         } else {
-                            // Assign to existing person
+                            // Assign to the matched existing person
+                            val bestMatch = personCache.getValue(bestPersonId)
                             personId = bestMatch.id
                             val updatedEmbedding = VectorUtils.add(bestMatch.Embedding, normEmb)
 
@@ -704,6 +758,7 @@ class GalleryService(val context: Context) {
                                 thumbnailSize = updatedThumbnailSize
                             )
                             personCache[personId] = updatedPerson
+                            memberEmbeddings.getValue(personId).add(normEmb)
 
                             personUpdates.removeAll { it.id == personId }
                             personUpdates.add(updatedPerson)
@@ -726,6 +781,12 @@ class GalleryService(val context: Context) {
                         }
                     }
 
+                    // Track how many new faces have been assigned incrementally since the last full
+                    // cluster, so drift gets corrected by a full re-cluster once it crosses the limit.
+                    prefs.edit()
+                        .putInt(PREF_FACES_SINCE_FULL, facesSinceFull + newFaces.size)
+                        .apply()
+
                     Log.d(TAG, "Incremental run complete: $assignedCount assigned to existing, $newPersonCount new persons created")
                 }
             }
@@ -735,6 +796,47 @@ class GalleryService(val context: Context) {
             cleanupOrphanThumbnails()
             true
         }
+    }
+
+    /**
+     * Maps a cluster index → the old personId whose identity (id + name) it should inherit, so a
+     * full re-cluster keeps user-assigned names and favorites (both keyed by person id). Each old
+     * person is inherited by the single new cluster that got the most of that person's faces;
+     * clusters that don't win any old identity are left out (the caller assigns them fresh ids).
+     *
+     * @param clusters CW output — lists of indices into [faces]
+     * @param faces    the faces that were clustered (each still carries its previous personId)
+     */
+    private fun computeCarriedIdentity(
+        clusters: List<List<Int>>,
+        faces: List<FaceEntity>
+    ): Map<Int, Long> {
+        // For each cluster, which old person contributed the most of its faces, and how many.
+        val majorityOldId = HashMap<Int, Long>()
+        val majorityCount = HashMap<Int, Int>()
+        clusters.forEachIndexed { i, cluster ->
+            val counts = HashMap<Long, Int>()
+            for (idx in cluster) {
+                val oldId = faces[idx].personId ?: continue
+                counts[oldId] = (counts[oldId] ?: 0) + 1
+            }
+            val best = counts.maxByOrNull { it.value } ?: return@forEachIndexed
+            majorityOldId[i] = best.key
+            majorityCount[i] = best.value
+        }
+
+        // Each old id is inherited by the cluster that holds the most of its faces.
+        val winningClusterForOldId = HashMap<Long, Int>()
+        majorityOldId.forEach { (clusterIdx, oldId) ->
+            val current = winningClusterForOldId[oldId]
+            if (current == null || (majorityCount[clusterIdx] ?: 0) > (majorityCount[current] ?: 0)) {
+                winningClusterForOldId[oldId] = clusterIdx
+            }
+        }
+
+        val result = HashMap<Int, Long>()
+        winningClusterForOldId.forEach { (oldId, clusterIdx) -> result[clusterIdx] = oldId }
+        return result
     }
 
     /**

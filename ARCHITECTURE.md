@@ -161,15 +161,21 @@ paused, the loop flushes pending writes, releases the ML models, and waits.
 
 Runs after indexing, under the same `mlExecutionLock`.
 
-- **First run / forced recluster** (`first_clustering_run_completed` pref false, or triggered by
-  `forceRecluster`): runs full **Chinese Whispers** graph clustering (`ChineseWhispers.cluster`) on
-  all face embeddings, builds people, generates thumbnails, and commits **everything in one atomic
-  transaction** (wipe + rebuild together). The old clustering stays intact on disk until that
-  commit, so a crash mid-computation never leaves an empty People tab (see §7). `ChineseWhispers`
-  uses a **seeded RNG** so results are reproducible.
-- **Incremental run** (subsequent): only faces with `personId == null` are processed. Each is
-  assigned to the nearest existing person centroid (if similarity ≥ `ASSIGN_THRESHOLD`) or becomes
-  a new singleton person. Applied in a single transaction.
+- **Full (re)cluster** — runs on the first ever clustering, when there are no persons yet,
+  `forceRecluster`, OR automatically once `FULL_RECLUSTER_THRESHOLD` (300) new faces have been
+  assigned incrementally (drift correction). Runs full **Chinese Whispers** (`ChineseWhispers.cluster`,
+  seeded RNG for reproducibility) on all embeddings, builds people + thumbnails, and commits
+  **everything in one atomic transaction** (wipe + rebuild). The old clustering stays on disk until
+  that commit, so a crash mid-computation never empties the People tab (see §7). **Identity is
+  preserved**: each old person's *id + name* is carried to the new cluster that inherited the most of
+  its faces (`computeCarriedIdentity`), so user-assigned names **and favorites** (keyed by person id)
+  survive; other clusters get fresh ids above the current max.
+- **Incremental run** (subsequent): only faces with `personId == null` are processed. Each new face
+  is assigned by **nearest-neighbor** — the person whose top-3 member-face similarities average
+  highest, if that clears `ChineseWhispers.EDGE_THRESHOLD` (the single shared face↔face cutoff) —
+  else it becomes a new person. This matches against actual member faces (not a drifting centroid),
+  and the accumulated new-face count is persisted so a full recluster eventually corrects drift.
+  Applied in a single transaction.
 - After either path, `cleanupOrphanThumbnails()` deletes thumbnail files on disk no longer
   referenced by any person (from re-clustering or interrupted runs).
 
@@ -187,6 +193,10 @@ work in the process-wide `GalleryService.mlExecutionLock` mutex. WorkManager uni
 worker; the mutex prevents indexing and clustering from computing simultaneously (the second one
 suspends until the first releases the lock). `isIndexingRunning` / `isClusteringRunning` flags let
 `forceRecluster` bail out early to avoid races.
+
+The normal order is indexing → then clustering (the indexer enqueues clustering on success). If a
+clustering pass is **already running** when indexing is triggered, indexing simply waits on the
+mutex for clustering to finish, then runs — it does not interrupt an in-progress clustering.
 
 ---
 
