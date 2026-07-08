@@ -39,7 +39,7 @@ class CategoryFolderRepository(
         fromDate: Long?,
         toDate: Long?,
         sortMode: SortMode
-    ): Flow<List<Uri>> {
+    ): Flow<com.example.gallery.SearchResult> {
         return categoryDao.getImagesIdsByCategoryFlow(bucketId).map { mediaIds ->
             service.searchWithin(mediaIds, prompt, useClip, fromDate, toDate, sortMode)
         }.flowOn(Dispatchers.IO)

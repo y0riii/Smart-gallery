@@ -22,14 +22,20 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import android.view.HapticFeedbackConstants
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.size.Size
 import com.example.gallery.folders.FolderItem
 import com.example.gallery.ui.theme.AppConfig
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -56,12 +62,19 @@ fun FolderTile(
     onLongClick: (() -> Unit)? = null,
     onFavoriteClick: () -> Unit
 ) {
+    val view = LocalView.current
     Card(
         modifier = modifier
             .fillMaxWidth()
             .combinedClickable(
                 onClick = onClick,
-                onLongClick = onLongClick
+                // Fire a long-press haptic before invoking the caller's handler (enter selection).
+                onLongClick = onLongClick?.let { handler ->
+                    {
+                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                        handler()
+                    }
+                }
             ),
         shape = RoundedCornerShape(AppConfig.FolderTileCornerRadius),
         border = if (isSelected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary) else null,
@@ -202,8 +215,22 @@ private fun ThumbCell(uri: Uri?, modifier: Modifier) {
         val isVideo = uri.isVideoUri()
         val videoThumbnail = if (isVideo) rememberVideoThumbnail(uri) else null
 
+        val context = LocalContext.current
+        // Decode at a small size (these are tiny 2x2 mosaic cells) instead of loading the full-res
+        // photo, and use explicit cache keys so the same thumbnail is reused across tiles/screens.
+        val request = remember(uri, videoThumbnail) {
+            ImageRequest.Builder(context)
+                .data(if (isVideo) videoThumbnail else uri)
+                .size(Size(256, 256))
+                .memoryCacheKey(uri.toString() + "_thumb")
+                .diskCacheKey(uri.toString() + "_thumb")
+                // Show the cached bitmap instantly when scrolled back into view (no reload flash).
+                .placeholderMemoryCacheKey(uri.toString() + "_thumb")
+                .build()
+        }
+
         AsyncImage(
-            model = if (isVideo) videoThumbnail else uri,
+            model = request,
             contentDescription = null,
             modifier = modifier,
             contentScale = ContentScale.Crop,

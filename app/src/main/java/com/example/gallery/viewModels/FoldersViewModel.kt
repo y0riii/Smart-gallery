@@ -41,6 +41,10 @@ abstract class FoldersViewModel(
 
     var images by mutableStateOf<List<Uri>>(emptyList())
 
+    /** Relevance-separator boundary for an open folder's semantic search (null = no separator). */
+    var relevantCount by mutableStateOf<Int?>(null)
+        private set
+
     var selectedFolder by mutableStateOf<FolderItem?>(null)
 
     var prompt by mutableStateOf(TextFieldValue(""))
@@ -155,8 +159,11 @@ abstract class FoldersViewModel(
                 fromDate = fromDate,
                 toDate = toDate,
                 sortMode = sortMode
-            ).collect { list ->
-                images = list
+            ).collect { result ->
+                images = result.uris
+                // Raw relevant count (null for non-scored searches); the grid guards when to draw
+                // the separator, and the count label reports this number.
+                relevantCount = result.relevantCount
                 isLoading = false
                 if (firstEmission) {
                     firstEmission = false
@@ -184,6 +191,7 @@ abstract class FoldersViewModel(
     fun clearSelectedFolder() {
         imagesCollectionJob?.cancel()
         images = emptyList()
+        relevantCount = null
         selectedFolder = null
         prompt = TextFieldValue("")
         fromDate = null

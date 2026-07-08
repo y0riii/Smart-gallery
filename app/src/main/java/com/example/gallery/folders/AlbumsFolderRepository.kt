@@ -5,6 +5,7 @@ import android.database.ContentObserver
 import android.net.Uri
 import android.provider.MediaStore
 import com.example.gallery.GalleryService
+import com.example.gallery.SearchResult
 import com.example.gallery.SortMode
 import com.example.gallery.utils.toMediaUri
 import com.example.gallery.utils.toVideoUri
@@ -69,7 +70,7 @@ class AlbumsFolderRepository(
         fromDate: Long?,
         toDate: Long?,
         sortMode: SortMode
-    ): Flow<List<Uri>> {
+    ): Flow<SearchResult> {
         return callbackFlow {
             val scope = CoroutineScope(Dispatchers.IO)
             fun load() {
@@ -168,10 +169,10 @@ class AlbumsFolderRepository(
         fromDate: Long?,
         toDate: Long?,
         sortMode: SortMode
-    ): List<Uri> = withContext(Dispatchers.IO) {
-        // No search active: merge images + videos sorted by date
+    ): SearchResult = withContext(Dispatchers.IO) {
+        // No search active: merge images + videos sorted by date (no relevance split).
         if (prompt.isNullOrBlank() && sortMode != SortMode.RELEVANCE) {
-            return@withContext getMergedAlbumMedia(bucketId, fromDate, toDate)
+            return@withContext SearchResult.all(getMergedAlbumMedia(bucketId, fromDate, toDate))
         }
 
         // With a prompt (semantic search): images only, videos excluded
@@ -189,7 +190,7 @@ class AlbumsFolderRepository(
 
         if (prompt.isNullOrBlank()) {
             // RELEVANCE with no prompt → fall back to merged date sort
-            return@withContext getMergedAlbumMedia(bucketId, fromDate, toDate)
+            return@withContext SearchResult.all(getMergedAlbumMedia(bucketId, fromDate, toDate))
         }
 
         service.searchWithin(imageIds, prompt, useClip, fromDate, toDate, null)

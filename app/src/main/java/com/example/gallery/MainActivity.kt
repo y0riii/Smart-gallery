@@ -64,6 +64,7 @@ import com.example.gallery.components.AlbumsFoldersScreen
 import com.example.gallery.components.CategoryFoldersScreen
 import com.example.gallery.components.GalleryScreen
 import com.example.gallery.components.PeopleFoldersScreen
+import com.example.gallery.components.PermissionRequestScreen
 import com.example.gallery.db.AppDatabase
 import com.example.gallery.folders.AlbumsFolderRepository
 import com.example.gallery.folders.CategoryFolderRepository
@@ -336,7 +337,8 @@ fun GalleryApp(
     Scaffold(
         contentWindowInsets = ScaffoldDefaults.contentWindowInsets.exclude(WindowInsets.navigationBars),
         bottomBar = {
-            if (!isFullScreen && !isSelecting && !isSelectingFolders) {
+            // Hide the nav bar + progress on the permission screen (nothing to navigate yet).
+            if (hasPermission && !isFullScreen && !isSelecting && !isSelectingFolders) {
                 Column {
                     progress?.let {
                         LinearProgressIndicator(
@@ -438,7 +440,10 @@ fun GalleryApp(
     ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding)) {
             if (!hasPermission) {
-                GalleryScreen(galleryViewModel)
+                // No media access yet: show a clear explainer + action instead of an empty gallery.
+                PermissionRequestScreen(
+                    onRequestPermission = { permissionLauncher.launch(permissionsToRequest) }
+                )
             } else {
                 HorizontalPager(
                     state = pagerState,

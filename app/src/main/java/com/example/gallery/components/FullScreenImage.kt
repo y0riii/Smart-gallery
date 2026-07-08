@@ -3,7 +3,7 @@ package com.example.gallery.components
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
-import android.widget.VideoView
+import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.VectorConverter
@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -77,12 +78,21 @@ import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
 import com.example.gallery.utils.isVideoUri
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
+// Media3's player + view APIs are annotated @UnstableApi; opt in for the whole viewer.
+@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 fun FullScreenImage(
     images: List<Uri>,
@@ -163,6 +173,9 @@ fun FullScreenImage(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
             beyondViewportPageCount = 1,
+            // A small black gutter between pages so swiping between photos reads as distinct
+            // cards rather than one image sliding into the next — a subtle premium touch.
+            pageSpacing = 16.dp,
             userScrollEnabled = !isCurrentPageZoomed && !isDraggingDownGlobal
         ) { pageIndex ->
             val uri = images[pageIndex]
@@ -172,20 +185,61 @@ fun FullScreenImage(
             val dismissOffset = remember { Animatable(0f) }
             var mediaAspectRatio by remember { mutableFloatStateOf(1f) }
 
-            // Video Controller States Hoisted per Page Item
+            // Video controller state, hoisted per page. Positions/durations are milliseconds.
             var isPlaying by remember { mutableStateOf(false) }
-            var currentPosition by remember { mutableStateOf(0) }
-            var duration by remember { mutableStateOf(0) }
-            var videoViewInstance by remember { mutableStateOf<VideoView?>(null) }
+            var currentPosition by remember(uri) { mutableStateOf(0L) }
+            var duration by remember(uri) { mutableStateOf(0L) }
 
-            // Periodically update currentPosition when video plays
+            // True while media is still loading (image decoding, or video buffering / not yet
+            // ready) so we can show a spinner instead of a black frame. Keyed on the uri so it
+            // resets if this page's uri changes (list mutation).
+            var isMediaLoading by remember(uri) { mutableStateOf(true) }
+
+            // One ExoPlayer per video page (at most ~3 alive at once given beyondViewportPageCount).
+            // Built lazily for video URIs only; released in the DisposableEffect below. ExoPlayer
+            // replaces the old VideoView for smoother seeking, buffering states, and format support.
+            val exoPlayer = remember(uri) {
+                if (uri.isVideoUri()) {
+                    ExoPlayer.Builder(context).build().apply {
+                        setMediaItem(MediaItem.fromUri(uri))
+                        repeatMode = Player.REPEAT_MODE_ONE
+                        prepare()
+                    }
+                } else null
+            }
+
+            // Bridge ExoPlayer callbacks into Compose state; release the player when the page leaves.
+            DisposableEffect(exoPlayer) {
+                val player = exoPlayer
+                val listener = object : Player.Listener {
+                    override fun onPlaybackStateChanged(state: Int) {
+                        when (state) {
+                            Player.STATE_BUFFERING -> isMediaLoading = true
+                            Player.STATE_READY -> {
+                                isMediaLoading = false
+                                player?.let { duration = it.duration.coerceAtLeast(0L) }
+                            }
+                        }
+                    }
+                    override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+                    override fun onVideoSizeChanged(size: androidx.media3.common.VideoSize) {
+                        if (size.width > 0 && size.height > 0) {
+                            mediaAspectRatio = size.width.toFloat() / size.height.toFloat()
+                        }
+                    }
+                }
+                player?.addListener(listener)
+                onDispose {
+                    player?.removeListener(listener)
+                    player?.release()
+                }
+            }
+
+            // Poll the play head so the seek bar tracks playback (ExoPlayer has no per-frame callback).
             LaunchedEffect(isPlaying) {
                 if (isPlaying) {
                     while (true) {
-                        videoViewInstance?.let {
-                            currentPosition = it.currentPosition
-                            duration = it.duration
-                        }
+                        exoPlayer?.let { currentPosition = it.currentPosition.coerceAtLeast(0L) }
                         delay(200)
                     }
                 }
@@ -201,19 +255,26 @@ fun FullScreenImage(
 
             LaunchedEffect(isCurrentPage) {
                 if (isCurrentPage) {
-                    if (uri.isVideoUri()) {
-                        videoViewInstance?.start()
-                        isPlaying = true
-                    }
+                    // Autoplay the video that just became the current page.
+                    exoPlayer?.play()
                 } else {
                     scale.snapTo(1f)
                     offset.snapTo(Offset.Zero)
                     dismissOffset.snapTo(0f)
-                    // Automatically pause running video if swiped away and reset to the beginning
-                    videoViewInstance?.pause()
-                    videoViewInstance?.seekTo(0)
-                    currentPosition = 0
+                    // Pause and rewind a video that was swiped away so it restarts cleanly.
+                    exoPlayer?.pause()
+                    exoPlayer?.seekTo(0)
+                    currentPosition = 0L
                     isPlaying = false
+                }
+            }
+
+            // Auto-hide the controls a few seconds into playback for an immersive, premium feel.
+            // Any tap sets showControls = true again, which restarts this timer.
+            LaunchedEffect(isCurrentPage, isPlaying, showControls) {
+                if (isCurrentPage && uri.isVideoUri() && isPlaying && showControls) {
+                    delay(3500)
+                    showControls = false
                 }
             }
 
@@ -235,48 +296,40 @@ fun FullScreenImage(
                             alpha = (1f - (dismissOffset.value / boxHeight)).coerceIn(0f, 1f)
                         )
                 ) {
-                    if (uri.isVideoUri()) {
+                    if (uri.isVideoUri() && exoPlayer != null) {
+                        // Media3 PlayerView renders the ExoPlayer output. We drive the transport with
+                        // our own Compose control bar (LAYER 3), so the built-in controller is off.
                         AndroidView(
                             factory = { ctx ->
-                                VideoView(ctx).apply {
-                                    setVideoURI(uri)
-                                    setOnPreparedListener { mp ->
-                                        duration = mp.duration
-                                        mp.isLooping = true
-                                        if (mp.videoWidth > 0 && mp.videoHeight > 0) {
-                                            mediaAspectRatio = mp.videoWidth.toFloat() / mp.videoHeight.toFloat()
-                                        }
-                                        if (pagerState.currentPage == pageIndex) {
-                                            start()
-                                            isPlaying = true
-                                        }
-                                    }
-                                    videoViewInstance = this
+                                PlayerView(ctx).apply {
+                                    player = exoPlayer
+                                    useController = false
+                                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
                                 }
                             },
-                            update = { videoView ->
-                                if (videoView.tag != uri) {
-                                    videoView.tag = uri
-                                    videoView.setVideoURI(uri)
-                                    if (pagerState.currentPage == pageIndex) {
-                                        videoView.start()
-                                        isPlaying = true
-                                    } else {
-                                        videoView.pause()
-                                        isPlaying = false
-                                    }
-                                    videoViewInstance = videoView
-                                }
-                            },
+                            // Rebind if the page's player instance changes (e.g. the uri changed
+                            // due to a list mutation) so the view never points at a released player.
+                            update = { it.player = exoPlayer },
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
                         AsyncImage(
                             model = uri,
-                            onSuccess = { state ->
-                                val intrinsicSize = state.painter.intrinsicSize
-                                if (intrinsicSize.width > 0 && intrinsicSize.height > 0) {
-                                    mediaAspectRatio = intrinsicSize.width / intrinsicSize.height
+                            // onState (not onSuccess) so we can also flip the loading spinner off
+                            // on error, and capture the intrinsic aspect ratio used by the zoom math.
+                            onState = { state ->
+                                when (state) {
+                                    is AsyncImagePainter.State.Success -> {
+                                        val sz = state.painter.intrinsicSize
+                                        if (sz.width > 0 && sz.height > 0) {
+                                            mediaAspectRatio = sz.width / sz.height
+                                        }
+                                        isMediaLoading = false
+                                    }
+                                    is AsyncImagePainter.State.Error -> isMediaLoading = false
+                                    is AsyncImagePainter.State.Loading -> isMediaLoading = true
+                                    else -> {}
                                 }
                             },
                             contentDescription = "Full screen image",
@@ -284,6 +337,15 @@ fun FullScreenImage(
                             contentScale = ContentScale.Fit
                         )
                     }
+                }
+
+                // LAYER 1.5: Loading / buffering spinner (centered, un-scaled) shown until the
+                // image decodes or the video is ready — avoids a bare black frame while loading.
+                if (isMediaLoading) {
+                    CircularProgressIndicator(
+                        color = Color.White,
+                        modifier = Modifier.align(Alignment.Center)
+                    )
                 }
 
                 // LAYER 2: Transparent Gesture Interceptor Overlay
@@ -295,6 +357,7 @@ fun FullScreenImage(
                         .pointerInput(Unit) {
                             detectTapGestures(
                                 onDoubleTap = {
+                                    view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                                     scope.launch {
                                         if (scale.value > 1.05f) {
                                             launch { scale.animateTo(1f) }
@@ -380,6 +443,8 @@ fun FullScreenImage(
                                             isDraggingDown = true
                                             isDraggingDownGlobal = true
                                             showControls = false
+                                            // Subtle confirmation that dismiss-drag has engaged.
+                                            view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                                         }
 
                                         if (isDraggingDown) {
@@ -464,8 +529,8 @@ fun FullScreenImage(
                                         Slider(
                                             value = sliderPosition,
                                             onValueChange = { newValue ->
-                                                currentPosition = newValue.toInt()
-                                                videoViewInstance?.seekTo(newValue.toInt())
+                                                currentPosition = newValue.toLong()
+                                                exoPlayer?.seekTo(newValue.toLong())
                                             },
                                             valueRange = 0f..durationFloat,
                                             modifier = Modifier
@@ -492,8 +557,8 @@ fun FullScreenImage(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         IconButton(onClick = {
-                                            videoViewInstance?.let {
-                                                val newPos = (it.currentPosition - 10000).coerceAtLeast(0)
+                                            exoPlayer?.let {
+                                                val newPos = (it.currentPosition - 10000).coerceAtLeast(0L)
                                                 it.seekTo(newPos)
                                                 currentPosition = newPos
                                             }
@@ -509,14 +574,10 @@ fun FullScreenImage(
 
                                         IconButton(
                                             onClick = {
-                                                videoViewInstance?.let {
-                                                    if (it.isPlaying) {
-                                                        it.pause()
-                                                        isPlaying = false
-                                                    } else {
-                                                        it.start()
-                                                        isPlaying = true
-                                                    }
+                                                view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                                                exoPlayer?.let {
+                                                    // isPlaying state syncs via the Player.Listener.
+                                                    if (it.isPlaying) it.pause() else it.play()
                                                 }
                                             },
                                             modifier = Modifier
@@ -536,7 +597,7 @@ fun FullScreenImage(
                                         Spacer(modifier = Modifier.width(24.dp))
 
                                         IconButton(onClick = {
-                                            videoViewInstance?.let {
+                                            exoPlayer?.let {
                                                 val newPos = (it.currentPosition + 10000).coerceAtMost(duration)
                                                 it.seekTo(newPos)
                                                 currentPosition = newPos
@@ -632,7 +693,7 @@ fun FullScreenImagePreview() {
     }
 }
 
-private fun formatTime(ms: Int): String {
+private fun formatTime(ms: Long): String {
     val totalSeconds = ms / 1000
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60

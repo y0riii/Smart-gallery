@@ -53,7 +53,7 @@ fun tutorialContentFor(tab: TutorialTab): TutorialContent = when (tab) {
             "Flip the toggle to Document search to find text inside pictures — receipts, notes, screenshots.",
             "Type \"@\" then a name to find photos of a specific person.",
             "Tap the date field to narrow results to a time range.",
-            "Long-press a photo to select several, then share, delete, or add them to a collection."
+            "Long-press a photo to select or drag to select several, then share, delete, or add them to a collection."
         )
     )
     TutorialTab.PEOPLE -> TutorialContent(

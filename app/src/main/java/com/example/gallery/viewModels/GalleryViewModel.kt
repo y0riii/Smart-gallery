@@ -26,6 +26,13 @@ class GalleryViewModel(
     var mediaTimestamps by mutableStateOf<Map<Uri, Long>>(emptyMap())
         private set
 
+    /**
+     * After a semantic search, how many leading [images] are strong matches (above the relevance
+     * threshold). The grid draws a "less relevant" separator at this index. null = no separator.
+     */
+    var relevantCount by mutableStateOf<Int?>(null)
+        private set
+
     private var mediaObserveJob: Job? = null
     private var allDeviceMedia: List<Uri> = emptyList()
     private var allDeviceTimestamps: Map<Uri, Long> = emptyMap()
@@ -76,6 +83,7 @@ class GalleryViewModel(
                 if (!isSearching && prompt.text.isBlank() && fromDate == null && toDate == null) {
                     images = uris
                     mediaTimestamps = timestamps
+                    relevantCount = null   // browsing all media — no relevance separator
                 }
             }
         }
@@ -110,10 +118,15 @@ class GalleryViewModel(
                 toDate = null
             }
 
-            images = if (useClip)
+            val result = if (useClip)
                 service.search(prompt.text, finalFrom, finalTo)
             else
                 service.searchDocuments(prompt.text, finalFrom, finalTo)
+
+            images = result.uris
+            // Raw relevant count (null for non-scored searches). The grid decides when to actually
+            // draw the separator; the search-count label reports this number.
+            relevantCount = result.relevantCount
 
             isSearching = false
             // Set flag last so LaunchedEffect fires after all state is settled
@@ -128,6 +141,7 @@ class GalleryViewModel(
         useClip = true
         images = allDeviceMedia
         mediaTimestamps = allDeviceTimestamps
+        relevantCount = null
         // Set flag last so LaunchedEffect fires after images list is ready
         shouldScrollToTop = true
     }

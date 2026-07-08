@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PhotoAlbum
+import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.CircularProgressIndicator
@@ -75,7 +76,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.example.gallery.SortMode
@@ -183,44 +183,17 @@ fun FoldersScreen(
                     )
                 }
                 if (viewModel.isLoading) {
-                    Box(Modifier
-                        .weight(1f)
-                        .fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
+                    // Shimmer skeleton instead of a bare spinner while folders load.
+                    ShimmerImageGrid(columnCount = 2, modifier = Modifier.weight(1f))
                 } else if (viewModel.folders.isEmpty()) {
-                    Box(Modifier
-                        .weight(1f)
-                        .fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                emptyStateIcon,
-                                contentDescription = null,
-                                modifier = Modifier.size(64.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            Text(
-                                emptyStateTitle,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            if (emptyStateDescription != null) {
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    text = emptyStateDescription,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.padding(horizontal = 32.dp)
-                                )
-                            }
-                            if (emptyStateAction != null) {
-                                Spacer(Modifier.height(24.dp))
-                                emptyStateAction()
-                            }
-                        }
-                    }
+                    // Shared EmptyState so every "nothing here" view looks consistent.
+                    EmptyState(
+                        icon = emptyStateIcon,
+                        title = emptyStateTitle,
+                        subtitle = emptyStateDescription,
+                        action = emptyStateAction,
+                        modifier = Modifier.weight(1f)
+                    )
                 } else {
                     val voiceFoldersLauncher = rememberLauncherForActivityResult(
                         contract = ActivityResultContracts.StartActivityForResult()
@@ -270,15 +243,11 @@ fun FoldersScreen(
                     )
 
                     if (viewModel.filteredFolders.isEmpty()) {
-                        Box(Modifier
-                            .weight(1f)
-                            .fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            Text(
-                                "No folders match your search",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        EmptyState(
+                            icon = Icons.Default.SearchOff,
+                            title = "No folders match your search",
+                            modifier = Modifier.weight(1f)
+                        )
                     } else {
                         LazyVerticalGrid(
                             columns = GridCells.Adaptive(minSize = 160.dp),
@@ -436,12 +405,26 @@ fun FoldersScreen(
                     nameThumbnails = nameThumbnails
                 )
 
+                // Result count for an active semantic/OCR search within the folder.
+                val folderFilterActive = viewModel.prompt.text.isNotBlank() ||
+                    viewModel.fromDate != null || viewModel.toDate != null
+                if (folderFilterActive && !viewModel.isLoading && viewModel.images.isNotEmpty()) {
+                    val relevant = viewModel.relevantCount
+                    Text(
+                        text = if (relevant != null) "$relevant relevant" else "${viewModel.images.size} results",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Box(modifier = Modifier.weight(1f)) {
                     ImageGridScreen(
                         images = viewModel.images,
                         onDelete = { viewModel.deleteImage(it) },
+                        relevantCount = viewModel.relevantCount,
                         fullScreenIndex = fullScreenIndex,
                         onIndexChanged = { index ->
                             if (index == null) {
@@ -464,7 +447,11 @@ fun FoldersScreen(
                         onAddToCollectionSelected = { onAddToCollection(viewModel.selectedUris) }
                     )
 
-                    if (viewModel.isLoading) {
+                    if (viewModel.isLoading && viewModel.images.isEmpty()) {
+                        // First load of this folder's contents — shimmer skeleton.
+                        ShimmerImageGrid(columnCount = 3, modifier = Modifier.fillMaxSize())
+                    } else if (viewModel.isLoading) {
+                        // Refreshing over existing content — light dimmed spinner.
                         Box(
                             Modifier
                                 .fillMaxSize()
@@ -473,6 +460,15 @@ fun FoldersScreen(
                         ) {
                             CircularProgressIndicator()
                         }
+                    } else if (viewModel.images.isEmpty()) {
+                        // Empty open folder — distinguish "no search matches" from a truly empty folder.
+                        val isFilterActive = viewModel.prompt.text.isNotBlank() ||
+                            viewModel.fromDate != null || viewModel.toDate != null
+                        EmptyState(
+                            icon = if (isFilterActive) Icons.Default.SearchOff else Icons.Default.PhotoAlbum,
+                            title = if (isFilterActive) "No matches" else "This folder is empty",
+                            subtitle = if (isFilterActive) "Try a different search or clear the filters." else null
+                        )
                     }
                 }
             }

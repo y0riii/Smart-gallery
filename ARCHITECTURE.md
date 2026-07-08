@@ -212,6 +212,12 @@ suspends until the first releases the lock). `isIndexingRunning` / `isClustering
   (served from an in-memory cache, `getAllMediaCached`, invalidated on insert/delete so repeat
   searches don't re-deserialize every BLOB), sort by score. `@name` mentions filter to photos
   containing those people first (`findNamesInPrompt` + `PersonDao.getImagesByNames`).
+- **Search results carry a relevance boundary.** `search`/`searchWithin`/`searchDocuments` return
+  `SearchResult(uris, relevantCount)`, where `relevantCount` = how many leading (best-scored)
+  results clear `SEARCH_RELEVANCE_THRESHOLD`. The grid draws a full-width "Less relevant" separator
+  at that index (home + open folders). Non-semantic searches (date/OCR/name-only/date-sorted) use
+  `SearchResult.all(...)` (relevantCount == size) so no separator shows. Folder repos' `getImagesFlow`
+  therefore emits `Flow<SearchResult>`.
 - **Document (OCR):** `searchDocuments(text)` → FTS (`searchMediaFts`) or `LIKE` fallback.
 - **Date-only:** merges images + videos from MediaStore by date.
 - **Within a folder:** `searchWithin(mediaIds, …)` applies prompt/date/sort to a restricted id set
@@ -281,10 +287,24 @@ cleans up the DB (which cascades faces and adjusts person counts).
 
 ### `components/` (Compose UI)
 - `GalleryScreen.kt`, `ImageGridScreen.kt`, `ImageGrid.kt` — home grid, column control, date
-  headers, drag-select, selection toolbar.
+  headers, drag-select (with long-press + per-cell tick haptics), selection toolbar, and a
+  premium empty state (no photos / no search matches).
+- `EmptyState.kt` — reusable centered icon+title+subtitle(+optional action) placeholder used by
+  the home grid and `FoldersScreen` (empty folder list, no search matches, empty open folder).
+- `PermissionRequestScreen.kt` — first-run / denied-permission explainer with "Grant access"
+  (re-requests) and "Open settings" (for permanent denial). Shown by `MainActivity` whenever media
+  permission is missing, instead of the gallery; the bottom nav + progress bar are hidden there.
+- `ShimmerGrid.kt` — animated shimmer skeleton (`ShimmerImageGrid`) shown while a media/folder grid
+  is loading its first frames, instead of a bare spinner (folder list + open-folder first load).
+- Home and open-folder search views show a "N results" count above the grid when a filter is active.
+- `FolderTile.kt` fires a long-press haptic when entering folder selection.
 - `FoldersScreen.kt` — the generic folder grid + open-folder view wrapped by all four folder tabs.
-- `FullScreenImage.kt` — full-screen pager with zoom/pan, swipe-to-dismiss, video playback,
-  share/delete.
+- `FullScreenImage.kt` — full-screen pager with zoom/pan, swipe-to-dismiss, and video playback via
+  **Media3 / ExoPlayer** (one player per video page, custom Compose control bar with
+  seek/±10s/play-pause), share/delete, plus premium touches: page-gutter spacing, a
+  loading/buffering spinner driven by ExoPlayer states, haptic feedback (zoom / dismiss /
+  play-pause), and auto-hiding video controls. Media3 deps live in the version catalog
+  (`media3` = exoplayer + ui).
 - `SearchBar.kt`, `SearchInputField.kt` (@mention autocomplete), `SearchModeToggle.kt`.
 - `FolderTile.kt`, `CustomDialog.kt`, `CollectionPickerDialog.kt`, `CreateButton.kt`, and the
   per-tab folder screens.

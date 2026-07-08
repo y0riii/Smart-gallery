@@ -56,6 +56,8 @@ fun ImageGridScreen(
     fullScreenIndex: Int?,
     onIndexChanged: (Int?) -> Unit,
     gridState: LazyGridState = rememberLazyGridState(),
+    // Relevance-separator boundary for semantic search results (null = no separator).
+    relevantCount: Int? = null,
     // ── Feature 1: selection state passed in from the parent ─────────────────
     selectedUris: Set<Uri> = emptySet(),
     isSelecting: Boolean = false,
@@ -89,6 +91,8 @@ fun ImageGridScreen(
                 images = images,
                 gridState = gridState,
                 modifier = Modifier.fillMaxSize(),
+                // Relevance separator (semantic folder search); null for date/OCR/no-prompt.
+                relevantCount = relevantCount,
                 // Feature 2: controlled column count
                 columnCount = columnCount,
                 onColumnCountChange = { newCount ->

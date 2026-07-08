@@ -84,4 +84,8 @@ dependencies {
     implementation(libs.text.recognition)
     implementation(libs.face.detection)
     implementation(libs.androidx.work.runtime.ktx)
+
+    // Media3 / ExoPlayer — premium video playback (buffering, formats, smooth seeking)
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.ui)
 }

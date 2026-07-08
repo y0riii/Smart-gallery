@@ -125,6 +125,11 @@ class GalleryService(val context: Context) {
         private const val CATEGORY_MATCH_THRESHOLD = 0.22f
         private const val ASSIGN_THRESHOLD = 0.45f
 
+        // Minimum CLIP text↔image similarity for a search hit to count as a "strong" match.
+        // Results at/above this appear before the "less relevant" separator; below it, after.
+        // Tune to taste — CLIP similarities for good matches typically sit around 0.25–0.35.
+        private const val SEARCH_RELEVANCE_THRESHOLD = 0.2f
+
         // How many images to accumulate before committing them in one DB transaction.
         // Batching amortizes the per-commit fsync cost that dominates indexing on large libraries.
         private const val INDEX_BATCH_SIZE = 24
@@ -896,20 +901,20 @@ class GalleryService(val context: Context) {
     // Three entry points: semantic CLIP search (search / searchWithin), OCR document search
     // (searchDocuments), and date-only browsing. @name mentions are resolved by findNamesInPrompt.
 
-    suspend fun search(prompt: String, fromDate: Long? = null, toDate: Long? = null): List<Uri> {
+    suspend fun search(prompt: String, fromDate: Long? = null, toDate: Long? = null): SearchResult {
         return withContext(Dispatchers.IO) {
             val (names, cleanPrompt) = findNamesInPrompt(prompt)
 
-            // Date-only search: no text, no names — include videos merged with images
+            // Date-only search: no text, no names — include videos merged with images.
+            // No similarity scores here, so the whole list is "relevant" (no separator).
             if (cleanPrompt.isBlank() && names.isEmpty()) {
-                val imageIds = getDeviceImagesWithDateFilter(fromDate, toDate).map { it.toMediaUri() }
-                val videoUris = getDeviceVideosWithDateFilter(fromDate, toDate)
-                // Merge images and videos, sorted by timestamp descending
-                return@withContext mergeMediaByDate(
-                    imageIds = getDeviceImagesWithDateFilter(fromDate, toDate),
-                    videoIds = VideoUtils.scanMediaStoreWithDateFilter(context, fromDate, toDate),
-                    fromDate = fromDate,
-                    toDate = toDate
+                return@withContext SearchResult.all(
+                    mergeMediaByDate(
+                        imageIds = getDeviceImagesWithDateFilter(fromDate, toDate),
+                        videoIds = VideoUtils.scanMediaStoreWithDateFilter(context, fromDate, toDate),
+                        fromDate = fromDate,
+                        toDate = toDate
+                    )
                 )
             }
 
@@ -925,11 +930,13 @@ class GalleryService(val context: Context) {
 
             images = filterByDate(images, fromDate, toDate)
 
-            if (images.isEmpty()) return@withContext emptyList()
+            if (images.isEmpty()) return@withContext SearchResult.all(emptyList())
 
             if (encoder == null) {
-                return@withContext images.sortedByDescending { it.timestampMs }
-                    .map { it.mediaId.toMediaUri() }
+                // No model → fall back to date order; nothing to score against, so no separator.
+                return@withContext SearchResult.all(
+                    images.sortedByDescending { it.timestampMs }.map { it.mediaId.toMediaUri() }
+                )
             }
 
             val textFeatures =
@@ -948,7 +955,9 @@ class GalleryService(val context: Context) {
                 }.awaitAll().flatten().sortedByDescending { it.second }
             }
 
-            sortedImages.map { it.first.toMediaUri() }
+            // Sorted best-first, so the strong matches are the leading run above the threshold.
+            val relevantCount = sortedImages.count { it.second >= SEARCH_RELEVANCE_THRESHOLD }
+            SearchResult(sortedImages.map { it.first.toMediaUri() }, relevantCount)
         }
     }
 
@@ -1035,26 +1044,29 @@ class GalleryService(val context: Context) {
         fromDate: Long?,
         toDate: Long?,
         sortMode: SortMode? = SortMode.RELEVANCE
-    ): List<Uri> {
+    ): SearchResult {
         if (prompt.isNullOrBlank()) {
             return withContext(Dispatchers.IO) {
                 if (sortMode == null){
                     val originalSet = mediaIds.toSet()
                     val images = getDeviceImagesWithDateFilter(fromDate, toDate)
                     val intersection = images.filter { it in originalSet }
-                    return@withContext intersection.map { it.toMediaUri() }
+                    return@withContext SearchResult.all(intersection.map { it.toMediaUri() })
                 }
                 val images = mediaDao.getMediaDatesByIds(mediaIds)
                 val filtered = filterByDateInfo(images, fromDate, toDate)
 
                 if (sortMode == SortMode.DATE_DESC) {
-                    filtered.sortedByDescending { it.timestampMs }
-                        .map { it.mediaId.toMediaUri() }
+                    SearchResult.all(
+                        filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toMediaUri() }
+                    )
                 } else {
                     // Maintain original order of mediaIds (important for Category similarity sort)
                     val idToIndex = mediaIds.withIndex().associate { it.value to it.index }
-                    filtered.sortedBy { idToIndex[it.mediaId] ?: Int.MAX_VALUE }
-                        .map { it.mediaId.toMediaUri() }
+                    SearchResult.all(
+                        filtered.sortedBy { idToIndex[it.mediaId] ?: Int.MAX_VALUE }
+                            .map { it.mediaId.toMediaUri() }
+                    )
                 }
             }
         }
@@ -1070,7 +1082,7 @@ class GalleryService(val context: Context) {
                 mediaIds.intersect(personMediaIds.toSet()).toList()
             }
 
-            if (targetIds.isEmpty()) return@withContext emptyList()
+            if (targetIds.isEmpty()) return@withContext SearchResult.all(emptyList())
 
             val images = mutableListOf<MediaEntity>()
             targetIds.chunked(200).forEach { chunk ->
@@ -1078,18 +1090,20 @@ class GalleryService(val context: Context) {
             }
             var filtered = filterByDate(images, fromDate, toDate)
 
-            if (filtered.isEmpty()) return@withContext emptyList()
+            if (filtered.isEmpty()) return@withContext SearchResult.all(emptyList())
 
             if (useClip) {
                 initJob.await()
                 val encoder = textEncoder
-                    ?: return@withContext filtered.sortedByDescending { it.timestampMs }
-                        .map { it.mediaId.toMediaUri() }
+                    ?: return@withContext SearchResult.all(
+                        filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toMediaUri() }
+                    )
 
                 // If cleanPrompt is blank but names were found, we just show filtered results sorted by date
                 if (cleanPrompt.isBlank() && names.isNotEmpty()) {
-                    return@withContext filtered.sortedByDescending { it.timestampMs }
-                        .map { it.mediaId.toMediaUri() }
+                    return@withContext SearchResult.all(
+                        filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toMediaUri() }
+                    )
                 }
 
                 val textFeatures =
@@ -1112,22 +1126,24 @@ class GalleryService(val context: Context) {
                 }
 
                 if (sortMode == SortMode.DATE_DESC) {
-                    sorted.sortedByDescending { it.first.timestampMs }
-                        .map { it.first.mediaId.toMediaUri() }
+                    // Date order: no relevance split.
+                    SearchResult.all(
+                        sorted.sortedByDescending { it.first.timestampMs }
+                            .map { it.first.mediaId.toMediaUri() }
+                    )
                 } else {
-                    sorted.sortedByDescending { it.second }.map { it.first.mediaId.toMediaUri() }
+                    // Relevance order: split strong matches from weak ones at the threshold.
+                    val ranked = sorted.sortedByDescending { it.second }
+                    val relevantCount = ranked.count { it.second >= SEARCH_RELEVANCE_THRESHOLD }
+                    SearchResult(ranked.map { it.first.mediaId.toMediaUri() }, relevantCount)
                 }
             } else {
-                // OCR search within
+                // OCR search within — substring match, date-ordered, no similarity score.
                 filtered =
                     filtered.filter { it.ocrText?.contains(cleanPrompt, ignoreCase = true) == true }
-
-                if (sortMode == SortMode.DATE_DESC) {
+                SearchResult.all(
                     filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toMediaUri() }
-                } else {
-                    // For OCR without a prompt (though we handled prompt null above), or just default to date
-                    filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toMediaUri() }
-                }
+                )
             }
         }
     }
@@ -1136,15 +1152,18 @@ class GalleryService(val context: Context) {
         text: String,
         fromDate: Long? = null,
         toDate: Long? = null
-    ): List<Uri> {
+    ): SearchResult {
         return withContext(Dispatchers.IO) {
             Log.d(TAG, "Is FTS supported: $ftsSupported")
+            // OCR/document search is date-ordered text matching — no similarity split.
             if (text.isBlank()) {
-                return@withContext mergeMediaByDate(
-                    imageIds = getDeviceImagesWithDateFilter(fromDate, toDate),
-                    videoIds = VideoUtils.scanMediaStoreWithDateFilter(context, fromDate, toDate),
-                    fromDate = fromDate,
-                    toDate = toDate
+                return@withContext SearchResult.all(
+                    mergeMediaByDate(
+                        imageIds = getDeviceImagesWithDateFilter(fromDate, toDate),
+                        videoIds = VideoUtils.scanMediaStoreWithDateFilter(context, fromDate, toDate),
+                        fromDate = fromDate,
+                        toDate = toDate
+                    )
                 )
             }
 
@@ -1157,7 +1176,7 @@ class GalleryService(val context: Context) {
             // Filter by dates
             results = filterByDate(results, fromDate, toDate)
 
-            results.map { it.mediaId.toMediaUri() }
+            SearchResult.all(results.map { it.mediaId.toMediaUri() })
         }
     }
 

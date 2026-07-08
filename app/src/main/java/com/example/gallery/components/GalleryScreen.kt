@@ -23,6 +23,8 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LibraryAdd
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomAppBar
@@ -150,31 +152,67 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
                     }
                 }
 
-                ImageGrid(
-                    images = viewModel.images,
-                    gridState = gridState,
-                    modifier = Modifier.weight(1f),
-                    // Date headers: map each URI to its timestamp for grouping
-                    timestamps = viewModel.mediaTimestamps,
-                    // Feature 2: controlled column count
-                    columnCount = columnCount,
-                    onColumnCountChange = { newCount ->
-                        columnCount = newCount
-                        // Persist new column count for next app launch
-                        context.getSharedPreferences(GALLERY_PREFS_NAME, Context.MODE_PRIVATE)
-                            .edit { putInt(GALLERY_PREFS_KEY_COLUMNS, newCount) }
-                    },
-                    // Feature 1: selection params from ViewModel
-                    selectedUris = viewModel.selectedUris,
-                    isSelecting = viewModel.isSelecting,
-                    onUpdateSelection = { viewModel.updateSelection(it) },
-                    onToggleSelect = { uri -> viewModel.toggleSelection(uri) },
-                    onImageClick = { index -> viewModel.openFullScreen(index) },
-                    // Feature 3: null hides the button
-                    onPreviewImage = if (showPreviewButton) { index ->
-                        viewModel.openFullScreen(index)
-                    } else null
-                )
+                // Grid, or a premium empty state when there's nothing to show. A search/date
+                // filter being active changes the empty message from "no photos" to "no matches".
+                val isFilterActive = viewModel.prompt.text.isNotBlank() ||
+                    viewModel.fromDate != null || viewModel.toDate != null
+
+                // Result count for an active search. For a scored (semantic) search we report the
+                // number of RELEVANT matches (above the threshold); otherwise the total.
+                if (isFilterActive && !viewModel.isSearching && viewModel.images.isNotEmpty()) {
+                    val relevant = viewModel.relevantCount
+                    Text(
+                        text = if (relevant != null) "$relevant relevant" else "${viewModel.images.size} results",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    )
+                }
+
+                Box(modifier = Modifier.weight(1f)) {
+                    ImageGrid(
+                        images = viewModel.images,
+                        gridState = gridState,
+                        modifier = Modifier.fillMaxSize(),
+                        // Date headers only when browsing all media. During a search/filter the
+                        // results are ordered by relevance (not date), so grouping them by date
+                        // would both reorder them away from most-relevant-first and produce
+                        // duplicate header keys — so we show a flat, relevance-ordered grid instead.
+                        timestamps = if (isFilterActive) emptyMap() else viewModel.mediaTimestamps,
+                        // Relevance separator for semantic search results (null otherwise).
+                        relevantCount = viewModel.relevantCount,
+                        // Feature 2: controlled column count
+                        columnCount = columnCount,
+                        onColumnCountChange = { newCount ->
+                            columnCount = newCount
+                            // Persist new column count for next app launch
+                            context.getSharedPreferences(GALLERY_PREFS_NAME, Context.MODE_PRIVATE)
+                                .edit { putInt(GALLERY_PREFS_KEY_COLUMNS, newCount) }
+                        },
+                        // Feature 1: selection params from ViewModel
+                        selectedUris = viewModel.selectedUris,
+                        isSelecting = viewModel.isSelecting,
+                        onUpdateSelection = { viewModel.updateSelection(it) },
+                        onToggleSelect = { uri -> viewModel.toggleSelection(uri) },
+                        onImageClick = { index -> viewModel.openFullScreen(index) },
+                        // Feature 3: null hides the button
+                        onPreviewImage = if (showPreviewButton) { index ->
+                            viewModel.openFullScreen(index)
+                        } else null
+                    )
+
+                    if (viewModel.images.isEmpty() && !viewModel.isSearching) {
+                        EmptyState(
+                            icon = if (isFilterActive) Icons.Default.SearchOff else Icons.Default.PhotoLibrary,
+                            title = if (isFilterActive) "No matches" else "No photos yet",
+                            subtitle = if (isFilterActive) {
+                                "Try a different search or clear the filters."
+                            } else {
+                                "Your photos will appear here once they've been processed."
+                            }
+                        )
+                    }
+                }
             }
 
             // Feature 1: selection action bar
