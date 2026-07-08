@@ -6,6 +6,7 @@ import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.graphics.Bitmap
 import androidx.core.graphics.scale
+import com.example.gallery.ml.OrtAcceleration
 import com.example.gallery.utils.VectorUtils
 import java.io.File
 import java.io.FileOutputStream
@@ -41,20 +42,49 @@ class ClipImageEncoder(context: Context) : AutoCloseable {
 
     init {
         val modelBytes = context.assets.open("image_model.ort").readBytes()
-        var tempSession: OrtSession? = null
-        try {
+        val modelKey = "clip_image"
+
+        fun buildCpuSession(): OrtSession {
+            return try {
+                val options = OrtSession.SessionOptions().apply {
+                    setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                }
+                options.use { env.createSession(modelBytes, it) }
+            } catch (e: Throwable) {
+                android.util.Log.e("ClipImageEncoder", "Failed to initialize session, falling back to defaults", e)
+                env.createSession(modelBytes)
+            }
+        }
+
+        fun buildNnapiSession(): OrtSession? = try {
             val options = OrtSession.SessionOptions().apply {
                 addNnapi()
                 setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
             }
-            options.use {
-                tempSession = env.createSession(modelBytes, it)
-            }
+            options.use { env.createSession(modelBytes, it) }
         } catch (e: Throwable) {
-            android.util.Log.e("ClipImageEncoder", "Failed to initialize with NNAPI, falling back to CPU", e)
-            tempSession = env.createSession(modelBytes)
+            android.util.Log.e("ClipImageEncoder", "NNAPI session unavailable, will use CPU", e)
+            null
         }
-        session = tempSession!!
+
+        fun dummyInput(): OnnxTensor {
+            floatBuffer.rewind()
+            return OnnxTensor.createTensor(
+                env, floatBuffer, longArrayOf(1, 3, IMAGE_SIZE.toLong(), IMAGE_SIZE.toLong())
+            )
+        }
+
+        session = when (OrtAcceleration.cachedDecision(context, modelKey)) {
+            true -> buildNnapiSession() ?: buildCpuSession()
+            false -> buildCpuSession()
+            null -> OrtAcceleration.pickFasterSession(
+                context, modelKey,
+                cpuSession = buildCpuSession(),
+                nnapiSession = buildNnapiSession(),
+                inputName = "image",
+                makeInput = ::dummyInput
+            )
+        }
     }
 
     private fun preprocessImage(bitmap: Bitmap): OnnxTensor {

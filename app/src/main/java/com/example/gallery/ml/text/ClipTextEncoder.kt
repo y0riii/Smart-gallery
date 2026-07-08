@@ -4,6 +4,7 @@ import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
+import com.example.gallery.ml.OrtAcceleration
 import com.example.gallery.utils.VectorUtils
 import java.io.File
 import java.io.FileOutputStream
@@ -16,20 +17,47 @@ class ClipTextEncoder(context: Context) {
 
     init {
         val modelBytes = context.assets.open("text_model.ort").readBytes()
-        var tempSession: OrtSession? = null
-        try {
+        val modelKey = "clip_text"
+
+        fun buildCpuSession(): OrtSession {
+            return try {
+                val options = OrtSession.SessionOptions().apply {
+                    setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                }
+                options.use { env.createSession(modelBytes, it) }
+            } catch (e: Throwable) {
+                android.util.Log.e("ClipTextEncoder", "Failed to initialize session, falling back to defaults", e)
+                env.createSession(modelBytes)
+            }
+        }
+
+        fun buildNnapiSession(): OrtSession? = try {
             val options = OrtSession.SessionOptions().apply {
                 addNnapi()
                 setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
             }
-            options.use {
-                tempSession = env.createSession(modelBytes, it)
-            }
+            options.use { env.createSession(modelBytes, it) }
         } catch (e: Throwable) {
-            android.util.Log.e("ClipTextEncoder", "Failed to initialize with NNAPI, falling back to CPU", e)
-            tempSession = env.createSession(modelBytes)
+            android.util.Log.e("ClipTextEncoder", "NNAPI session unavailable, will use CPU", e)
+            null
         }
-        session = tempSession!!
+
+        fun dummyInput(): OnnxTensor {
+            val tokens = tokenizer.tokenize("a photo", truncate = true)
+            return OnnxTensor.createTensor(env, tokens, longArrayOf(1, 77))
+        }
+
+        session = when (OrtAcceleration.cachedDecision(context, modelKey)) {
+            true -> buildNnapiSession() ?: buildCpuSession()
+            false -> buildCpuSession()
+            null -> OrtAcceleration.pickFasterSession(
+                context, modelKey,
+                cpuSession = buildCpuSession(),
+                nnapiSession = buildNnapiSession(),
+                inputName = "text",
+                makeInput = ::dummyInput
+            )
+        }
     }
 
     fun getTextFeatures(text: String): FloatArray {

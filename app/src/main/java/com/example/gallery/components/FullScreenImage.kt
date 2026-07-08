@@ -3,6 +3,7 @@ package com.example.gallery.components
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.widget.VideoView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.VectorConverter
@@ -13,25 +14,42 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -54,27 +72,13 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import android.widget.VideoView
-import androidx.compose.ui.viewinterop.AndroidView
 import coil3.compose.AsyncImage
 import com.example.gallery.utils.isVideoUri
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Forward10
-import androidx.compose.material.icons.filled.Replay10
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Text
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -166,7 +170,26 @@ fun FullScreenImage(
             val scale = remember { Animatable(1f) }
             val offset = remember { Animatable(Offset.Zero, Offset.VectorConverter) }
             val dismissOffset = remember { Animatable(0f) }
-            var imageAspectRatio by remember { mutableFloatStateOf(1f) }
+            var mediaAspectRatio by remember { mutableFloatStateOf(1f) }
+
+            // Video Controller States Hoisted per Page Item
+            var isPlaying by remember { mutableStateOf(false) }
+            var currentPosition by remember { mutableStateOf(0) }
+            var duration by remember { mutableStateOf(0) }
+            var videoViewInstance by remember { mutableStateOf<VideoView?>(null) }
+
+            // Periodically update currentPosition when video plays
+            LaunchedEffect(isPlaying) {
+                if (isPlaying) {
+                    while (true) {
+                        videoViewInstance?.let {
+                            currentPosition = it.currentPosition
+                            duration = it.duration
+                        }
+                        delay(200)
+                    }
+                }
+            }
 
             LaunchedEffect(scale.value) {
                 if (pagerState.currentPage == pageIndex) {
@@ -174,11 +197,23 @@ fun FullScreenImage(
                 }
             }
 
-            LaunchedEffect(pagerState.currentPage) {
-                if (pagerState.currentPage != pageIndex) {
+            val isCurrentPage = pagerState.currentPage == pageIndex
+
+            LaunchedEffect(isCurrentPage) {
+                if (isCurrentPage) {
+                    if (uri.isVideoUri()) {
+                        videoViewInstance?.start()
+                        isPlaying = true
+                    }
+                } else {
                     scale.snapTo(1f)
                     offset.snapTo(Offset.Zero)
                     dismissOffset.snapTo(0f)
+                    // Automatically pause running video if swiped away and reset to the beginning
+                    videoViewInstance?.pause()
+                    videoViewInstance?.seekTo(0)
+                    currentPosition = 0
+                    isPlaying = false
                 }
             }
 
@@ -188,101 +223,158 @@ fun FullScreenImage(
                 val boxWidth = with(LocalDensity.current) { maxWidth.toPx() }
                 val boxHeight = with(LocalDensity.current) { maxHeight.toPx() }
 
+                // LAYER 1: Media Player/Viewer (Zoomable & Pannable Frame)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .pointerInput(boxWidth, boxHeight) {
-                            var lastTapTime = 0L
-                            awaitEachGesture {
-                                awaitFirstDown(requireUnconsumed = false)
-                                var isDraggingDown = false
-                                var hasMovedSignificant = false
-                                var isTransforming = false
+                        .graphicsLayer(
+                            scaleX = scale.value,
+                            scaleY = scale.value,
+                            translationX = offset.value.x,
+                            translationY = offset.value.y + dismissOffset.value,
+                            alpha = (1f - (dismissOffset.value / boxHeight)).coerceIn(0f, 1f)
+                        )
+                ) {
+                    if (uri.isVideoUri()) {
+                        AndroidView(
+                            factory = { ctx ->
+                                VideoView(ctx).apply {
+                                    setVideoURI(uri)
+                                    setOnPreparedListener { mp ->
+                                        duration = mp.duration
+                                        mp.isLooping = true
+                                        if (mp.videoWidth > 0 && mp.videoHeight > 0) {
+                                            mediaAspectRatio = mp.videoWidth.toFloat() / mp.videoHeight.toFloat()
+                                        }
+                                        if (pagerState.currentPage == pageIndex) {
+                                            start()
+                                            isPlaying = true
+                                        }
+                                    }
+                                    videoViewInstance = this
+                                }
+                            },
+                            update = { videoView ->
+                                if (videoView.tag != uri) {
+                                    videoView.tag = uri
+                                    videoView.setVideoURI(uri)
+                                    if (pagerState.currentPage == pageIndex) {
+                                        videoView.start()
+                                        isPlaying = true
+                                    } else {
+                                        videoView.pause()
+                                        isPlaying = false
+                                    }
+                                    videoViewInstance = videoView
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        AsyncImage(
+                            model = uri,
+                            onSuccess = { state ->
+                                val intrinsicSize = state.painter.intrinsicSize
+                                if (intrinsicSize.width > 0 && intrinsicSize.height > 0) {
+                                    mediaAspectRatio = intrinsicSize.width / intrinsicSize.height
+                                }
+                            },
+                            contentDescription = "Full screen image",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit
+                        )
+                    }
+                }
 
-                                val now = System.currentTimeMillis()
-                                val isDoubleTap = (now - lastTapTime) < 300
-
-                                if (isDoubleTap) {
-                                    lastTapTime = 0L
+                // LAYER 2: Transparent Gesture Interceptor Overlay
+                // Guarantees stable touch feedback over Native AndroidViews
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        // 1. Native Tap Detection (intercepts safely and accurately)
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onDoubleTap = {
                                     scope.launch {
                                         if (scale.value > 1.05f) {
                                             launch { scale.animateTo(1f) }
                                             launch { offset.animateTo(Offset.Zero) }
                                         } else {
+                                            showControls = false
                                             launch { scale.animateTo(3f) }
                                         }
                                     }
+                                },
+                                onTap = {
+                                    if (scale.value <= 1.05f) {
+                                        showControls = !showControls
+                                    }
                                 }
+                            )
+                        }
+                        // 2. Custom Transform & Drag Tracker
+                        .pointerInput(boxWidth, boxHeight) {
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false)
+                                var isDraggingDown = false
+                                // Track state at start so pinching out aggressively doesn't accidentally trigger dismiss
+                                val startedZoomedOut = scale.value <= 1.05f
 
                                 do {
                                     val event = awaitPointerEvent()
                                     val zoomChange = event.calculateZoom()
                                     val panChange = event.calculatePan()
 
-                                    if ((abs(panChange.x) > 2f) || (abs(panChange.y) > 2f) || (zoomChange != 1f)) {
-                                        hasMovedSignificant = true
-                                    }
-
                                     if (scale.value > 1.05f || zoomChange != 1f) {
-                                        isTransforming = true
-                                        event.changes.forEach { it.consume() }
+                                        // Only consume if actively moving (prevents blocking pure taps)
+                                        val isMoving = zoomChange != 1f || abs(panChange.x) > 1f || abs(panChange.y) > 1f
+                                        if (isMoving) {
+                                            event.changes.forEach { it.consume() }
+                                        }
 
                                         if (!scale.isRunning && !offset.isRunning) {
+                                            if (showControls && isMoving) showControls = false
+
                                             scope.launch {
-                                                val newScale =
-                                                    (scale.value * zoomChange).coerceIn(1f, 3f)
+                                                val prospectiveScale = scale.value * zoomChange
+                                                val newScale = if (prospectiveScale < 1.05f) 1f else prospectiveScale.coerceIn(1f, 3f)
 
                                                 val screenAspectRatio = boxWidth / boxHeight
                                                 var displayedWidth = boxWidth
                                                 var displayedHeight = boxHeight
 
-                                                if (imageAspectRatio > screenAspectRatio) {
-                                                    displayedHeight = boxWidth / imageAspectRatio
+                                                if (mediaAspectRatio > screenAspectRatio) {
+                                                    displayedHeight = boxWidth / mediaAspectRatio
                                                 } else {
-                                                    displayedWidth = boxHeight * imageAspectRatio
+                                                    displayedWidth = boxHeight * mediaAspectRatio
                                                 }
 
-                                                val maxX =
-                                                    ((displayedWidth * newScale) - boxWidth).coerceAtLeast(
-                                                        0f
-                                                    ) / 2f
-                                                val maxY =
-                                                    ((displayedHeight * newScale) - boxHeight).coerceAtLeast(
-                                                        0f
-                                                    ) / 2f
+                                                val maxX = ((displayedWidth * newScale) - boxWidth).coerceAtLeast(0f) / 2f
+                                                val maxY = ((displayedHeight * newScale) - boxHeight).coerceAtLeast(0f) / 2f
 
                                                 scale.snapTo(newScale)
 
                                                 if (newScale > 1f) {
-                                                    val newOffsetX =
-                                                        (offset.value.x + panChange.x).coerceIn(
-                                                            -maxX,
-                                                            maxX
-                                                        )
-                                                    val newOffsetY =
-                                                        (offset.value.y + panChange.y).coerceIn(
-                                                            -maxY,
-                                                            maxY
-                                                        )
+                                                    val newOffsetX = (offset.value.x + panChange.x).coerceIn(-maxX, maxX)
+                                                    val newOffsetY = (offset.value.y + panChange.y).coerceIn(-maxY, maxY)
                                                     offset.snapTo(Offset(newOffsetX, newOffsetY))
                                                 } else {
                                                     offset.snapTo(Offset.Zero)
                                                 }
                                             }
                                         }
-                                    } else if (!isDoubleTap) {
+                                    } else if (startedZoomedOut) {
                                         // Swipe down detection
-                                        if (!isDraggingDown && panChange.y > 10f && abs(panChange.y) > abs(
-                                                panChange.x
-                                            ) * 2
-                                        ) {
+                                        if (!isDraggingDown && panChange.y > 10f && abs(panChange.y) > abs(panChange.x) * 2) {
                                             isDraggingDown = true
                                             isDraggingDownGlobal = true
                                             showControls = false
                                         }
 
                                         if (isDraggingDown) {
-                                            event.changes.forEach { it.consume() }
+                                            if (panChange.y != 0f) {
+                                                event.changes.forEach { it.consume() }
+                                            }
                                             scope.launch {
                                                 dismissOffset.snapTo(dismissOffset.value + panChange.y)
                                             }
@@ -290,14 +382,7 @@ fun FullScreenImage(
                                     }
                                 } while (event.changes.any { it.pressed })
 
-                                // Toggle controls on single tap
-                                if (!isDoubleTap && !hasMovedSignificant && !isTransforming && !isDraggingDown) {
-                                    showControls = !showControls
-                                    lastTapTime = now
-                                } else if (!isDoubleTap) {
-                                    lastTapTime = now
-                                }
-
+                                // End of gesture cleanup
                                 if (isDraggingDown) {
                                     isDraggingDownGlobal = false
                                     if (dismissOffset.value > 200f) {
@@ -310,46 +395,156 @@ fun FullScreenImage(
                                             dismissOffset.animateTo(0f)
                                         }
                                     }
+                                } else if (scale.value <= 1.05f && scale.value != 1f) {
+                                    // Make absolutely sure math is perfect for next tap cycle
+                                    scope.launch {
+                                        scale.snapTo(1f)
+                                        offset.snapTo(Offset.Zero)
+                                    }
                                 }
                             }
                         }
-                ) {
-                    if (uri.isVideoUri()) {
-                        // ── Custom Video Player with Bottom Controls ───────────
-                        VideoPlayer(
-                            uri = uri,
-                            dismissOffset = dismissOffset.value,
-                            boxHeight = boxHeight,
-                            showControls = showControls
-                        )
-                    } else {
-                        // ── Image viewer ───────────────────────────────────
-                        AsyncImage(
-                            model = uri,
-                            onSuccess = { state ->
-                                val intrinsicSize = state.painter.intrinsicSize
-                                if (intrinsicSize.width > 0 && intrinsicSize.height > 0) {
-                                    imageAspectRatio = intrinsicSize.width / intrinsicSize.height
+                )
+
+                // LAYER 3: Native Video Playback Controls (Always un-scaled at bottom boundary)
+                if (uri.isVideoUri()) {
+                    AnimatedVisibility(
+                        visible = showControls,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    ) {
+                        Surface(
+                            color = Color.Transparent,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .pointerInput(Unit) { detectTapGestures {} } // Protects interface from passing taps backwards
+                                    .background(
+                                        Brush.verticalGradient(
+                                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
+                                        )
+                                    )
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                                        .windowInsetsPadding(WindowInsets.navigationBars)
+                                ) {
+                                    // Slider (Seek bar)
+                                    val durationFloat = duration.toFloat().coerceAtLeast(1f)
+                                    val sliderPosition = currentPosition.toFloat().coerceIn(0f, durationFloat)
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = formatTime(currentPosition),
+                                            color = Color.White,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+
+                                        Slider(
+                                            value = sliderPosition,
+                                            onValueChange = { newValue ->
+                                                currentPosition = newValue.toInt()
+                                                videoViewInstance?.seekTo(newValue.toInt())
+                                            },
+                                            valueRange = 0f..durationFloat,
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .padding(horizontal = 8.dp),
+                                            colors = SliderDefaults.colors(
+                                                thumbColor = MaterialTheme.colorScheme.primary,
+                                                activeTrackColor = MaterialTheme.colorScheme.primary,
+                                                inactiveTrackColor = Color.Gray
+                                            )
+                                        )
+
+                                        Text(
+                                            text = formatTime(duration),
+                                            color = Color.White,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+
+                                    // Controls Bar Buttons (Play/Pause, Rewind, Fast Forward)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        IconButton(onClick = {
+                                            videoViewInstance?.let {
+                                                val newPos = (it.currentPosition - 10000).coerceAtLeast(0)
+                                                it.seekTo(newPos)
+                                                currentPosition = newPos
+                                            }
+                                        }) {
+                                            Icon(
+                                                imageVector = Icons.Default.Replay10,
+                                                contentDescription = "Rewind 10s",
+                                                tint = Color.White
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.width(24.dp))
+
+                                        IconButton(
+                                            onClick = {
+                                                videoViewInstance?.let {
+                                                    if (it.isPlaying) {
+                                                        it.pause()
+                                                        isPlaying = false
+                                                    } else {
+                                                        it.start()
+                                                        isPlaying = true
+                                                    }
+                                                }
+                                            },
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .background(
+                                                    MaterialTheme.colorScheme.primary,
+                                                    shape = androidx.compose.foundation.shape.CircleShape
+                                                )
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                                contentDescription = if (isPlaying) "Pause" else "Play",
+                                                tint = Color.White
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.width(24.dp))
+
+                                        IconButton(onClick = {
+                                            videoViewInstance?.let {
+                                                val newPos = (it.currentPosition + 10000).coerceAtMost(duration)
+                                                it.seekTo(newPos)
+                                                currentPosition = newPos
+                                            }
+                                        }) {
+                                            Icon(
+                                                imageVector = Icons.Default.Forward10,
+                                                contentDescription = "Forward 10s",
+                                                tint = Color.White
+                                            )
+                                        }
+                                    }
                                 }
-                            },
-                            contentDescription = "Full screen image",
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer(
-                                    scaleX = scale.value,
-                                    scaleY = scale.value,
-                                    translationX = offset.value.x,
-                                    translationY = offset.value.y + dismissOffset.value,
-                                    alpha = (1f - (dismissOffset.value / boxHeight)).coerceIn(0f, 1f)
-                                ),
-                            contentScale = ContentScale.Fit
-                        )
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // Top Controls with Dark Gradient
+        // Global Top Controls overlay
         AnimatedVisibility(
             visible = showControls,
             enter = fadeIn(),
@@ -359,12 +554,13 @@ fun FullScreenImage(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .pointerInput(Unit) { detectTapGestures {} } // Protects interface from passing taps backwards
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)
                         )
                     )
-                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top))
                     .padding(bottom = 16.dp, start = 8.dp, end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -374,7 +570,6 @@ fun FullScreenImage(
 
                 Box(modifier = Modifier.weight(1f))
 
-                // Feature 3: Share and Delete are hidden in preview mode
                 if (!isPreviewMode) {
                     IconButton(onClick = {
                         val currentUri = images[pagerState.currentPage]
@@ -420,202 +615,6 @@ fun FullScreenImagePreview() {
                 onClose = {},
                 onDelete = {}
             )
-        }
-    }
-}
-
-@Composable
-fun VideoPlayer(
-    uri: Uri,
-    dismissOffset: Float,
-    boxHeight: Float,
-    showControls: Boolean,
-    modifier: Modifier = Modifier
-) {
-    var isPlaying by remember { mutableStateOf(false) }
-    var currentPosition by remember { mutableStateOf(0) }
-    var duration by remember { mutableStateOf(0) }
-    var videoViewInstance by remember { mutableStateOf<VideoView?>(null) }
-
-    // Periodically update currentPosition when playing
-    LaunchedEffect(isPlaying) {
-        if (isPlaying) {
-            while (true) {
-                videoViewInstance?.let {
-                    currentPosition = it.currentPosition
-                    duration = it.duration
-                }
-                delay(200)
-            }
-        }
-    }
-
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .graphicsLayer(
-                translationY = dismissOffset,
-                alpha = (1f - (dismissOffset / boxHeight)).coerceIn(0f, 1f)
-            )
-            .background(Color.Black)
-    ) {
-        // 1. Video container (occupies all space)
-        AndroidView(
-            factory = { ctx ->
-                VideoView(ctx).apply {
-                    setVideoURI(uri)
-                    setOnPreparedListener { mp ->
-                        duration = mp.duration
-                        mp.isLooping = true
-                        start()
-                        isPlaying = true
-                    }
-                    videoViewInstance = this
-                }
-            },
-            update = { videoView ->
-                if (videoView.tag != uri) {
-                    videoView.tag = uri
-                    videoView.setVideoURI(uri)
-                    videoView.start()
-                    isPlaying = true
-                    videoViewInstance = videoView
-                }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-
-        // 2. Beautiful Custom Controls Row (overlaying at the bottom!)
-        AnimatedVisibility(
-            visible = showControls,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter)
-        ) {
-            Surface(
-                color = Color.Transparent,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
-                            )
-                        )
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp)
-                            .windowInsetsPadding(WindowInsets.navigationBars)
-                    ) {
-                        // Slider (Seek bar)
-                        val durationFloat = duration.toFloat().coerceAtLeast(1f)
-                        val sliderPosition = currentPosition.toFloat().coerceIn(0f, durationFloat)
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = formatTime(currentPosition),
-                                color = Color.White,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-
-                            Slider(
-                                value = sliderPosition,
-                                onValueChange = { newValue ->
-                                    currentPosition = newValue.toInt()
-                                    videoViewInstance?.seekTo(newValue.toInt())
-                                },
-                                valueRange = 0f..durationFloat,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(horizontal = 8.dp),
-                                colors = SliderDefaults.colors(
-                                    thumbColor = MaterialTheme.colorScheme.primary,
-                                    activeTrackColor = MaterialTheme.colorScheme.primary,
-                                    inactiveTrackColor = Color.Gray
-                                )
-                            )
-
-                            Text(
-                                text = formatTime(duration),
-                                color = Color.White,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-
-                        // Buttons row (Play/Pause, Rewind, Fast Forward)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(onClick = {
-                                videoViewInstance?.let {
-                                    val newPos = (it.currentPosition - 10000).coerceAtLeast(0)
-                                    it.seekTo(newPos)
-                                    currentPosition = newPos
-                                }
-                            }) {
-                                Icon(
-                                    imageVector = Icons.Default.Replay10,
-                                    contentDescription = "Rewind 10s",
-                                    tint = Color.White
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(24.dp))
-
-                            IconButton(
-                                onClick = {
-                                    videoViewInstance?.let {
-                                        if (it.isPlaying) {
-                                            it.pause()
-                                            isPlaying = false
-                                        } else {
-                                            it.start()
-                                            isPlaying = true
-                                        }
-                                    }
-                                },
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .background(
-                                        MaterialTheme.colorScheme.primary,
-                                        shape = androidx.compose.foundation.shape.CircleShape
-                                    )
-                            ) {
-                                Icon(
-                                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                    contentDescription = if (isPlaying) "Pause" else "Play",
-                                    tint = Color.White
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(24.dp))
-
-                            IconButton(onClick = {
-                                videoViewInstance?.let {
-                                    val newPos = (it.currentPosition + 10000).coerceAtMost(duration)
-                                    it.seekTo(newPos)
-                                    currentPosition = newPos
-                                }
-                            }) {
-                                Icon(
-                                    imageVector = Icons.Default.Forward10,
-                                    contentDescription = "Forward 10s",
-                                    tint = Color.White
-                                )
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 }

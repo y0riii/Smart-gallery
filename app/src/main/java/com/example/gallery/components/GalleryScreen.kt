@@ -154,6 +154,8 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
                     images = viewModel.images,
                     gridState = gridState,
                     modifier = Modifier.weight(1f),
+                    // Date headers: map each URI to its timestamp for grouping
+                    timestamps = viewModel.mediaTimestamps,
                     // Feature 2: controlled column count
                     columnCount = columnCount,
                     onColumnCountChange = { newCount ->

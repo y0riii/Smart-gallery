@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import java.io.File
 
 class GalleryViewModel(
@@ -21,6 +22,13 @@ class GalleryViewModel(
 ) : DeletableViewModel(service) {
 
     var images by mutableStateOf<List<Uri>>(emptyList())
+    /** Maps each URI to its DATE_ADDED timestamp (ms) for date-header grouping in the grid. */
+    var mediaTimestamps by mutableStateOf<Map<Uri, Long>>(emptyMap())
+        private set
+
+    private var mediaObserveJob: Job? = null
+    private var allDeviceMedia: List<Uri> = emptyList()
+    private var allDeviceTimestamps: Map<Uri, Long> = emptyMap()
 
     var isSearching by mutableStateOf(false)
 
@@ -57,8 +65,21 @@ class GalleryViewModel(
         )
 
     fun onPermissionGranted() {
+        mediaObserveJob?.cancel()
+        mediaObserveJob = viewModelScope.launch {
+            service.getAllDeviceMediaFlow().collect { pairs ->
+                val uris = pairs.map { it.first }
+                val timestamps = pairs.associate { it.first to it.second }
+                allDeviceMedia = uris
+                allDeviceTimestamps = timestamps
+                // Only update images when the user is not actively searching
+                if (!isSearching && prompt.text.isBlank() && fromDate == null && toDate == null) {
+                    images = uris
+                    mediaTimestamps = timestamps
+                }
+            }
+        }
         viewModelScope.launch {
-            images = service.getAllDeviceMedia()
             service.startIndexingWorkManager()
         }
     }
@@ -105,11 +126,10 @@ class GalleryViewModel(
         fromDate = null
         toDate = null
         useClip = true
-        viewModelScope.launch {
-            images = service.getAllDeviceMedia()
-            // Set flag last so LaunchedEffect fires after images list is ready
-            shouldScrollToTop = true
-        }
+        images = allDeviceMedia
+        mediaTimestamps = allDeviceTimestamps
+        // Set flag last so LaunchedEffect fires after images list is ready
+        shouldScrollToTop = true
     }
 
     override suspend fun onDeleteSuccess(uris: List<Uri>) {

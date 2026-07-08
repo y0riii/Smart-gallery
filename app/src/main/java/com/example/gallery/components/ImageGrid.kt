@@ -18,10 +18,12 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -35,6 +37,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,8 +53,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
@@ -61,6 +66,9 @@ import com.example.gallery.utils.isVideoUri
 import com.example.gallery.utils.rememberVideoThumbnail
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 
@@ -70,6 +78,8 @@ fun ImageGrid(
     images: List<Uri>,
     gridState: LazyGridState,
     modifier: Modifier = Modifier,
+    /** Optional map of URI → timestamp (ms). When provided, date headers are shown. */
+    timestamps: Map<Uri, Long> = emptyMap(),
     // ── Feature 2: column count driven from outside ──────────────────────────
     columnCount: Int = 3,
     onColumnCountChange: (Int) -> Unit = {},
@@ -224,129 +234,77 @@ fun ImageGrid(
             }
         )
     ) {
-        itemsIndexed(images, key = { _, uri -> uri.toString() }) { index, uri ->
-            val isSelected = uri in selectedUris
+        // Build groups: if timestamps are provided, group images by calendar date
+        if (timestamps.isNotEmpty()) {
+            val dateFormat = SimpleDateFormat("d MMMM yyyy", Locale.ENGLISH)
+            // Compute the date string for each image (normalised to midnight)
+            val dayOf: (Uri) -> String = { uri ->
+                val ts = timestamps[uri] ?: 0L
+                dateFormat.format(Date(ts))
+            }
 
-            // Each cell is a Box so we can layer overlay elements on top of the image
-            Box(
-                modifier = Modifier
-                    .padding(animatedCellPadding)
-                    .aspectRatio(1f) // Square cell — image always fills correctly
-            ) {
-                // ── Image/Video thumbnail ─────────────────────────────────
-                val isVideo = uri.isVideoUri()
-                val videoThumbnail = if (isVideo) rememberVideoThumbnail(uri) else null
-
-                val context = LocalContext.current
-                val imageRequest = remember(uri, videoThumbnail) {
-                    ImageRequest.Builder(context)
-                        .data(if (isVideo) videoThumbnail else uri)
-                        // Decode at a capped resolution: no cell ever needs more
-                        // than 256 px. This prevents Coil from loading full-res
-                        // bitmaps into tiny grid cells, which causes GC pressure
-                        // and jitter at high column counts (6+).
-                        .size(Size(256, 256))
-                        // Explicit cache keys guarantee instant memory cache lookups
-                        // and zero flicker when items are recycled during fast scroll.
-                        .memoryCacheKey(uri.toString() + "_thumb")
-                        .diskCacheKey(uri.toString() + "_thumb")
-                        .build()
+            // Group consecutive images under the same date label, preserving overall order
+            data class Group(val label: String, val items: List<Pair<Int, Uri>>)
+            val groups = mutableListOf<Group>()
+            var currentLabel = ""
+            var currentItems = mutableListOf<Pair<Int, Uri>>()
+            images.forEachIndexed { idx, uri ->
+                val label = dayOf(uri)
+                if (label != currentLabel) {
+                    if (currentItems.isNotEmpty()) groups.add(Group(currentLabel, currentItems))
+                    currentLabel = label
+                    currentItems = mutableListOf()
                 }
+                currentItems.add(idx to uri)
+            }
+            if (currentItems.isNotEmpty()) groups.add(Group(currentLabel, currentItems))
 
-                AsyncImage(
-                    model = imageRequest,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .clickable {
-                            if (dragStartIndex != null) {
-                                return@clickable
-                            }
-                            if (isSelecting) {
-                                // Feature 1: tapping while selecting toggles the image
-                                onToggleSelect(uri)
-                            } else {
-                                // Normal mode: open full screen
-                                onImageClick(index)
-                            }
-                        },
-                    contentScale = ContentScale.Crop, // Always fill the square cell
+            for (group in groups) {
+                // Full-width date header
+                item(key = "header_${group.label}", span = { GridItemSpan(maxLineSpan) }) {
+                    Text(
+                        text = group.label,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    )
+                }
+                // Media cells for this date group
+                itemsIndexed(
+                    group.items,
+                    key = { _, pair -> pair.second.toString() }
+                ) { _, pair ->
+                    val (index, uri) = pair
+                    MediaCell(
+                        uri = uri,
+                        index = index,
+                        isSelected = uri in selectedUris,
+                        isSelecting = isSelecting,
+                        animatedCellPadding = animatedCellPadding,
+                        dragStartIndex = dragStartIndex,
+                        onToggleSelect = onToggleSelect,
+                        onImageClick = onImageClick,
+                        onPreviewImage = onPreviewImage
+                    )
+                }
+            }
+        } else {
+            // No timestamps: flat grid without headers (search results, albums, etc.)
+            itemsIndexed(images, key = { _, uri -> uri.toString() }) { index, uri ->
+                MediaCell(
+                    uri = uri,
+                    index = index,
+                    isSelected = uri in selectedUris,
+                    isSelecting = isSelecting,
+                    animatedCellPadding = animatedCellPadding,
+                    dragStartIndex = dragStartIndex,
+                    onToggleSelect = onToggleSelect,
+                    onImageClick = onImageClick,
+                    onPreviewImage = onPreviewImage
                 )
-
-                // ── Feature 1: selection overlay ──────────────────────────
-                if (isSelecting) {
-                    if (isSelected) {
-                        // Dark overlay to visually indicate the image is chosen
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color.Black.copy(alpha = 0.45f))
-                        )
-                        // Filled checkmark in the top-left corner
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = "Selected",
-                            tint = Color.White,
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .padding(4.dp)
-                                .size(AppConfig.SelectionIconSize)
-                        )
-                    } else {
-                        // Empty circle in the top-left corner for unselected images
-                        Icon(
-                            imageVector = Icons.Default.RadioButtonUnchecked,
-                            contentDescription = "Not selected",
-                            tint = Color.White.copy(alpha = 0.75f),
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .padding(4.dp)
-                                .size(AppConfig.SelectionIconSize)
-                        )
-                    }
-                }
-
-                // ── Video badge ───────────────────────────────────────────
-                if (uri.isVideoUri()) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(4.dp)
-                            .size(24.dp)
-                            .background(
-                                Color.Black.copy(alpha = 0.55f),
-                                shape = androidx.compose.foundation.shape.CircleShape
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = "Video",
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-
-                // ── Feature 3: preview button ─────────────────────────────
-                // Shown on every cell when selecting AND cells are large enough
-                // (onPreviewImage is set to null by the parent when cells are too small)
-                if (onPreviewImage != null) {
-                    IconButton(
-                        onClick = { onPreviewImage(index) },
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ZoomIn,
-                            contentDescription = "Preview image",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                }
             }
         }
     }
@@ -364,6 +322,125 @@ fun ImageGridPreview() {
                 images = mockImages,
                 gridState = rememberLazyGridState()
             )
+        }
+    }
+}
+
+/** A single square media cell (image or video thumbnail) with selection and preview overlays. */
+@Composable
+private fun MediaCell(
+    uri: Uri,
+    index: Int,
+    isSelected: Boolean,
+    isSelecting: Boolean,
+    animatedCellPadding: androidx.compose.ui.unit.Dp,
+    dragStartIndex: Int?,
+    onToggleSelect: (Uri) -> Unit,
+    onImageClick: (Int) -> Unit,
+    onPreviewImage: ((Int) -> Unit)?
+) {
+    Box(
+        modifier = Modifier
+            .padding(animatedCellPadding)
+            .aspectRatio(1f)
+    ) {
+        val isVideo = uri.isVideoUri()
+        val videoThumbnail = if (isVideo) rememberVideoThumbnail(uri) else null
+
+        val context = LocalContext.current
+        val imageRequest = remember(uri, videoThumbnail) {
+            ImageRequest.Builder(context)
+                .data(if (isVideo) videoThumbnail else uri)
+                .size(Size(256, 256))
+                .memoryCacheKey(uri.toString() + "_thumb")
+                .diskCacheKey(uri.toString() + "_thumb")
+                .build()
+        }
+
+        AsyncImage(
+            model = imageRequest,
+            contentDescription = null,
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .clickable {
+                    if (dragStartIndex != null) return@clickable
+                    if (isSelecting) {
+                        onToggleSelect(uri)
+                    } else {
+                        onImageClick(index)
+                    }
+                },
+            contentScale = ContentScale.Crop,
+        )
+
+        // ── Selection overlay ─────────────────────────────────────────────
+        if (isSelecting) {
+            if (isSelected) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.45f))
+                )
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "Selected",
+                    tint = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(4.dp)
+                        .size(AppConfig.SelectionIconSize)
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.RadioButtonUnchecked,
+                    contentDescription = "Not selected",
+                    tint = Color.White.copy(alpha = 0.75f),
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(4.dp)
+                        .size(AppConfig.SelectionIconSize)
+                )
+            }
+        }
+
+        // ── Video badge ───────────────────────────────────────────────────
+        if (uri.isVideoUri()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(4.dp)
+                    .size(24.dp)
+                    .background(
+                        Color.Black.copy(alpha = 0.55f),
+                        shape = androidx.compose.foundation.shape.CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = "Video",
+                    tint = Color.White,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+
+        // ── Preview button ────────────────────────────────────────────────
+        if (onPreviewImage != null) {
+            IconButton(
+                onClick = { onPreviewImage(index) },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ZoomIn,
+                    contentDescription = "Preview image",
+                    tint = Color.White,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
         }
     }
 }

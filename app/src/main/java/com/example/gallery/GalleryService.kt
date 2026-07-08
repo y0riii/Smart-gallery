@@ -40,8 +40,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import android.database.ContentObserver
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class GalleryService(val context: Context) {
@@ -275,39 +281,28 @@ class GalleryService(val context: Context) {
                 }
 
                 // Check if the device gets hot
-                var isThermalPaused = false
-                val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && powerManager != null) {
-                    val status = powerManager.currentThermalStatus
-                    if (status >= PowerManager.THERMAL_STATUS_SEVERE) {
-                        isThermalPaused = true
-                        Log.w("GalleryService", "Device is hot (thermal status: $status). Pausing indexing.")
-                    }
-                }
+//                var isThermalPaused = false
+//                val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+//                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && powerManager != null) {
+//                    val status = powerManager.currentThermalStatus
+//                    if (status >= PowerManager.THERMAL_STATUS_SEVERE) {
+//                        isThermalPaused = true
+//                        Log.w("GalleryService", "Device is hot (thermal status: $status). Pausing indexing.")
+//                    }
+//                }
 
                 // Check if we are paused (either manually or due to thermal throttling)!
-                if (GalleryIndexerWorker.isPaused || isThermalPaused) {
+                if (GalleryIndexerWorker.isPaused) {
                     Log.d("GalleryService", "Indexing is paused (Manual/Thermal). Releasing ML models and waiting...")
                     closeProcessors()
                     progress.value = null
 
                     // Wait loop
-                    while (GalleryIndexerWorker.isPaused || isThermalPaused) {
+                    while (GalleryIndexerWorker.isPaused) {
                         if (!kotlinx.coroutines.currentCoroutineContext().isActive) {
                             break
                         }
                         kotlinx.coroutines.delay(1000) // check every 1 second
-                        
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && powerManager != null) {
-                            val status = powerManager.currentThermalStatus
-                            // Resume only when cooled down below moderate (i.e. to light or none)
-                            isThermalPaused = status >= PowerManager.THERMAL_STATUS_MODERATE
-                            if (isThermalPaused) {
-                                Log.w("GalleryService", "Device is still warm (thermal status: $status). Waiting to cool down...")
-                            }
-                        } else {
-                            isThermalPaused = false
-                        }
                     }
 
                     // Check if cancelled during wait
@@ -393,14 +388,16 @@ class GalleryService(val context: Context) {
                                 }
                             }
                         }
-
-                        counter++
-                        Log.d("GalleryService", "Processed: $counter / $totalCount (ID: $mediaId)")
-                        progress.value = counter / totalCount.toFloat()
-                        onProgress(counter, totalCount)
                     }
                 } catch (e: Exception) {
                     Log.e("GalleryService", "Error processing image $mediaId", e)
+                } finally {
+                    // Always advance the counter so the notification reaches 100%
+                    // even if the bitmap failed to load or an error was thrown.
+                    counter++
+                    Log.d("GalleryService", "Processed: $counter / $totalCount (ID: $mediaId)")
+                    progress.value = counter / totalCount.toFloat()
+                    onProgress(counter, totalCount)
                 }
             }
         } finally {
@@ -740,6 +737,37 @@ class GalleryService(val context: Context) {
                 .sortedByDescending { it.first }
                 .map { it.second }
         }
+
+    /** Same as [getAllDeviceMedia] but also returns the timestamp (ms) for each URI. */
+    suspend fun getAllDeviceMediaWithTimestamps(): List<Pair<Uri, Long>> =
+        withContext(Dispatchers.IO) {
+            val images = ImageUtils.scanMediaStore(context).map { (id, ts) -> id.toMediaUri() to ts }
+            val videos = VideoUtils.scanMediaStore(context).map { (id, ts) -> id.toVideoUri() to ts }
+            (images + videos).sortedByDescending { it.second }
+        }
+
+    fun getAllDeviceMediaFlow(): Flow<List<Pair<Uri, Long>>> = callbackFlow {
+        val observer = object : ContentObserver(null) {
+            override fun onChange(selfChange: Boolean) {
+                launch {
+                    trySend(getAllDeviceMediaWithTimestamps())
+                }
+            }
+        }
+        context.contentResolver.registerContentObserver(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer
+        )
+        context.contentResolver.registerContentObserver(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, observer
+        )
+
+        // Load initial state
+        trySend(getAllDeviceMediaWithTimestamps())
+
+        awaitClose {
+            context.contentResolver.unregisterContentObserver(observer)
+        }
+    }.flowOn(Dispatchers.IO)
 
     /**
      * Returns video URIs filtered by an optional date range.
