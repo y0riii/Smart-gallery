@@ -29,16 +29,15 @@ import com.example.gallery.ml.face.ChineseWhispers
 import com.example.gallery.ml.image.ClipImageEncoder
 import com.example.gallery.ml.ocr.OcrProcessor
 import com.example.gallery.ml.text.ClipTextEncoder
+import com.example.gallery.ml.text.TextEncoderProvider
 import com.example.gallery.utils.ImageUtils
 import com.example.gallery.utils.VideoUtils
 import com.example.gallery.utils.VectorUtils
 import com.example.gallery.utils.toMediaUri
 import com.example.gallery.utils.toVideoUri
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import android.database.ContentObserver
@@ -51,6 +50,23 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * Central coordinator for all on-device media work. Constructed cheaply in several places
+ * (MainActivity + each background worker); shared cross-cutting state (progress, the media cache,
+ * the ML execution lock, the run flags) lives in the [companion object] so every instance sees it.
+ *
+ * Responsibilities are grouped into the sections below, in file order:
+ *  - Work scheduling & recluster triggers   (isUriDeleted, startIndexingWorkManager, forceRecluster)
+ *  - Companion: shared state                 (progress, media cache, mlExecutionLock, run flags)
+ *  - INDEXING                                (indexImagesBackground, processAndInsertImages, deleteImageFromDb)
+ *  - FACE CLUSTERING                         (createClusters, cleanupOrphanThumbnails)
+ *  - MEDIASTORE QUERIES                      (getAllDeviceMedia*, date-filter helpers, mergeMediaByDate)
+ *  - AI CATEGORIES                           (createCategory)
+ *  - SEARCH                                  (search, searchWithin, searchDocuments, findNamesInPrompt)
+ *  - DELETION                                (prepare/finalize delete, single & bulk)
+ *
+ * See ARCHITECTURE.md for the end-to-end flows these methods participate in.
+ */
 class GalleryService(val context: Context) {
 
     fun isUriDeleted(uri: Uri): Boolean {
@@ -136,43 +152,6 @@ class GalleryService(val context: Context) {
 
         @Volatile
         private var lastReclusterTime = 0L
-
-        @Volatile
-        private var textEncoderInstance: ClipTextEncoder? = null
-        private var textEncoderInitJob: Deferred<Unit>? = null
-        private val initLock = Any()
-
-        fun getTextEncoder(context: Context): ClipTextEncoder? {
-            return synchronized(initLock) {
-                if (textEncoderInstance == null) {
-                    try {
-                        textEncoderInstance = ClipTextEncoder(context.applicationContext)
-                    } catch (e: Throwable) {
-                        Log.e(TAG, "Failed to init TextEncoder", e)
-                    }
-                }
-                textEncoderInstance
-            }
-        }
-
-        fun ensureTextEncoderInitialized(context: Context): Deferred<Unit> {
-            return synchronized(initLock) {
-                var job = textEncoderInitJob
-                val shouldRecreate = job == null || (job.isCompleted && textEncoderInstance == null)
-                if (shouldRecreate) {
-                    val appContext = context.applicationContext
-                    job = CoroutineScope(SupervisorJob() + Dispatchers.IO).async {
-                        try {
-                            getTextEncoder(appContext)
-                        } catch (t: Throwable) {
-                            Log.e(TAG, "TextEncoder pre-load failed", t)
-                        }
-                    }
-                    textEncoderInitJob = job
-                }
-                job
-            }
-        }
     }
 
     val db = AppDatabase.getDatabase(context)
@@ -181,11 +160,13 @@ class GalleryService(val context: Context) {
     private val categoryDao = db.categoryDao()
     private val faceDao = db.faceDao()
 
+    // The shared text encoder + its lazy init live in TextEncoderProvider; these getters just
+    // adapt it to this instance's context.
     private val textEncoder: ClipTextEncoder?
-        get() = getTextEncoder(context)
+        get() = TextEncoderProvider.get(context)
 
     private val initJob: Deferred<Unit>
-        get() = ensureTextEncoderInitialized(context)
+        get() = TextEncoderProvider.ensureInitialized(context)
 
     private val ftsSupported by lazy {
         try {
@@ -197,6 +178,11 @@ class GalleryService(val context: Context) {
             false
         }
     }
+
+    // ═══════════════════════════ INDEXING ═══════════════════════════
+    // Keeps Room in sync with the device (add new / drop deleted) and computes each new photo's
+    // ML features (CLIP embedding, OCR text, face embeddings). Writes are batched; see §4 of
+    // ARCHITECTURE.md for the full pipeline and crash-safety guarantees.
 
     /**
      * Compares the device's MediaStore with the Room Database and syncs them.
@@ -463,6 +449,11 @@ class GalleryService(val context: Context) {
         invalidateMediaCache()
     }
 
+
+    // ═══════════════════════════ FACE CLUSTERING ═══════════════════════════
+    // Groups face embeddings into people. First run = full Chinese Whispers; later runs assign
+    // new faces to the nearest existing person. Runs under mlExecutionLock so it never overlaps
+    // indexing. See §5 of ARCHITECTURE.md.
 
     /**
      * Performs face clustering on all faces in the database.
@@ -763,6 +754,10 @@ class GalleryService(val context: Context) {
         }
     }
 
+    // ═══════════════════════════ MEDIASTORE QUERIES ═══════════════════════════
+    // Direct reads of the device's photo/video store (no Room). Used to browse "all media" and
+    // to resolve date-filtered id lists that search/albums then refine.
+
     suspend fun getAllDeviceImages(): List<Uri> =
         withContext(Dispatchers.IO) {
             ImageUtils.scanMediaStore(context).map { (id, _) -> id.toMediaUri() }
@@ -896,6 +891,10 @@ class GalleryService(val context: Context) {
             }
         }
     }
+
+    // ═══════════════════════════ SEARCH ═══════════════════════════
+    // Three entry points: semantic CLIP search (search / searchWithin), OCR document search
+    // (searchDocuments), and date-only browsing. @name mentions are resolved by findNamesInPrompt.
 
     suspend fun search(prompt: String, fromDate: Long? = null, toDate: Long? = null): List<Uri> {
         return withContext(Dispatchers.IO) {
@@ -1195,6 +1194,11 @@ class GalleryService(val context: Context) {
         }
         return Pair(results, cleanPromptBuilder.toString())
     }
+
+    // ═══════════════════════════ DELETION ═══════════════════════════
+    // Two phases: prepare* builds the MediaStore delete request (system confirmation dialog on
+    // R+), then finalize* removes the rows from Room. Cleans up faces/persons via cascade + the
+    // person-count adjustments in deleteImageFromDb. See §9 of ARCHITECTURE.md.
 
     /**
      * Prepares deletion intent. Images are only removed if finalized.

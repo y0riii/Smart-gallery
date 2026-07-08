@@ -18,6 +18,16 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * The "Albums" tab's data source. Unlike the other folder repositories (which read Room), this one
+ * reads the device's **MediaStore** directly, so albums mirror the phone's real photo/video folders
+ * (Camera, Screenshots, Downloads, …) live — including files added by other apps.
+ *
+ * Both flows use the same reactive pattern: emit once immediately, then re-emit whenever MediaStore
+ * changes. Because MediaStore has no Flow API, we bridge its callback-based [ContentObserver] into a
+ * Flow with [callbackFlow] — register the observer on open, re-query on each change, and unregister
+ * in [awaitClose] when the collector goes away.
+ */
 class AlbumsFolderRepository(
     private val context: Context,
     private val service: GalleryService
@@ -25,16 +35,18 @@ class AlbumsFolderRepository(
 
     override fun getFoldersFlow(): Flow<List<FolderItem>> {
         return callbackFlow {
+            // A dedicated scope so each MediaStore change can launch a fresh (re)load off the
+            // observer's callback thread; cancelled in awaitClose to avoid leaking work.
             val scope = CoroutineScope(Dispatchers.IO)
             fun load() {
                 scope.launch { trySend(getFolders()) }
             }
-            load()
+            load() // initial emission so the UI has data before any change fires
 
             val observer = object : ContentObserver(null) {
                 override fun onChange(selfChange: Boolean) { load() }
             }
-            // Observe both image and video changes
+            // Observe both image and video changes (albums mix photos and videos).
             context.contentResolver.registerContentObserver(
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer
             )
@@ -42,6 +54,7 @@ class AlbumsFolderRepository(
                 MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, observer
             )
 
+            // Runs when the collector stops: tear down the observer and cancel pending loads.
             awaitClose {
                 context.contentResolver.unregisterContentObserver(observer)
                 scope.cancel()

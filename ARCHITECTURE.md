@@ -255,6 +255,9 @@ cleans up the DB (which cascades faces and adjusts person counts).
 
 ### `ml/`
 - `OrtAcceleration.kt` — CPU-vs-NNAPI per-model benchmark + cache.
+- `ml/text/TextEncoderProvider.kt` — owns the single, lazily-built, process-wide `ClipTextEncoder`
+  used by search (extracted from `GalleryService`'s companion so the lazy-init concurrency is
+  isolated).
 - `ml/image/ClipImageEncoder.kt`, `ml/text/ClipTextEncoder.kt`, `ml/text/ClipTokenizer.kt`,
   `ml/face/FaceEncoder.kt`, `ml/face/FaceDetectionProcessor.kt`, `ml/face/ChineseWhispers.kt`,
   `ml/ocr/OcrProcessor.kt` — described in §4/§5.

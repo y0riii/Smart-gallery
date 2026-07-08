@@ -7,6 +7,20 @@ import java.nio.ByteOrder
 import java.nio.LongBuffer
 import java.util.regex.Pattern
 
+/**
+ * CLIP's text tokenizer — a byte-level Byte-Pair-Encoding (BPE) tokenizer, ported to Kotlin so it
+ * exactly matches what CLIP's text model was trained on. It converts a prompt into the 77-length
+ * integer token sequence the ONNX text model expects.
+ *
+ * Pipeline: text → lower-cased & whitespace-cleaned → split into "words" by [pat] → each word's
+ * bytes mapped to printable stand-in chars ([byteEncoder]) → BPE merges applied ([bpe]) → each
+ * resulting sub-word looked up in [encoder] to an integer id. The sequence is wrapped with
+ * start/end tokens and padded/truncated to 77 in [tokenize].
+ *
+ * Assets:
+ *  - vocab.json  ([encoder]) — sub-word string → integer id.
+ *  - merges.txt  ([merges])  — ordered list of BPE merge rules; earlier lines = higher priority.
+ */
 class ClipTokenizer(
     context: Context,
     vocabJsonPath: String = "vocab.json",
@@ -50,9 +64,18 @@ class ClipTokenizer(
         )
     }
 
+    /**
+     * Applies BPE merges to a single token, returning its sub-words joined by spaces.
+     *
+     * Starts with the token split into individual characters (the last one marked with the
+     * end-of-word suffix "</w>"), then repeatedly merges the adjacent pair with the highest
+     * priority (lowest rank in [bpeRanks]) until no more mergeable pairs remain. Results are
+     * memoised in [cache] because the same tokens recur constantly across prompts.
+     */
     private fun bpe(token: String): String {
         cache[token]?.let { return it }
 
+        // Split into symbols; the final symbol carries the "</w>" end-of-word marker.
         var word = token.dropLast(1).map { it.toString() }.toMutableList()
         word.add(token.last().toString() + "</w>")
         var pairs = getPairs(word)
@@ -61,11 +84,14 @@ class ClipTokenizer(
             return "$token</w>"
         }
         while (true) {
+            // Pick the highest-priority adjacent pair (lowest merge rank); stop if none qualify.
             val bigram: Pair<String, String> =
                 pairs.minByOrNull { bpeRanks[it] ?: Int.MAX_VALUE } ?: break
             if (!bpeRanks.containsKey(bigram)) break
 
             val (first, second) = bigram
+
+            // Walk the symbol list and fuse every occurrence of (first, second) into one symbol.
 
             val newWord = mutableListOf<String>()
             var i = 0
@@ -98,6 +124,7 @@ class ClipTokenizer(
         return result
     }
 
+    /** Turns cleaned text into the list of integer token ids (no start/end/pad — that's [tokenize]). */
     private fun encode(text: String): List<Int> {
         val cleanedText = whitespaceClean(text).lowercase()
         val matcher = pat.matcher(cleanedText)
@@ -105,15 +132,23 @@ class ClipTokenizer(
         while (matcher.find()) {
             val token = matcher.group()
 
+            // Map each UTF-8 byte to its printable stand-in char so BPE operates purely on text.
             val encodedToken =
                 token.toByteArray().map { byteEncoder[it.toInt() and 0xFF]!! }.joinToString("")
 
+            // Apply BPE, then map each resulting sub-word to its vocab id.
             for (bpeToken in bpe(encodedToken).split(" ")) {
                 bpeTokens.add(encoder[bpeToken]!!)
             }
         }
         return bpeTokens
     }
+
+    /**
+     * Produces the model's fixed-size input: [start] + encoded tokens + [end], then padded with 0
+     * (or truncated to [contextLength], keeping the end token last) and packed into a little-endian
+     * LongBuffer of length [contextLength] — the tensor shape the ONNX text model expects.
+     */
 
     fun tokenize(
         text: String,
@@ -150,18 +185,17 @@ class ClipTokenizer(
         }
 
         longBuffer.rewind()
-
-        IntArray(contextLength) {
-            if (it < tokens.size)
-                tokens[it]
-            else 0
-        }
         return longBuffer
     }
 
 }
 
 
+/**
+ * Builds CLIP's byte→char map. Bytes that are already printable characters map to themselves;
+ * the remaining bytes are mapped to unused code points starting at 256. This lets the BPE step
+ * work on ordinary strings while still round-tripping arbitrary UTF-8 bytes losslessly.
+ */
 private fun createCharDict(): Map<Int, Char> {
     val bytesList = mutableListOf<Int>()
     bytesList.addAll(33..126)

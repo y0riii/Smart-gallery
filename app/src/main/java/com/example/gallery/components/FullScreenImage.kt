@@ -313,6 +313,16 @@ fun FullScreenImage(
                             )
                         }
                         // 2. Custom Transform & Drag Tracker
+                        //
+                        // A single hand-rolled gesture loop that unifies THREE gestures that would
+                        // otherwise conflict if handled by separate detectors:
+                        //   • pinch-to-zoom + pan-while-zoomed (updates `scale` / `offset`)
+                        //   • swipe-down-to-dismiss when at 1x zoom (drives `dismissOffset`, and
+                        //     `onClose()` once dragged past the threshold below)
+                        //   • plain taps pass through untouched (we only consume when actually moving)
+                        //
+                        // awaitEachGesture runs once per finger-down; inside, we manually read each
+                        // pointer event and decide zoom vs. dismiss based on the current scale.
                         .pointerInput(boxWidth, boxHeight) {
                             awaitEachGesture {
                                 awaitFirstDown(requireUnconsumed = false)
@@ -320,6 +330,7 @@ fun FullScreenImage(
                                 // Track state at start so pinching out aggressively doesn't accidentally trigger dismiss
                                 val startedZoomedOut = scale.value <= 1.05f
 
+                                // Consume events until all fingers lift, routing each to zoom or dismiss.
                                 do {
                                     val event = awaitPointerEvent()
                                     val zoomChange = event.calculateZoom()
@@ -382,7 +393,9 @@ fun FullScreenImage(
                                     }
                                 } while (event.changes.any { it.pressed })
 
-                                // End of gesture cleanup
+                                // End of gesture: decide dismiss vs. snap-back. Dragged far enough
+                                // (>200px) → animate the rest of the way off-screen and close;
+                                // otherwise spring back to the original position.
                                 if (isDraggingDown) {
                                     isDraggingDownGlobal = false
                                     if (dismissOffset.value > 200f) {
