@@ -104,19 +104,13 @@ interface CategoryDao {
     @Transaction
     suspend fun getCategoriesWithMediaIds():
             List<Pair<CategoryPreview, List<Long>>> {
-
-        val categories = getCategoryPreviews()
-
-        val refs = getCategoryMediaRefs()
-
-        val mediaMap = refs.groupBy(
-            keySelector = { it.categoryId },
-            valueTransform = { it.mediaId }
+        return associateMediaIds(
+            previews = getCategoryPreviews(),
+            refs = getCategoryMediaRefs(),
+            previewId = { it.id },
+            refOwnerId = { it.categoryId },
+            refMediaId = { it.mediaId }
         )
-
-        return categories.map { category ->
-            category to mediaMap[category.id].orEmpty()
-        }
     }
 
     @Query(
@@ -153,13 +147,7 @@ interface CategoryDao {
             getCategoryPreviewsFlow(),
             getCategoryMediaRefsFlow()
         ) { categories, refs ->
-            val mediaMap = refs.groupBy(
-                keySelector = { it.categoryId },
-                valueTransform = { it.mediaId }
-            )
-            categories.map { category ->
-                category to mediaMap[category.id].orEmpty()
-            }
+            associateMediaIds(categories, refs, { it.id }, { it.categoryId }, { it.mediaId })
         }
     }
 }

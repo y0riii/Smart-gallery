@@ -10,12 +10,12 @@ data class FolderItem(
     val insideFolderThumbnail: Uri?
 )
 
-fun List<Uri>.padToFour(): List<Uri> {
-    if (isEmpty()) return emptyList()
-    if (size >= 4) return take(4)
-    val result = ArrayList<Uri>(4)
-    while (result.size < 4) {
-        result.addAll(take(4 - result.size))
-    }
-    return result
-}
+/**
+ * Returns the top 4 images to preview in a folder's 2x2 mosaic tile.
+ *
+ * Callers pass URIs already ordered by relevance (category similarity, person face size,
+ * collection/album recency), so "top 4" = the first 4. Folders with fewer than 4 images return
+ * fewer — thumbnails are NOT duplicated to fill the grid; the empty slots render blank
+ * (see FolderTile.ThumbCell, which draws a placeholder for a null cell).
+ */
+fun List<Uri>.topFourThumbnails(): List<Uri> = take(4)

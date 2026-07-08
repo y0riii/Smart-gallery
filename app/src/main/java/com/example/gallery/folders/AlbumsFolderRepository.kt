@@ -135,7 +135,7 @@ class AlbumsFolderRepository(
             val name = entries.first().second
             val thumbUris = entries.map { (id, _, isVideo) ->
                 if (isVideo) id.toVideoUri() else id.toMediaUri()
-            }.padToFour()
+            }.topFourThumbnails()
             FolderItem(
                 bucketId = bucketId,
                 name = name,

@@ -31,6 +31,9 @@ class GalleryIndexerWorker(
         const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID = "gallery_indexing_channel"
 
+        // Minimum gap between progress/notification updates during indexing (see doWork).
+        private const val PROGRESS_UPDATE_MS = 500L
+
         @Volatile
         var isPaused = false
 
@@ -99,22 +102,32 @@ class GalleryIndexerWorker(
             val service = GalleryService(applicationContext)
             GalleryService.mlExecutionLock.withLock {
                 GalleryService.isIndexingRunning = true
+                // Throttle progress/notification updates: firing setProgress() (a WorkManager DB
+                // write) and notificationManager.notify() (a cross-process call) on every single
+                // image is a real cost on large libraries. Update at most every PROGRESS_UPDATE_MS,
+                // but always emit the very first and very last item so the bar starts and completes.
+                var lastUpdateMs = 0L
                 try {
                     service.indexImagesBackground { processed, total ->
-                        // ── KEY FIX: never overwrite the "paused" notification ──
+                        // ── never overwrite the "paused" notification ──
                         if (!isPaused) {
-                            withContext(Dispatchers.Main) {
-                                setProgress(
-                                    workDataOf(
-                                        "processed" to processed,
-                                        "total" to total
+                            val now = System.currentTimeMillis()
+                            val isBoundary = processed == 1 || processed >= total
+                            if (isBoundary || now - lastUpdateMs >= PROGRESS_UPDATE_MS) {
+                                lastUpdateMs = now
+                                withContext(Dispatchers.Main) {
+                                    setProgress(
+                                        workDataOf(
+                                            "processed" to processed,
+                                            "total" to total
+                                        )
                                     )
+                                }
+                                notificationManager.notify(
+                                    NOTIFICATION_ID,
+                                    createForegroundInfo(processed, total).notification
                                 )
                             }
-                            notificationManager.notify(
-                                NOTIFICATION_ID,
-                                createForegroundInfo(processed, total).notification
-                            )
                         }
                     }
                 } finally {

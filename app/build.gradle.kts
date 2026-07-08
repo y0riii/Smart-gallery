@@ -46,6 +46,13 @@ android {
     }
 }
 
+// Export Room schemas to a tracked directory so future schema changes can ship real
+// migrations instead of silently wiping the user's indexed database. The exported JSON
+// also becomes the source for Room's automated migration testing.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

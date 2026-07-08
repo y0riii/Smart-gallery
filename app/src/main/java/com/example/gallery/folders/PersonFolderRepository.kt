@@ -22,32 +22,19 @@ class PersonFolderRepository(
 ) : FolderSource {
     private val MIN_IMAGES = 5
 
-    // Matches auto-generated placeholder names like "#p1", "#p2", "#p10", etc.
-    private val PLACEHOLDER_REGEX = Regex("^#p\\d+$", RegexOption.IGNORE_CASE)
-
-    /** Returns true if the name is a system-generated placeholder (e.g. "#p1"). */
-    private fun isPlaceholder(name: String) = PLACEHOLDER_REGEX.matches(name)
-
     /**
-     * Sorts people into two buckets:
-     *  1. Named people (not placeholders) — sorted A–Z case-insensitively.
-     *  2. Placeholder people (#p1, #p2, …) — sorted numerically by their number.
+     * Orders people using the shared [PersonSort] rule (named A–Z, then #p placeholders
+     * numerically). No favorites tier here — the repository sorts before favorites are known.
      */
-    private fun sortedPeople(list: List<FolderItem>): List<FolderItem> {
-        val named = list.filter { !isPlaceholder(it.name) }.sortedBy { it.name.lowercase() }
-        val unnamed = list.filter { isPlaceholder(it.name) }.sortedBy {
-            // Extract the numeric suffix so #p2 comes before #p10
-            it.name.removePrefix("#p").toIntOrNull() ?: Int.MAX_VALUE
-        }
-        return named + unnamed
-    }
+    private fun sortedPeople(list: List<FolderItem>): List<FolderItem> =
+        list.sortedWith(PersonSort.comparator(emptySet()))
 
     override fun getFoldersFlow(): Flow<List<FolderItem>> {
         return personDao.getPersonsWithMediaIdsFlow().map { persons ->
             persons.mapNotNull { (person, mediaIds) ->
                 if (mediaIds.size < MIN_IMAGES) return@mapNotNull null
 
-                val thumbnails = mediaIds.map { it.toMediaUri() }.padToFour()
+                val thumbnails = mediaIds.map { it.toMediaUri() }.topFourThumbnails()
 
                 FolderItem(
                     bucketId = person.id,
@@ -88,7 +75,7 @@ class PersonFolderRepository(
         persons.mapNotNull { (person, mediaIds) ->
             if (mediaIds.size < MIN_IMAGES) return@mapNotNull null
 
-            val thumbnails = mediaIds.map { it.toMediaUri() }.padToFour()
+            val thumbnails = mediaIds.map { it.toMediaUri() }.topFourThumbnails()
 
             FolderItem(
                 bucketId = person.id,

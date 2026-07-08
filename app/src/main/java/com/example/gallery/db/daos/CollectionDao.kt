@@ -101,18 +101,13 @@ interface CollectionDao {
     @Transaction
     suspend fun getCollectionsWithMediaIds():
             List<Pair<CollectionPreview, List<Long>>> {
-
-        val collections = getCollectionPreviews()
-        val refs = getCollectionMediaRefs()
-
-        val mediaMap = refs.groupBy(
-            keySelector = { it.collectionId },
-            valueTransform = { it.mediaId }
+        return associateMediaIds(
+            previews = getCollectionPreviews(),
+            refs = getCollectionMediaRefs(),
+            previewId = { it.id },
+            refOwnerId = { it.collectionId },
+            refMediaId = { it.mediaId }
         )
-
-        return collections.map { collection ->
-            collection to mediaMap[collection.id].orEmpty()
-        }
     }
 
     @Query(
@@ -149,13 +144,7 @@ interface CollectionDao {
             getCollectionPreviewsFlow(),
             getCollectionMediaRefsFlow()
         ) { collections, refs ->
-            val mediaMap = refs.groupBy(
-                keySelector = { it.collectionId },
-                valueTransform = { it.mediaId }
-            )
-            collections.map { collection ->
-                collection to mediaMap[collection.id].orEmpty()
-            }
+            associateMediaIds(collections, refs, { it.id }, { it.collectionId }, { it.mediaId })
         }
     }
 }

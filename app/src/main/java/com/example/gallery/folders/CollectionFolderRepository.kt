@@ -19,7 +19,7 @@ class CollectionFolderRepository(
     override fun getFoldersFlow(): Flow<List<FolderItem>> {
         return collectionDao.getCollectionsWithMediaIdsFlow().map { collections ->
             collections.map { (collection, mediaIds) ->
-                val thumbnails = mediaIds.map { it.toMediaUri() }.padToFour()
+                val thumbnails = mediaIds.map { it.toMediaUri() }.topFourThumbnails()
 
                 FolderItem(
                     bucketId = collection.id,
@@ -52,7 +52,7 @@ class CollectionFolderRepository(
     suspend fun getFolders(): List<FolderItem> = withContext(Dispatchers.IO) {
         val collections = collectionDao.getCollectionsWithMediaIds()
         collections.map { (collection, mediaIds) ->
-            val thumbnails = mediaIds.map { it.toMediaUri() }.padToFour()
+            val thumbnails = mediaIds.map { it.toMediaUri() }.topFourThumbnails()
 
             FolderItem(
                 bucketId = collection.id,

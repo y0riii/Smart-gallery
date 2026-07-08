@@ -8,8 +8,6 @@ import android.graphics.Bitmap
 import androidx.core.graphics.scale
 import com.example.gallery.ml.OrtAcceleration
 import com.example.gallery.utils.VectorUtils
-import java.io.File
-import java.io.FileOutputStream
 import java.lang.AutoCloseable
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -146,7 +144,10 @@ class ClipImageEncoder(context: Context) : AutoCloseable {
     }
 
     override fun close() {
+        // NOTE: do NOT close `env` — OrtEnvironment.getEnvironment() is a process-wide
+        // singleton shared with the other encoders (image/text/face). Closing it here would
+        // invalidate sessions still in use elsewhere (e.g. the long-lived text encoder used
+        // for search) and break the next indexing batch that re-creates this encoder.
         session.close()
-        env.close()
     }
 }

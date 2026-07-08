@@ -18,8 +18,8 @@ import kotlin.math.max
 object ImageUtils {
 
     /**
-     * Finds image URIs on the device.
-     * Capped at 100 images for testing purposes.
+     * Scans the device MediaStore for all images, returning (imageId, dateAddedMs) pairs
+     * sorted newest-first. Timestamps are converted from MediaStore's seconds to milliseconds.
      */
     fun scanMediaStore(context: Context): List<Pair<Long, Long>> {
         val list = mutableListOf<Pair<Long, Long>>()

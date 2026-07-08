@@ -6,8 +6,6 @@ import ai.onnxruntime.OrtSession
 import android.content.Context
 import com.example.gallery.ml.OrtAcceleration
 import com.example.gallery.utils.VectorUtils
-import java.io.File
-import java.io.FileOutputStream
 
 class ClipTextEncoder(context: Context) {
 

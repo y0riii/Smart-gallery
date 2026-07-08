@@ -37,6 +37,7 @@ import com.example.gallery.utils.toVideoUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -108,7 +109,22 @@ class GalleryService(val context: Context) {
         private const val CATEGORY_MATCH_THRESHOLD = 0.22f
         private const val ASSIGN_THRESHOLD = 0.45f
 
+        // How many images to accumulate before committing them in one DB transaction.
+        // Batching amortizes the per-commit fsync cost that dominates indexing on large libraries.
+        private const val INDEX_BATCH_SIZE = 24
+
         val progress = MutableStateFlow<Float?>(null)
+
+        // Process-wide cache of all indexed media (with embeddings), used by semantic search so
+        // repeat queries don't re-read and re-deserialize every embedding BLOB from disk. Kept in
+        // the companion (not per-instance) so an invalidation from the indexing worker is visible
+        // to the GalleryService instance the UI/search uses. Set to null to invalidate.
+        @Volatile
+        private var cachedMedia: List<MediaEntity>? = null
+
+        fun invalidateMediaCache() {
+            cachedMedia = null
+        }
 
         @Volatile
         var isIndexingRunning = false
@@ -171,9 +187,6 @@ class GalleryService(val context: Context) {
     private val initJob: Deferred<Unit>
         get() = ensureTextEncoderInitialized(context)
 
-    /** True once the text encoder has finished loading (or failed). */
-    val isModelReady: Boolean get() = initJob.isCompleted
-
     private val ftsSupported by lazy {
         try {
             db.openHelper.readableDatabase
@@ -221,22 +234,7 @@ class GalleryService(val context: Context) {
                 Log.d(TAG, "Sync: Database is fully synced. No new images to process.")
                 progress.value = null
             }
-
-            logDatabaseContent()
         }
-    }
-
-    private suspend fun logDatabaseContent() {
-        val allItems = mediaDao.getAllMedia()
-        Log.d("DB_DEBUG", "=== CURRENT DATABASE CONTENT (${allItems.size} items) ===")
-        allItems.forEachIndexed { index, entity ->
-            val embeddingPreview = entity.embedding.take(3).joinToString(", ")
-            Log.d(
-                "DB_DEBUG",
-                "[#$index] ID: ${entity.mediaId} | OCR: ${entity.ocrText?.take(30) ?: "None"}... | Vector: [$embeddingPreview...]"
-            )
-        }
-        Log.d("DB_DEBUG", "============================================")
     }
 
     private suspend fun processAndInsertImages(imagesToProcess: List<Pair<Long, Long>>, onProgress: suspend (Int, Int) -> Unit) {
@@ -269,6 +267,30 @@ class GalleryService(val context: Context) {
             faceEncoder?.close(); faceEncoder = null
         }
 
+        // Batched DB writes: committing one transaction per image means one fsync per photo,
+        // which dominates indexing time on large libraries. We accumulate up to INDEX_BATCH_SIZE
+        // images and commit them together. On cancellation the unflushed buffer is simply dropped
+        // and those images get re-indexed next run (indexing is a device-vs-DB diff, so it's safe).
+        val mediaBuffer = mutableListOf<MediaEntity>()
+        val faceBuffer = mutableListOf<FaceEntity>()
+        val crossRefBuffer = mutableListOf<MediaCategoryCrossRef>()
+
+        suspend fun flushBuffers() {
+            if (mediaBuffer.isEmpty() && faceBuffer.isEmpty() && crossRefBuffer.isEmpty()) return
+            val mediaToInsert = mediaBuffer.toList()
+            val facesToInsert = faceBuffer.toList()
+            val crossRefsToInsert = crossRefBuffer.toList()
+            mediaBuffer.clear(); faceBuffer.clear(); crossRefBuffer.clear()
+            withContext(Dispatchers.IO) {
+                db.withTransaction {
+                    if (mediaToInsert.isNotEmpty()) mediaDao.insertAll(mediaToInsert)
+                    if (facesToInsert.isNotEmpty()) faceDao.insertFaces(facesToInsert)
+                    if (crossRefsToInsert.isNotEmpty()) categoryDao.insertCrossRefs(crossRefsToInsert)
+                }
+            }
+            invalidateMediaCache()
+        }
+
         try {
             val totalCount = imagesToProcess.size
             var counter = 0
@@ -280,20 +302,11 @@ class GalleryService(val context: Context) {
                     break
                 }
 
-                // Check if the device gets hot
-//                var isThermalPaused = false
-//                val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-//                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && powerManager != null) {
-//                    val status = powerManager.currentThermalStatus
-//                    if (status >= PowerManager.THERMAL_STATUS_SEVERE) {
-//                        isThermalPaused = true
-//                        Log.w("GalleryService", "Device is hot (thermal status: $status). Pausing indexing.")
-//                    }
-//                }
-
-                // Check if we are paused (either manually or due to thermal throttling)!
+                // Check if we are paused (either manually or from the notification action)
                 if (GalleryIndexerWorker.isPaused) {
-                    Log.d("GalleryService", "Indexing is paused (Manual/Thermal). Releasing ML models and waiting...")
+                    Log.d("GalleryService", "Indexing is paused. Flushing pending writes and releasing ML models...")
+                    // Persist what we've processed so a kill during the pause doesn't waste it.
+                    flushBuffers()
                     closeProcessors()
                     progress.value = null
 
@@ -342,7 +355,7 @@ class GalleryService(val context: Context) {
                             )
                         }
 
-                        // 1. Save face embeddings + bounding box to FaceEntity (clustering happens offline later)
+                        // Compute face embeddings + category assignments, then queue for a batched insert.
                         withContext(Dispatchers.Default) {
                             val faceEntities = faces.map { face ->
                                 val croppedImage = faceDetector!!.alignFace(bitmap, face)
@@ -359,7 +372,8 @@ class GalleryService(val context: Context) {
                                 )
                             }
 
-                            // 2. Process Categories (Auto-assignment logic)
+                            // Category auto-assignment (category list is intentionally re-queried
+                            // per image so newly created categories are picked up mid-run).
                             val allCategories = withContext(Dispatchers.IO) { categoryDao.getAllCategories() }
                             val crossRefs = allCategories.mapNotNull { category ->
                                 val similarity = VectorUtils.dotProduct(features, category.embedding)
@@ -374,19 +388,13 @@ class GalleryService(val context: Context) {
                                 }
                             }
 
-                            withContext(Dispatchers.IO) {
-                                db.withTransaction {
-                                    mediaDao.insertAll(listOf(MediaEntity(mediaId, timestamp, false, features, text)))
+                            mediaBuffer.add(MediaEntity(mediaId, timestamp, false, features, text))
+                            faceBuffer.addAll(faceEntities)
+                            crossRefBuffer.addAll(crossRefs)
+                        }
 
-                                    if (faceEntities.isNotEmpty()) {
-                                        faceDao.insertFaces(faceEntities)
-                                    }
-
-                                    if (crossRefs.isNotEmpty()) {
-                                        categoryDao.insertCrossRefs(crossRefs)
-                                    }
-                                }
-                            }
+                        if (mediaBuffer.size >= INDEX_BATCH_SIZE) {
+                            flushBuffers()
                         }
                     }
                 } catch (e: Exception) {
@@ -395,12 +403,20 @@ class GalleryService(val context: Context) {
                     // Always advance the counter so the notification reaches 100%
                     // even if the bitmap failed to load or an error was thrown.
                     counter++
-                    Log.d("GalleryService", "Processed: $counter / $totalCount (ID: $mediaId)")
                     progress.value = counter / totalCount.toFloat()
                     onProgress(counter, totalCount)
                 }
             }
         } finally {
+            // Persist whatever is still buffered — even on cancellation — so no completed work is
+            // thrown away. NonCancellable guarantees the final commit runs to completion.
+            withContext(NonCancellable) {
+                try {
+                    flushBuffers()
+                } catch (e: Exception) {
+                    Log.e("GalleryService", "Final buffer flush failed", e)
+                }
+            }
             progress.value = null
             closeProcessors()
         }
@@ -442,6 +458,9 @@ class GalleryService(val context: Context) {
         if (entity != null) {
             mediaDao.delete(entity)
         }
+
+        // The set of indexed media changed — drop the search embedding cache.
+        invalidateMediaCache()
     }
 
 
@@ -472,13 +491,11 @@ class GalleryService(val context: Context) {
                 // ── FIRST RUN: Full Chinese Whispers on all faces ──
                 Log.d(TAG, "First run: not completed yet (or empty persons), running full Chinese Whispers from scratch")
 
-                // Clear any partial person data to start clean from scratch
-                db.withTransaction {
-                    personDao.deleteAllPersons()
-                    faceDao.clearAllPersonAssignments()
-                }
-
-                // Re-query all faces to ensure we have the fresh set
+                // NOTE: we intentionally do NOT wipe persons here. The wipe-and-rebuild is
+                // performed atomically in the single transaction below, so that a crash/kill
+                // during the (potentially long) Chinese Whispers computation never leaves the
+                // People screen empty — the old clustering stays intact until the new one is
+                // ready to commit in one shot.
                 val facesToCluster = faceDao.getAllFaces()
                 if (facesToCluster.isEmpty()) {
                     Log.d(TAG, "No faces to cluster, skipping first run")
@@ -716,7 +733,33 @@ class GalleryService(val context: Context) {
                     Log.d(TAG, "Incremental run complete: $assignedCount assigned to existing, $newPersonCount new persons created")
                 }
             }
+
+            // Delete thumbnail files left behind by re-clustering or interrupted runs
+            // (files written to disk whose person row no longer references them).
+            cleanupOrphanThumbnails()
             true
+        }
+    }
+
+    /**
+     * Deletes person-thumbnail image files in filesDir that are no longer referenced by any
+     * [PersonEntity]. These accumulate when clustering re-runs (old thumbnails replaced) or when
+     * a clustering pass is interrupted after writing a thumbnail but before committing its person.
+     */
+    private suspend fun cleanupOrphanThumbnails() = withContext(Dispatchers.IO) {
+        try {
+            val referenced = personDao.getAllPersons()
+                .mapNotNull { it.thumbnailPath.takeIf { path -> path.isNotEmpty() } }
+                .toSet()
+            context.filesDir
+                .listFiles { file -> file.isFile && file.name.startsWith("thumb_") && file.name.endsWith(".jpg") }
+                ?.forEach { file ->
+                    if (file.absolutePath !in referenced && file.delete()) {
+                        Log.d(TAG, "Deleted orphan thumbnail ${file.name}")
+                    }
+                }
+        } catch (e: Exception) {
+            Log.e(TAG, "Orphan thumbnail cleanup failed", e)
         }
     }
 
@@ -793,7 +836,7 @@ class GalleryService(val context: Context) {
         withContext(Dispatchers.IO) {
             val categoryId =
                 categoryDao.insertCategory(CategoryEntity(name = prompt, embedding = textFeatures))
-            val allImages = mediaDao.getAllMedia()
+            val allImages = getAllMediaCached()
 
             withContext(Dispatchers.Default) {
                 allImages.forEach { image ->
@@ -810,6 +853,16 @@ class GalleryService(val context: Context) {
                 }
             }
         }
+    }
+
+    /**
+     * Returns all indexed media (with embeddings), served from an in-memory cache so repeat
+     * semantic searches don't re-read and re-deserialize every embedding BLOB from disk.
+     * The cache is invalidated by [invalidateMediaCache] whenever media is inserted or deleted.
+     */
+    private suspend fun getAllMediaCached(): List<MediaEntity> {
+        cachedMedia?.let { return it }
+        return mediaDao.getAllMedia().also { cachedMedia = it }
     }
 
     fun filterByDate(
@@ -866,7 +919,7 @@ class GalleryService(val context: Context) {
             val encoder = textEncoder
 
             var images = if (names.isEmpty()) {
-                mediaDao.getAllMedia()
+                getAllMediaCached()
             } else {
                 personDao.getImagesByNames(names, names.size)
             }

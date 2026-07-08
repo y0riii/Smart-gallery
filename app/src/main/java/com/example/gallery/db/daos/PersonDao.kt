@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import com.example.gallery.db.Converters
 import com.example.gallery.db.entities.MediaEntity
 import com.example.gallery.db.entities.PersonEntity
 import com.example.gallery.db.previews.PersonMediaRef
@@ -63,9 +64,9 @@ interface PersonDao {
     suspend fun updateEmbeddingRaw(personId: Long, embedding: ByteArray)
 
     suspend fun updateEmbedding(personId: Long, embedding: FloatArray) {
-        val buffer = java.nio.ByteBuffer.allocate(embedding.size * 4)
-        buffer.asFloatBuffer().put(embedding)
-        updateEmbeddingRaw(personId, buffer.array())
+        // Serialize via the same Converters used by Room's @TypeConverters so the byte layout
+        // written here matches exactly how PersonEntity.Embedding is read back (see ConvertersTest).
+        updateEmbeddingRaw(personId, Converters().fromFloatArray(embedding))
     }
 
     @Query("UPDATE person SET count = count + 1 WHERE id = :personId")
@@ -175,18 +176,13 @@ interface PersonDao {
     @Transaction
     suspend fun getPersonsWithMediaIds():
             List<Pair<PersonPreview, List<Long>>> {
-
-        val persons = getPersonPreviews()
-        val refs = getPersonMediaRefs()
-
-        val mediaMap = refs.groupBy(
-            keySelector = { it.personId },
-            valueTransform = { it.mediaId }
+        return associateMediaIds(
+            previews = getPersonPreviews(),
+            refs = getPersonMediaRefs(),
+            previewId = { it.id },
+            refOwnerId = { it.personId },
+            refMediaId = { it.mediaId }
         )
-
-        return persons.map { person ->
-            person to mediaMap[person.id].orEmpty()
-        }
     }
 
     @Query(
@@ -227,13 +223,7 @@ interface PersonDao {
             getPersonPreviewsFlow(),
             getPersonMediaRefsFlow()
         ) { persons, refs ->
-            val mediaMap = refs.groupBy(
-                keySelector = { it.personId },
-                valueTransform = { it.mediaId }
-            )
-            persons.map { person ->
-                person to mediaMap[person.id].orEmpty()
-            }
+            associateMediaIds(persons, refs, { it.id }, { it.personId }, { it.mediaId })
         }
     }
     @Query("UPDATE person SET thumbnailPath = :thumbnailPath, thumbnailSize = :thumbnailSize WHERE id = :personId")

@@ -8,13 +8,9 @@ import android.graphics.Bitmap
 import android.graphics.Matrix
 import androidx.core.graphics.scale
 import com.example.gallery.ml.OrtAcceleration
-import java.io.File
-import java.io.FileOutputStream
 import java.lang.AutoCloseable
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import kotlin.io.copyTo
-import kotlin.use
 
 class FaceEncoder(context: Context) : AutoCloseable {
 
@@ -138,7 +134,9 @@ class FaceEncoder(context: Context) : AutoCloseable {
     }
 
     override fun close() {
+        // NOTE: do NOT close `env` — OrtEnvironment.getEnvironment() is a process-wide
+        // singleton shared with the other encoders. Closing it here would invalidate
+        // sessions still in use elsewhere and break the next indexing batch.
         session.close()
-        env.close()
     }
 }

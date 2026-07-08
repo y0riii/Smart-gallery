@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
-import android.util.Log
 import androidx.core.graphics.createBitmap
 import com.example.gallery.utils.ImageUtils
 import com.google.mlkit.vision.common.InputImage
@@ -118,14 +117,6 @@ class FaceDetectionProcessor : AutoCloseable {
 
         val transform = computeSimilarityTransform(srcPoints, REFERENCE_LANDMARKS)
 
-//        val inverse = Matrix()
-//        transform.invert(inverse)
-
-        val values = FloatArray(9)
-        transform.getValues(values)
-
-        Log.d("MATRIX", values.joinToString())
-
         // Warp the full image with the computed affine matrix
         val aligned = createBitmap(ALIGNED_SIZE, ALIGNED_SIZE)
         val canvas = Canvas(aligned)
@@ -157,9 +148,6 @@ class FaceDetectionProcessor : AutoCloseable {
         val nose = face.getLandmark(FaceLandmark.NOSE_BASE)?.position ?: return null
         val mouthLeft = face.getLandmark(FaceLandmark.MOUTH_LEFT)?.position ?: return null
         val mouthRight = face.getLandmark(FaceLandmark.MOUTH_RIGHT)?.position ?: return null
-
-        Log.d("FaceDetector", "LeftEye: (${leftEye.x}, ${leftEye.y})")
-        Log.d("FaceDetector", "rightEye: (${rightEye.x}, ${rightEye.y})")
 
         return arrayOf(
             floatArrayOf(leftEye.x, leftEye.y),

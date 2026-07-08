@@ -106,5 +106,18 @@ class ConvertersTest {
         val retrieved = converters.toFloatArray(converters.fromFloatArray(original))
         assertArrayEquals(original, retrieved, 0f)
     }
+
+    @Test
+    fun test_converters_match_manual_persondao_layout() {
+        // PersonDao.updateEmbedding previously hand-rolled ByteBuffer.allocate(size*4) instead of
+        // using Converters. It now delegates to Converters; this guards that the two byte layouts
+        // are identical so the refactor can't silently corrupt existing stored person embeddings.
+        val original = FloatArray(64) { it * 0.01f }
+        val viaConverters = converters.fromFloatArray(original)
+        val viaManual = java.nio.ByteBuffer.allocate(original.size * 4)
+            .apply { asFloatBuffer().put(original) }
+            .array()
+        assertArrayEquals(viaManual, viaConverters)
+    }
 }
 

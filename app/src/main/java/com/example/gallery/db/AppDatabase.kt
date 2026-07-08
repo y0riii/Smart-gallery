@@ -32,7 +32,7 @@ import com.example.gallery.db.entities.CollectionMediaCrossRef
         CollectionMediaCrossRef::class
     ],
     version = 21,
-    exportSchema = false
+    exportSchema = true
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {

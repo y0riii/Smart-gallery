@@ -1,6 +1,7 @@
 package com.example.gallery.ml.face
 
 import com.example.gallery.utils.VectorUtils
+import kotlin.random.Random
 
 /**
  * Pure-Kotlin implementation of the Chinese Whispers graph clustering algorithm.
@@ -22,6 +23,11 @@ object ChineseWhispers {
 
     private const val EDGE_THRESHOLD = 0.55f
     private const val MAX_ITERATIONS = 20
+
+    // Fixed seed so that clustering the same set of faces yields the same result across runs.
+    // Chinese Whispers is order-dependent (it shuffles node visit order each iteration); seeding
+    // the RNG removes run-to-run nondeterminism without changing the algorithm's behaviour.
+    private const val SHUFFLE_SEED = 42L
 
     /**
      * Clusters a list of face embeddings.
@@ -52,9 +58,10 @@ object ChineseWhispers {
         val labels = IntArray(n) { it }
 
         // ── Step 3: Iterate ──
+        val rng = Random(SHUFFLE_SEED)
         val indices = (0 until n).toMutableList()
         for (iteration in 0 until MAX_ITERATIONS) {
-            indices.shuffle()
+            indices.shuffle(rng)
             var changed = false
 
             for (node in indices) {
