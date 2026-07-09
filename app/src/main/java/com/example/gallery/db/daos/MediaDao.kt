@@ -5,8 +5,10 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import com.example.gallery.db.entities.ArabicOcrDoneEntity
 import com.example.gallery.db.entities.MediaEntity
 import com.example.gallery.db.previews.MediaDateInfo
+import com.example.gallery.db.previews.MediaOcrRef
 
 @Dao
 interface MediaDao {
@@ -37,6 +39,22 @@ interface MediaDao {
 
     @Query("SELECT * FROM media_items WHERE mediaId IN (:ids)")
     suspend fun getMediaByIds(ids: List<Long>): List<MediaEntity>
+
+    // ===== ARABIC OCR TRACKING =====
+
+    /** Media rows not yet scanned by the Arabic OCR pass (the exact "pending" set), id + text only. */
+    @Query("SELECT mediaId, ocrText FROM media_items WHERE mediaId NOT IN (SELECT mediaId FROM arabic_ocr_done)")
+    suspend fun getMediaPendingArabic(): List<MediaOcrRef>
+
+    /** Count of media rows not yet Arabic-scanned (cheap check before enqueuing the pass). */
+    @Query("SELECT COUNT(*) FROM media_items WHERE mediaId NOT IN (SELECT mediaId FROM arabic_ocr_done)")
+    suspend fun countMediaPendingArabic(): Int
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun markArabicOcrDone(entry: ArabicOcrDoneEntity)
+
+    @Query("DELETE FROM arabic_ocr_done WHERE mediaId = :mediaId")
+    suspend fun deleteArabicOcrDone(mediaId: Long)
 
     @Query("SELECT mediaId, timestampMs FROM media_items WHERE mediaId IN (:ids)")
     suspend fun getMediaDatesByIds(ids: List<Long>): List<MediaDateInfo>

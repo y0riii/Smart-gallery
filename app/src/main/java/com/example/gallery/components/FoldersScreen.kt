@@ -400,6 +400,7 @@ fun FoldersScreen(
                     onSearch = { viewModel.applyFilters(scrollToTop = true) },
                     onClear = { viewModel.clearSearch() },
                     allNames = allNames,
+                    searchActive = viewModel.isSearchActive,
                     showDates = showDates,
                     // Feature 5: forward the thumbnail map so person avatars appear in the dropdown
                     nameThumbnails = nameThumbnails

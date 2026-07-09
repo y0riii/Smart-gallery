@@ -13,7 +13,9 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.Row
@@ -24,6 +26,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
@@ -67,7 +70,9 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.size.Size
 import com.example.gallery.ui.theme.AppConfig
+import com.example.gallery.utils.formatVideoDuration
 import com.example.gallery.utils.isVideoUri
+import com.example.gallery.utils.rememberVideoDuration
 import com.example.gallery.utils.rememberVideoThumbnail
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -429,11 +434,14 @@ private fun MediaCell(
     onImageClick: (Int) -> Unit,
     onPreviewImage: ((Int) -> Unit)?
 ) {
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .padding(animatedCellPadding)
             .aspectRatio(1f)
     ) {
+        // Edge length of this tile — used to scale the video-duration label so it stays
+        // proportional whether the grid is dense (many columns) or sparse (few).
+        val tileSize = maxWidth
         val isVideo = uri.isVideoUri()
         val videoThumbnail = if (isVideo) rememberVideoThumbnail(uri) else null
 
@@ -498,25 +506,42 @@ private fun MediaCell(
             }
         }
 
-        // ── Video badge ───────────────────────────────────────────────────
-        if (uri.isVideoUri()) {
-            Box(
+        // ── Video duration badge ──────────────────────────────────────────
+        // Bottom-left pill with a play glyph and the clip's length. Everything scales with the
+        // tile edge (clamped) so it stays legible in dense grids and grows in sparse ones.
+        if (isVideo) {
+            val tileDp = tileSize.value
+            val fontSize = (tileDp * 0.11f).coerceIn(8f, 13f).sp
+            val iconSize = (tileDp * 0.15f).coerceIn(11f, 18f).dp
+            val hPad = (tileDp * 0.04f).coerceIn(3f, 6f).dp
+            val durationMs = rememberVideoDuration(uri)
+            Row(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(4.dp)
-                    .size(24.dp)
                     .background(
                         Color.Black.copy(alpha = 0.55f),
-                        shape = androidx.compose.foundation.shape.CircleShape
-                    ),
-                contentAlignment = Alignment.Center
+                        shape = RoundedCornerShape(percent = 50)
+                    )
+                    .padding(horizontal = hPad, vertical = 1.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = Icons.Default.PlayArrow,
                     contentDescription = "Video",
                     tint = Color.White,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(iconSize)
                 )
+                if (durationMs != null && durationMs > 0) {
+                    Spacer(Modifier.width(2.dp))
+                    Text(
+                        text = formatVideoDuration(durationMs),
+                        color = Color.White,
+                        fontSize = fontSize,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1
+                    )
+                }
             }
         }
 

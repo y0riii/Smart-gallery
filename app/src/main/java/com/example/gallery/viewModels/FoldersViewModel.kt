@@ -45,6 +45,10 @@ abstract class FoldersViewModel(
     var relevantCount by mutableStateOf<Int?>(null)
         private set
 
+    /** True while a search/filter is applied in the open folder and not yet cleared (keeps Clear shown). */
+    var isSearchActive by mutableStateOf(false)
+        private set
+
     var selectedFolder by mutableStateOf<FolderItem?>(null)
 
     var prompt by mutableStateOf(TextFieldValue(""))
@@ -148,6 +152,9 @@ abstract class FoldersViewModel(
 
     fun applyFilters(scrollToTop: Boolean = false) {
         val folder = selectedFolder ?: return
+        // Recompute active-search state from the current query/filters each time filters are applied
+        // (so clearing/loading resets it, and an actual search sets it).
+        isSearchActive = prompt.text.isNotBlank() || fromDate != null || toDate != null
         var firstEmission = scrollToTop  // local flag: only scroll on first emit of this job
         imagesCollectionJob?.cancel()
         imagesCollectionJob = viewModelScope.launch {
@@ -192,6 +199,7 @@ abstract class FoldersViewModel(
         imagesCollectionJob?.cancel()
         images = emptyList()
         relevantCount = null
+        isSearchActive = false
         selectedFolder = null
         prompt = TextFieldValue("")
         fromDate = null

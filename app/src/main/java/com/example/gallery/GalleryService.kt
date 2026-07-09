@@ -3,7 +3,6 @@ package com.example.gallery
 import android.app.PendingIntent
 import android.content.ContentUris
 import android.content.Context
-import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
@@ -17,19 +16,21 @@ import androidx.work.WorkManager
 import com.example.gallery.db.AppDatabase
 import com.example.gallery.db.FaceClusteringWorker
 import com.example.gallery.db.GalleryIndexerWorker
+import com.example.gallery.db.entities.ArabicOcrDoneEntity
 import com.example.gallery.db.entities.CategoryEntity
 import com.example.gallery.db.entities.FaceEntity
 import com.example.gallery.db.entities.MediaCategoryCrossRef
 import com.example.gallery.db.entities.MediaEntity
-import com.example.gallery.db.entities.PersonEntity
 import com.example.gallery.db.previews.MediaDateInfo
+import com.example.gallery.ml.face.FaceClusterer
 import com.example.gallery.ml.face.FaceDetectionProcessor
 import com.example.gallery.ml.face.FaceEncoder
-import com.example.gallery.ml.face.ChineseWhispers
 import com.example.gallery.ml.image.ClipImageEncoder
+import com.example.gallery.ml.ocr.ArabicOcrProcessor
 import com.example.gallery.ml.ocr.OcrProcessor
 import com.example.gallery.ml.text.ClipTextEncoder
 import com.example.gallery.ml.text.TextEncoderProvider
+import com.example.gallery.utils.ArabicTextNormalizer
 import com.example.gallery.utils.ImageUtils
 import com.example.gallery.utils.VideoUtils
 import com.example.gallery.utils.VectorUtils
@@ -59,7 +60,7 @@ import kotlinx.coroutines.withContext
  *  - Work scheduling & recluster triggers   (isUriDeleted, startIndexingWorkManager, forceRecluster)
  *  - Companion: shared state                 (progress, media cache, mlExecutionLock, run flags)
  *  - INDEXING                                (indexImagesBackground, processAndInsertImages, deleteImageFromDb)
- *  - FACE CLUSTERING                         (createClusters, cleanupOrphanThumbnails)
+ *  - FACE CLUSTERING                         (createClusters — delegates to FaceClusterer)
  *  - MEDIASTORE QUERIES                      (getAllDeviceMedia*, date-filter helpers, mergeMediaByDate)
  *  - AI CATEGORIES                           (createCategory)
  *  - SEARCH                                  (search, searchWithin, searchDocuments, findNamesInPrompt)
@@ -67,7 +68,7 @@ import kotlinx.coroutines.withContext
  *
  * See ARCHITECTURE.md for the end-to-end flows these methods participate in.
  */
-class GalleryService(val context: Context) {
+class GalleryService private constructor(val context: Context) {
 
     fun isUriDeleted(uri: Uri): Boolean {
         return try {
@@ -79,6 +80,9 @@ class GalleryService(val context: Context) {
     }
 
     fun startIndexingWorkManager(force: Boolean = false) {
+        // Signal any in-progress Arabic OCR pass to yield so this indexing runs first.
+        indexingRequested = true
+
         val indexRequest = OneTimeWorkRequestBuilder<GalleryIndexerWorker>()
             .setBackoffCriteria(
                 androidx.work.BackoffPolicy.LINEAR,
@@ -91,6 +95,29 @@ class GalleryService(val context: Context) {
                 "GalleryIndexing_OneTime",
                 if (force) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
                 indexRequest
+            )
+            .enqueue()
+    }
+
+    /**
+     * Ensures the Arabic OCR re-scan worker is running. No-op if it's already alive (e.g. paused and
+     * waiting); restarts it if it was killed. Used to resume the Arabic pass from the notification.
+     * Same unique work name the clustering worker enqueues, so KEEP dedupes them.
+     */
+    fun startArabicOcrWorkManager() {
+        val request = OneTimeWorkRequestBuilder<GalleryIndexerWorker>()
+            .setInputData(androidx.work.workDataOf(GalleryIndexerWorker.KEY_RE_OCR_ONLY to true))
+            .setBackoffCriteria(
+                androidx.work.BackoffPolicy.LINEAR,
+                5,
+                java.util.concurrent.TimeUnit.MINUTES
+            ).build()
+
+        WorkManager.getInstance(context)
+            .beginUniqueWork(
+                "GalleryArabicOcr_OneTime",
+                ExistingWorkPolicy.KEEP,
+                request
             )
             .enqueue()
     }
@@ -121,6 +148,17 @@ class GalleryService(val context: Context) {
     }
 
     companion object {
+        // GalleryService is a process-wide singleton: it owns/serializes ML work and shared caches,
+        // so there must only ever be one. (Its heavy dependencies — the Room DB, the text encoder —
+        // are already singletons; this makes the coordinator itself one too.)
+        @Volatile
+        private var INSTANCE: GalleryService? = null
+
+        fun getInstance(context: Context): GalleryService =
+            INSTANCE ?: synchronized(this) {
+                INSTANCE ?: GalleryService(context.applicationContext).also { INSTANCE = it }
+            }
+
         private const val TAG = "GalleryService"
         private const val CATEGORY_MATCH_THRESHOLD = 0.22f
 
@@ -137,7 +175,18 @@ class GalleryService(val context: Context) {
 
         // How many images to accumulate before committing them in one DB transaction.
         // Batching amortizes the per-commit fsync cost that dominates indexing on large libraries.
-        private const val INDEX_BATCH_SIZE = 24
+        private const val INDEX_BATCH_SIZE = 10
+
+        // Opt-in flag (default off): Arabic OCR via Tesseract is slow, so it only runs when the
+        // user enables it in settings. Kept in the shared gallery_prefs file.
+        const val PREF_ARABIC_OCR = "arabic_ocr_enabled"
+
+        // Whether the periodic full re-cluster (every FULL_RECLUSTER_THRESHOLD new faces) is allowed.
+        // Default ON — it corrects incremental drift. Read by FaceClusterer, toggled in settings.
+        const val PREF_AUTO_RECLUSTER = "auto_recluster_enabled"
+
+        // Persisted app appearance (ThemeMode.name). Absent = follow the system theme.
+        const val PREF_THEME_MODE = "theme_mode"
 
         val progress = MutableStateFlow<Float?>(null)
 
@@ -158,6 +207,13 @@ class GalleryService(val context: Context) {
         @Volatile
         var isClusteringRunning = false
 
+        // Set whenever a normal indexing pass is enqueued (app open / 6-hour trigger / etc.). The
+        // low-priority Arabic OCR pass polls this and yields — exiting and releasing mlExecutionLock —
+        // so indexing → clustering always run first. Cleared once indexing has actually run. Note:
+        // clustering does NOT check this; it's never preempted, only Arabic is.
+        @Volatile
+        var indexingRequested = false
+
         val mlExecutionLock = kotlinx.coroutines.sync.Mutex()
 
         @Volatile
@@ -177,6 +233,11 @@ class GalleryService(val context: Context) {
 
     private val initJob: Deferred<Unit>
         get() = TextEncoderProvider.ensureInitialized(context)
+
+    /** True when the user has opted into (slow) Arabic OCR. */
+    val arabicOcrEnabled: Boolean
+        get() = context.getSharedPreferences("gallery_prefs", Context.MODE_PRIVATE)
+            .getBoolean(PREF_ARABIC_OCR, false)
 
     private val ftsSupported by lazy {
         try {
@@ -233,7 +294,103 @@ class GalleryService(val context: Context) {
         }
     }
 
+    /** True when Arabic OCR is enabled and there are images it hasn't scanned yet (cheap COUNT). */
+    suspend fun hasPendingArabicOcr(): Boolean = withContext(Dispatchers.IO) {
+        arabicOcrEnabled && mediaDao.countMediaPendingArabic() > 0
+    }
+
+    /**
+     * Third pipeline step (after indexing + clustering): the incremental Arabic OCR pass.
+     *
+     * Processes exactly the media rows not yet marked in `arabic_ocr_done` — so it scans the whole
+     * library once when first enabled, then only new photos, and never re-scans an already-scanned
+     * one. For each image it runs Arabic OCR, appends it to the existing (English) text,
+     * re-normalizes, stores it, and marks it done **immediately** (per image, no batching) so a
+     * cancel/kill never re-processes it (which would otherwise duplicate its Arabic text). No-op when
+     * Arabic OCR is disabled.
+     */
+    suspend fun runArabicOcrPass(onProgress: suspend (Int, Int) -> Unit) {
+        withContext(Dispatchers.IO) {
+            if (!arabicOcrEnabled) { progress.value = null; return@withContext }
+
+            val pending = mediaDao.getMediaPendingArabic()
+            if (pending.isEmpty()) { progress.value = null; return@withContext }
+
+            var arabic: ArabicOcrProcessor? = null
+            try {
+                arabic = ArabicOcrProcessor(context)
+                val total = pending.size
+                progress.value = 0f
+                pending.forEachIndexed { index, entity ->
+                    if (!kotlinx.coroutines.currentCoroutineContext().isActive) return@withContext
+
+                    // Yield to a freshly-triggered indexing pass (Arabic is lowest priority). Return
+                    // here so the enclosing withLock releases mlExecutionLock, letting indexing →
+                    // clustering run first. Already-processed images stay marked done, and the
+                    // clustering step re-enqueues this pass afterwards, so it resumes where it left off.
+                    if (indexingRequested) {
+                        Log.d(TAG, "Arabic OCR pass yielding to a requested indexing pass")
+                        return@withContext
+                    }
+
+                    // Honor the pause button (the same flag indexing uses — they never run at the
+                    // same time, so sharing it is safe). While paused, stop advancing and wait; the
+                    // Tesseract instance is kept alive (a single model, unlike indexing's four) so
+                    // resuming is instant. Already-scanned images stay marked done, so a kill during
+                    // the pause simply resumes where we left off next run.
+                    if (GalleryIndexerWorker.isPaused) {
+                        progress.value = null
+                        while (GalleryIndexerWorker.isPaused) {
+                            if (!kotlinx.coroutines.currentCoroutineContext().isActive) return@withContext
+                            // Even while paused we must yield to indexing — a paused Arabic pass still
+                            // holds the ML lock, which would otherwise block indexing indefinitely.
+                            if (indexingRequested) {
+                                Log.d(TAG, "Paused Arabic OCR pass yielding to a requested indexing pass")
+                                return@withContext
+                            }
+                            kotlinx.coroutines.delay(1000)
+                        }
+                        progress.value = index / total.toFloat()
+                    }
+
+                    try {
+                        val bitmap = ImageUtils.getBitmapFromUri(context, entity.mediaId.toMediaUri())
+                        if (bitmap != null) {
+                            val ar = withContext(Dispatchers.Default) { arabic!!.recognizeText(bitmap) }
+                            // Update text + mark-done ATOMICALLY, so an interruption can't leave the
+                            // Arabic text appended without the "done" marker (which would append it
+                            // again next run — a double scan). Either both land or neither does.
+                            // We only mark done once we've actually processed the bitmap; a transient
+                            // load failure (bitmap == null) stays pending and is retried next pass.
+                            db.withTransaction {
+                                if (!ar.isNullOrBlank()) {
+                                    val combined = listOfNotNull(entity.ocrText?.ifBlank { null }, ar)
+                                        .joinToString("\n")
+                                    mediaDao.updateOcrText(
+                                        entity.mediaId,
+                                        ArabicTextNormalizer.normalize(combined) ?: ""
+                                    )
+                                }
+                                mediaDao.markArabicOcrDone(ArabicOcrDoneEntity(entity.mediaId))
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Arabic OCR failed for ${entity.mediaId}", e)
+                    } finally {
+                        progress.value = (index + 1) / total.toFloat()
+                        onProgress(index + 1, total)
+                    }
+                }
+            } finally {
+                progress.value = null
+                arabic?.close()
+            }
+        }
+    }
+
     private suspend fun processAndInsertImages(imagesToProcess: List<Pair<Long, Long>>, onProgress: suspend (Int, Int) -> Unit) {
+        // NOTE: regular indexing is English-only (ML Kit). Arabic OCR is a separate, later pipeline
+        // step (runArabicOcrPass) that runs only when enabled — see the index → cluster → arabic chain.
         var imageEncoder: ClipImageEncoder? = null
         var ocrProcessor: OcrProcessor? = null
         var faceDetector: FaceDetectionProcessor? = null
@@ -342,11 +499,14 @@ class GalleryService(val context: Context) {
                     if (bitmap != null) {
                         val (features, text, faces) = withContext(Dispatchers.Default) {
                             val featuresDeferred = async { imageEncoder!!.getImageFeatures(bitmap) }
-                            val textDeferred = async { ocrProcessor!!.recognizeText(bitmap) }
+                            // English-only (ML Kit) here; Arabic OCR is a separate later step.
+                            val latinDeferred = async { ocrProcessor!!.recognizeText(bitmap) }
                             val facesDeferred = async { faceDetector!!.detectFaces(bitmap) }
                             Triple(
                                 featuresDeferred.await(),
-                                textDeferred.await(),
+                                // Normalize (no-op for Latin) so stored text format stays consistent
+                                // with what the Arabic pass writes later.
+                                ArabicTextNormalizer.normalize(latinDeferred.await()),
                                 facesDeferred.await()
                             )
                         }
@@ -455,411 +615,30 @@ class GalleryService(val context: Context) {
             mediaDao.delete(entity)
         }
 
+        // 4. Drop its Arabic-OCR-done marker (ids aren't reused, so this is just cleanup).
+        mediaDao.deleteArabicOcrDone(mediaId)
+
         // The set of indexed media changed — drop the search embedding cache.
         invalidateMediaCache()
     }
 
 
     // ═══════════════════════════ FACE CLUSTERING ═══════════════════════════
-    // Groups face embeddings into people. First run = full Chinese Whispers; later runs assign
-    // new faces to the nearest existing person. Runs under mlExecutionLock so it never overlaps
-    // indexing. See §5 of ARCHITECTURE.md.
+    // Groups face embeddings into people. The actual algorithm lives in FaceClusterer; this just
+    // delegates. Runs under mlExecutionLock (held by the caller) so it never overlaps indexing.
+    // See §5 of ARCHITECTURE.md.
+
+    private val faceClusterer = FaceClusterer(context, db)
 
     /**
-     * Performs face clustering on all faces in the database.
+     * Performs face clustering on all faces in the database. Delegates to [FaceClusterer].
      *
      * - First run (no persons exist): runs full Chinese Whispers clustering.
-     * - Subsequent runs: assigns new (unassigned) faces to existing persons
-     *   via sequential centroid comparison, or creates new singleton persons.
+     * - Subsequent runs: assigns new (unassigned) faces to existing persons via nearest-neighbour
+     *   member similarity, or creates new singleton persons.
      * - After clustering, generates person thumbnails from face bounding boxes.
      */
-    suspend fun createClusters(): Boolean {
-        return withContext(Dispatchers.IO) {
-            val allFaces = faceDao.getAllFaces()
-            Log.d(TAG, "Loaded ${allFaces.size} faces for clustering")
-
-            if (allFaces.isEmpty()) {
-                Log.d(TAG, "No faces to cluster, skipping")
-                return@withContext true
-            }
-
-            val prefs = context.getSharedPreferences("gallery_prefs", Context.MODE_PRIVATE)
-            val firstRunCompleted = prefs.getBoolean("first_clustering_run_completed", false)
-            val facesSinceFull = prefs.getInt(PREF_FACES_SINCE_FULL, 0)
-            val allPersons = personDao.getAllPersons()
-            // Run a full (re)cluster on the first ever run, when there are no persons yet, or once
-            // enough new faces have accumulated that incremental drift should be corrected.
-            val shouldRunFirstRun = !firstRunCompleted || allPersons.isEmpty() ||
-                facesSinceFull >= FULL_RECLUSTER_THRESHOLD
-
-            if (shouldRunFirstRun) {
-                // ── FIRST RUN: Full Chinese Whispers on all faces ──
-                Log.d(TAG, "First run: not completed yet (or empty persons), running full Chinese Whispers from scratch")
-
-                // NOTE: we intentionally do NOT wipe persons here. The wipe-and-rebuild is
-                // performed atomically in the single transaction below, so that a crash/kill
-                // during the (potentially long) Chinese Whispers computation never leaves the
-                // People screen empty — the old clustering stays intact until the new one is
-                // ready to commit in one shot.
-                val facesToCluster = faceDao.getAllFaces()
-                if (facesToCluster.isEmpty()) {
-                    Log.d(TAG, "No faces to cluster, skipping first run")
-                    prefs.edit()
-                        .putBoolean("first_clustering_run_completed", true)
-                        .putInt(PREF_FACES_SINCE_FULL, 0)
-                        .apply()
-                    return@withContext true
-                }
-
-                val normalizedFaces = facesToCluster.map { VectorUtils.normalize(it.embedding) }
-                val clusters = ChineseWhispers.cluster(normalizedFaces)
-
-                // Preserve person identity across the re-cluster: each old person's id + name is
-                // carried to the new cluster that inherited the most of that person's faces, so
-                // user-assigned names AND favorites (which are keyed by person id) survive. Clusters
-                // that don't inherit an identity get fresh ids above the current max.
-                val carriedIdentity = computeCarriedIdentity(clusters, facesToCluster)
-                val oldNameById = allPersons.associate { it.id to it.name }
-                val maxOldId = allPersons.maxOfOrNull { it.id } ?: 0L
-
-                val personsToInsert = mutableListOf<PersonEntity>()
-                val faceUpdates = mutableListOf<Pair<Long, Long>>() // faceId to personId
-
-                var freshId = maxOldId
-
-                for ((clusterIndex, cluster) in clusters.withIndex()) {
-                    if (!kotlinx.coroutines.currentCoroutineContext().isActive) {
-                        Log.d(TAG, "First run clustering loop cancelled, aborting.")
-                        return@withContext false
-                    }
-
-                    if (cluster.isEmpty()) continue
-
-                    // Carry the old person's id + name if this cluster owns one; else a fresh id.
-                    val carriedOldId = carriedIdentity[clusterIndex]
-                    val personId: Long
-                    val personName: String
-                    if (carriedOldId != null) {
-                        personId = carriedOldId
-                        personName = oldNameById[carriedOldId] ?: "#p$carriedOldId"
-                    } else {
-                        freshId++
-                        personId = freshId
-                        personName = "#p$personId"
-                    }
-
-                    // Compute sum of normalized embeddings for this cluster
-                    val dim = facesToCluster.first().embedding.size
-                    val sum = FloatArray(dim)
-                    for (faceIdx in cluster) {
-                        val norm = normalizedFaces[faceIdx]
-                        for (d in norm.indices) sum[d] += norm[d]
-                    }
-
-                    // thumbnail creation
-                    val clusterFaces = cluster.map { facesToCluster[it] }
-                    val bestFace = clusterFaces.maxByOrNull {
-                        (it.boxRight - it.boxLeft) * (it.boxBottom - it.boxTop)
-                    } ?: continue
-
-                    val boxArea = (bestFace.boxRight - bestFace.boxLeft) * (bestFace.boxBottom - bestFace.boxTop)
-                    val bitmap = ImageUtils.getBitmapFromUri(context, bestFace.mediaId.toMediaUri())
-                    var thumbnailPath: String? = null
-                    if (bitmap != null) {
-                        try {
-                            val rect = Rect(bestFace.boxLeft, bestFace.boxTop, bestFace.boxRight, bestFace.boxBottom)
-                            val cropped = ImageUtils.cropImage(bitmap, rect)
-                            try {
-                                thumbnailPath = ImageUtils.createThumbnail(context, cropped)
-                            } finally {
-                                cropped.recycle()
-                            }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to crop or save thumbnail for face ${bestFace.faceId}", e)
-                        } finally {
-                            bitmap.recycle()
-                        }
-                    }
-
-                    personsToInsert.add(
-                        PersonEntity(
-                            id = personId,
-                            name = personName,
-                            thumbnailPath = thumbnailPath ?: "",
-                            thumbnailSize = boxArea,
-                            Embedding = sum,
-                            count = cluster.size
-                        )
-                    )
-
-                    for (faceIdx in cluster) {
-                        val face = facesToCluster[faceIdx]
-                        faceUpdates.add(face.faceId to personId)
-                    }
-                }
-
-                // Now run a single database transaction to apply all changes
-                db.withTransaction {
-                    // Double check to make sure we start clean
-                    personDao.deleteAllPersons()
-                    faceDao.clearAllPersonAssignments()
-
-                    personsToInsert.forEach { personDao.insertPerson(it) }
-                    faceUpdates.forEach { (faceId, personId) ->
-                        faceDao.updateFacePersonId(faceId, personId)
-                    }
-                }
-
-                // Set first-run flag + reset the drift counter ONLY after successful commit.
-                prefs.edit()
-                    .putBoolean("first_clustering_run_completed", true)
-                    .putInt(PREF_FACES_SINCE_FULL, 0)
-                    .apply()
-                Log.d(TAG, "Full cluster complete: ${personsToInsert.size} persons created and ${faceUpdates.size} faces assigned.")
-            } else {
-                // ── SUBSEQUENT RUNS: Incremental centroid assignment ──
-                val newFaces = allFaces.filter { it.personId == null }
-
-                if (newFaces.isEmpty()) {
-                    Log.d(TAG, "No new faces to process")
-                } else {
-                    Log.d(TAG, "Incremental run: ${newFaces.size} new faces, ${allPersons.size} existing persons")
-
-                    val personsToInsert = mutableListOf<PersonEntity>()
-                    val personUpdates = mutableListOf<PersonEntity>()
-                    val faceUpdates = mutableListOf<Pair<Long, Long>>() // faceId to personId
-
-                    // We need a local cache of person entities to update them as we iterate,
-                    // since multiple new faces might be assigned to the same person.
-                    val personCache = allPersons.associateBy { it.id }.toMutableMap()
-                    val maxId = personCache.keys.maxOrNull() ?: 0L
-                    var currentPersonCount = maxId
-
-                    // Per-person normalized member-face embeddings. New faces are matched against
-                    // these ACTUAL members (nearest-neighbour), not a single drifting centroid.
-                    // Grown in-loop so faces assigned earlier in this run are matchable by later ones.
-                    val memberEmbeddings = HashMap<Long, MutableList<FloatArray>>()
-                    for (f in allFaces) {
-                        val pid = f.personId ?: continue
-                        memberEmbeddings.getOrPut(pid) { mutableListOf() }
-                            .add(VectorUtils.normalize(f.embedding))
-                    }
-
-                    var assignedCount = 0
-                    var newPersonCount = 0
-
-                    for (face in newFaces) {
-                        if (!kotlinx.coroutines.currentCoroutineContext().isActive) {
-                            Log.d(TAG, "Incremental clustering loop cancelled, aborting.")
-                            return@withContext false
-                        }
-
-                        val normEmb = VectorUtils.normalize(face.embedding)
-                        val boxArea = (face.boxRight - face.boxLeft) * (face.boxBottom - face.boxTop)
-
-                        // Nearest-neighbour match: score each person by the MEAN of its top-3
-                        // member-face similarities to this face. Robust to a single lucky match and
-                        // to centroid drift. Uses the same face↔face cutoff as Chinese Whispers.
-                        var bestPersonId: Long? = null
-                        var bestScore = Float.NEGATIVE_INFINITY
-                        for ((pid, embs) in memberEmbeddings) {
-                            var s1 = Float.NEGATIVE_INFINITY
-                            var s2 = Float.NEGATIVE_INFINITY
-                            var s3 = Float.NEGATIVE_INFINITY
-                            for (e in embs) {
-                                val sim = VectorUtils.dotProduct(normEmb, e)
-                                when {
-                                    sim > s1 -> { s3 = s2; s2 = s1; s1 = sim }
-                                    sim > s2 -> { s3 = s2; s2 = sim }
-                                    sim > s3 -> { s3 = sim }
-                                }
-                            }
-                            val top = listOf(s1, s2, s3).filter { it.isFinite() }
-                            if (top.isEmpty()) continue
-                            val score = top.sum() / top.size
-                            if (score > bestScore) {
-                                bestScore = score
-                                bestPersonId = pid
-                            }
-                        }
-
-                        val personId: Long
-                        if (bestPersonId == null || bestScore < ChineseWhispers.EDGE_THRESHOLD) {
-                            // Create a new person
-                            currentPersonCount++
-                            personId = currentPersonCount
-
-                            val bitmap = ImageUtils.getBitmapFromUri(context, face.mediaId.toMediaUri())
-                            var thumbnailPath: String? = null
-                            if (bitmap != null) {
-                                try {
-                                    val rect = Rect(face.boxLeft, face.boxTop, face.boxRight, face.boxBottom)
-                                    val cropped = ImageUtils.cropImage(bitmap, rect)
-                                    try {
-                                        thumbnailPath = ImageUtils.createThumbnail(context, cropped)
-                                    } finally {
-                                        cropped.recycle()
-                                    }
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "Failed to create thumbnail for face ${face.faceId}", e)
-                                } finally {
-                                    bitmap.recycle()
-                                }
-                            }
-
-                            val newPerson = PersonEntity(
-                                id = personId,
-                                name = "#p$personId",
-                                thumbnailPath = thumbnailPath ?: "",
-                                thumbnailSize = boxArea,
-                                Embedding = normEmb,
-                                count = 1
-                            )
-                            personCache[personId] = newPerson
-                            memberEmbeddings[personId] = mutableListOf(normEmb)
-                            personsToInsert.add(newPerson)
-                            newPersonCount++
-                            Log.d(TAG, "Prepared new person '#p$personId' (id=$personId) for face ${face.faceId}")
-                        } else {
-                            // Assign to the matched existing person
-                            val bestMatch = personCache.getValue(bestPersonId)
-                            personId = bestMatch.id
-                            val updatedEmbedding = VectorUtils.add(bestMatch.Embedding, normEmb)
-
-                            var updatedThumbnailPath = bestMatch.thumbnailPath
-                            var updatedThumbnailSize = bestMatch.thumbnailSize
-
-                            if (boxArea > bestMatch.thumbnailSize) {
-                                val bitmap = ImageUtils.getBitmapFromUri(context, face.mediaId.toMediaUri())
-                                if (bitmap != null) {
-                                    try {
-                                        val rect = Rect(face.boxLeft, face.boxTop, face.boxRight, face.boxBottom)
-                                        val cropped = ImageUtils.cropImage(bitmap, rect)
-                                        try {
-                                            val newThumb = ImageUtils.createThumbnail(context, cropped)
-                                            ImageUtils.deleteThumbnail(bestMatch.thumbnailPath)
-                                            updatedThumbnailPath = newThumb
-                                            updatedThumbnailSize = boxArea
-                                        } finally {
-                                            cropped.recycle()
-                                        }
-                                    } catch (e: Exception) {
-                                        Log.e(TAG, "Failed to update thumbnail for person ${bestMatch.id}", e)
-                                    } finally {
-                                        bitmap.recycle()
-                                    }
-                                }
-                            }
-
-                            val updatedPerson = bestMatch.copy(
-                                Embedding = updatedEmbedding,
-                                count = bestMatch.count + 1,
-                                thumbnailPath = updatedThumbnailPath,
-                                thumbnailSize = updatedThumbnailSize
-                            )
-                            personCache[personId] = updatedPerson
-                            memberEmbeddings.getValue(personId).add(normEmb)
-
-                            personUpdates.removeAll { it.id == personId }
-                            personUpdates.add(updatedPerson)
-                            assignedCount++
-                        }
-
-                        faceUpdates.add(face.faceId to personId)
-                    }
-
-                    // Single transaction for incremental updates
-                    db.withTransaction {
-                        personsToInsert.forEach { personDao.insertPerson(it) }
-                        personUpdates.forEach { person ->
-                            personDao.updateEmbedding(person.id, person.Embedding)
-                            personDao.updatePersonCounter(person.id, person.count.toLong())
-                            personDao.updatePersonThumbnail(person.id, person.thumbnailPath, person.thumbnailSize)
-                        }
-                        faceUpdates.forEach { (faceId, personId) ->
-                            faceDao.updateFacePersonId(faceId, personId)
-                        }
-                    }
-
-                    // Track how many new faces have been assigned incrementally since the last full
-                    // cluster, so drift gets corrected by a full re-cluster once it crosses the limit.
-                    prefs.edit()
-                        .putInt(PREF_FACES_SINCE_FULL, facesSinceFull + newFaces.size)
-                        .apply()
-
-                    Log.d(TAG, "Incremental run complete: $assignedCount assigned to existing, $newPersonCount new persons created")
-                }
-            }
-
-            // Delete thumbnail files left behind by re-clustering or interrupted runs
-            // (files written to disk whose person row no longer references them).
-            cleanupOrphanThumbnails()
-            true
-        }
-    }
-
-    /**
-     * Maps a cluster index → the old personId whose identity (id + name) it should inherit, so a
-     * full re-cluster keeps user-assigned names and favorites (both keyed by person id). Each old
-     * person is inherited by the single new cluster that got the most of that person's faces;
-     * clusters that don't win any old identity are left out (the caller assigns them fresh ids).
-     *
-     * @param clusters CW output — lists of indices into [faces]
-     * @param faces    the faces that were clustered (each still carries its previous personId)
-     */
-    private fun computeCarriedIdentity(
-        clusters: List<List<Int>>,
-        faces: List<FaceEntity>
-    ): Map<Int, Long> {
-        // For each cluster, which old person contributed the most of its faces, and how many.
-        val majorityOldId = HashMap<Int, Long>()
-        val majorityCount = HashMap<Int, Int>()
-        clusters.forEachIndexed { i, cluster ->
-            val counts = HashMap<Long, Int>()
-            for (idx in cluster) {
-                val oldId = faces[idx].personId ?: continue
-                counts[oldId] = (counts[oldId] ?: 0) + 1
-            }
-            val best = counts.maxByOrNull { it.value } ?: return@forEachIndexed
-            majorityOldId[i] = best.key
-            majorityCount[i] = best.value
-        }
-
-        // Each old id is inherited by the cluster that holds the most of its faces.
-        val winningClusterForOldId = HashMap<Long, Int>()
-        majorityOldId.forEach { (clusterIdx, oldId) ->
-            val current = winningClusterForOldId[oldId]
-            if (current == null || (majorityCount[clusterIdx] ?: 0) > (majorityCount[current] ?: 0)) {
-                winningClusterForOldId[oldId] = clusterIdx
-            }
-        }
-
-        val result = HashMap<Int, Long>()
-        winningClusterForOldId.forEach { (oldId, clusterIdx) -> result[clusterIdx] = oldId }
-        return result
-    }
-
-    /**
-     * Deletes person-thumbnail image files in filesDir that are no longer referenced by any
-     * [PersonEntity]. These accumulate when clustering re-runs (old thumbnails replaced) or when
-     * a clustering pass is interrupted after writing a thumbnail but before committing its person.
-     */
-    private suspend fun cleanupOrphanThumbnails() = withContext(Dispatchers.IO) {
-        try {
-            val referenced = personDao.getAllPersons()
-                .mapNotNull { it.thumbnailPath.takeIf { path -> path.isNotEmpty() } }
-                .toSet()
-            context.filesDir
-                .listFiles { file -> file.isFile && file.name.startsWith("thumb_") && file.name.endsWith(".jpg") }
-                ?.forEach { file ->
-                    if (file.absolutePath !in referenced && file.delete()) {
-                        Log.d(TAG, "Deleted orphan thumbnail ${file.name}")
-                    }
-                }
-        } catch (e: Exception) {
-            Log.e(TAG, "Orphan thumbnail cleanup failed", e)
-        }
-    }
+    suspend fun createClusters(): Boolean = faceClusterer.createClusters()
 
     // ═══════════════════════════ MEDIASTORE QUERIES ═══════════════════════════
     // Direct reads of the device's photo/video store (no Room). Used to browse "all media" and
@@ -1257,8 +1036,12 @@ class GalleryService(val context: Context) {
     ): SearchResult {
         return withContext(Dispatchers.IO) {
             Log.d(TAG, "Is FTS supported: $ftsSupported")
+            // Normalize the query the same way stored OCR text was normalized, so Arabic matches
+            // regardless of writing variants (and Latin is unchanged).
+            val query = ArabicTextNormalizer.normalize(text) ?: text
+
             // OCR/document search is date-ordered text matching — no similarity split.
-            if (text.isBlank()) {
+            if (query.isBlank()) {
                 return@withContext SearchResult.all(
                     mergeMediaByDate(
                         imageIds = getDeviceImagesWithDateFilter(fromDate, toDate),
@@ -1269,10 +1052,14 @@ class GalleryService(val context: Context) {
                 )
             }
 
-            var results = if (ftsSupported) {
-                mediaDao.searchMediaFts(text)
+            // FTS uses the "simple" tokenizer, which doesn't index non-ASCII (Arabic) tokens, so
+            // route Arabic queries through the LIKE substring path (which matches the normalized
+            // stored text directly). Latin queries still use fast FTS when available.
+            val hasArabic = ArabicTextNormalizer.containsArabic(query)
+            var results = if (ftsSupported && !hasArabic) {
+                mediaDao.searchMediaFts(query)
             } else {
-                mediaDao.searchMediaSimple(text)
+                mediaDao.searchMediaSimple(query)
             }
 
             // Filter by dates

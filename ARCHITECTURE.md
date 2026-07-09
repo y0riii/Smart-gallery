@@ -148,7 +148,20 @@ paused, the loop flushes pending writes, releases the ML models, and waits.
   its horizontal flip for a more robust embedding.
 - **`FaceDetectionProcessor`** — ML Kit face detection + landmark-based alignment (Umeyama
   similarity transform) to a canonical 112×112 pose before encoding.
-- **`OcrProcessor`** — ML Kit Latin text recognition.
+- **`OcrProcessor`** — ML Kit Latin text recognition, run per image during **regular indexing**
+  (English only). **`ArabicOcrProcessor`** — Tesseract (needs `assets/tessdata/ara.traineddata`;
+  disables itself gracefully if absent). Arabic OCR is **opt-in** (Settings toggle, off by default —
+  it's slow) and runs as a **separate, later pipeline step**, never during indexing.
+- **Pipeline order is strict: indexing → clustering → Arabic OCR.** The indexer enqueues clustering
+  on success; clustering, on success, enqueues the Arabic OCR worker *only if enabled and there's
+  pending work* (`hasPendingArabicOcr`). The Arabic step (`runArabicOcrPass`, reusing
+  `GalleryIndexerWorker` with `KEY_RE_OCR_ONLY`) is **incremental**: it scans only images newer than
+  a persisted high-water-mark id (advanced per image, so a kill never re-scans / duplicates), which
+  means it processes the whole library exactly once when first enabled, then only new photos.
+- OCR text (English at index time, Arabic appended by the pass) is run through `ArabicTextNormalizer`
+  (collapses Arabic to its 28 base letters — strips tashkeel/tatweel, unifies
+  alef/hamza/teh-marbuta/alef-maksura) before storage; the same normalizer is applied to the OCR
+  search query. Arabic queries use the `LIKE` path (FTS's `simple` tokenizer doesn't index non-ASCII).
 - **`OrtAcceleration`** — **per-model, once-per-install benchmark** that decides CPU vs NNAPI. On
   first use of each model it times a few dummy inferences on both providers, keeps the faster one,
   and caches the decision in SharedPreferences (`ort_acceleration_prefs`). This exists because

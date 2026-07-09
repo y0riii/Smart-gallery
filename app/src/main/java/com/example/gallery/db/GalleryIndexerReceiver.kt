@@ -27,10 +27,16 @@ class GalleryIndexerReceiver : BroadcastReceiver() {
             "com.example.gallery.ACTION_START_INDEXING" -> {
                 // 1. Instantly swap notification to active state with pause button
                 showResumedNotification(context)
-                // 2. Clear the flag so the worker loop resumes on next poll (~100ms)
+                // 2. Clear the flag so the worker loop resumes on next poll (~1s)
                 GalleryIndexerWorker.isPaused = false
-                // 3. Ensure the worker is running (no-op if already alive & waiting)
-                GalleryService(context).startIndexingWorkManager(force = false)
+                // 3. Ensure the right worker is running (no-op if already alive & waiting; restarts
+                //    it if it had been killed). Route to the Arabic pass when that's what was paused.
+                val service = GalleryService.getInstance(context)
+                if (GalleryIndexerWorker.isArabicPass) {
+                    service.startArabicOcrWorkManager()
+                } else {
+                    service.startIndexingWorkManager(force = false)
+                }
             }
         }
     }
@@ -60,7 +66,10 @@ class GalleryIndexerReceiver : BroadcastReceiver() {
 
         val notification = Notification.Builder(context, GalleryIndexerWorker.CHANNEL_ID)
             .setContentTitle("Smart Gallery")
-            .setContentText("Resuming photo indexing…")
+            .setContentText(
+                if (GalleryIndexerWorker.isArabicPass) "Resuming Arabic text scan…"
+                else "Resuming photo indexing…"
+            )
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
             .addAction(pauseAction)

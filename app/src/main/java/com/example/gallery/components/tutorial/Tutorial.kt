@@ -53,6 +53,7 @@ fun tutorialContentFor(tab: TutorialTab): TutorialContent = when (tab) {
             "Flip the toggle to Document search to find text inside pictures — receipts, notes, screenshots.",
             "Type \"@\" then a name to find photos of a specific person.",
             "Tap the date field to narrow results to a time range.",
+            "Tap the gear icon (top-right) for Settings — switch between Light, Dark, or System theme, toggle automatic face re-grouping, and turn on Arabic text search.",
             "Long-press a photo to select or drag to select several, then share, delete, or add them to a collection."
         )
     )

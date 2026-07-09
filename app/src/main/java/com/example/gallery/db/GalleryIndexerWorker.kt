@@ -31,11 +31,21 @@ class GalleryIndexerWorker(
         const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID = "gallery_indexing_channel"
 
+        // Input-data flag: when true this worker re-runs OCR over the whole library instead of the
+        // normal device-vs-DB sync (used when the user enables Arabic OCR).
+        const val KEY_RE_OCR_ONLY = "reOcrOnly"
+
         // Minimum gap between progress/notification updates during indexing (see doWork).
         private const val PROGRESS_UPDATE_MS = 500L
 
         @Volatile
         var isPaused = false
+
+        // True while this worker is running the Arabic OCR re-scan (reOcrOnly) rather than normal
+        // indexing. Drives the wording of every notification (progress / paused / resumed). The two
+        // passes never run at once, so a single process-wide flag is enough.
+        @Volatile
+        var isArabicPass = false
 
         /**
          * Immediately post the "paused" notification, reusing the same
@@ -57,7 +67,9 @@ class GalleryIndexerWorker(
 
             val notification = Notification.Builder(context, CHANNEL_ID)
                 .setContentTitle("Smart Gallery")
-                .setContentText("Photo indexing is paused")
+                .setContentText(
+                    if (isArabicPass) "Arabic text scan is paused" else "Photo indexing is paused"
+                )
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setOngoing(true)
                 .addAction(playAction)
@@ -89,6 +101,10 @@ class GalleryIndexerWorker(
     }
 
     override suspend fun doWork(): Result {
+        val reOcrOnly = inputData.getBoolean(KEY_RE_OCR_ONLY, false)
+        // Set before the first notification so even "Preparing…" uses the right wording.
+        isArabicPass = reOcrOnly
+
         try {
             setForeground(createForegroundInfo(0, 0))
         } catch (e: Exception) {
@@ -99,7 +115,7 @@ class GalleryIndexerWorker(
             .getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         return try {
-            val service = GalleryService(applicationContext)
+            val service = GalleryService.getInstance(applicationContext)
             // Indexing shares the ML lock with clustering: if a clustering pass is already running,
             // this simply waits for it to finish, then runs.
             GalleryService.mlExecutionLock.withLock {
@@ -109,54 +125,64 @@ class GalleryIndexerWorker(
                 // image is a real cost on large libraries. Update at most every PROGRESS_UPDATE_MS,
                 // but always emit the very first and very last item so the bar starts and completes.
                 var lastUpdateMs = 0L
-                try {
-                    service.indexImagesBackground { processed, total ->
-                        // ── never overwrite the "paused" notification ──
-                        if (!isPaused) {
-                            val now = System.currentTimeMillis()
-                            val isBoundary = processed == 1 || processed >= total
-                            if (isBoundary || now - lastUpdateMs >= PROGRESS_UPDATE_MS) {
-                                lastUpdateMs = now
-                                withContext(Dispatchers.Main) {
-                                    setProgress(
-                                        workDataOf(
-                                            "processed" to processed,
-                                            "total" to total
-                                        )
-                                    )
-                                }
-                                notificationManager.notify(
-                                    NOTIFICATION_ID,
-                                    createForegroundInfo(processed, total).notification
-                                )
+                val onProgress: suspend (Int, Int) -> Unit = { processed, total ->
+                    // ── never overwrite the "paused" notification ──
+                    if (!isPaused) {
+                        val now = System.currentTimeMillis()
+                        val isBoundary = processed == 1 || processed >= total
+                        if (isBoundary || now - lastUpdateMs >= PROGRESS_UPDATE_MS) {
+                            lastUpdateMs = now
+                            withContext(Dispatchers.Main) {
+                                setProgress(workDataOf("processed" to processed, "total" to total))
                             }
+                            notificationManager.notify(
+                                NOTIFICATION_ID,
+                                createForegroundInfo(processed, total).notification
+                            )
                         }
+                    }
+                }
+                try {
+                    if (reOcrOnly) {
+                        service.runArabicOcrPass(onProgress)
+                    } else {
+                        service.indexImagesBackground(onProgress)
+                        // Indexing has run; the priority request is satisfied, so a subsequent Arabic
+                        // pass (enqueued after clustering) won't immediately yield.
+                        GalleryService.indexingRequested = false
                     }
                 } finally {
                     GalleryService.isIndexingRunning = false
                 }
             }
 
-            // Indexing completed successfully — enqueue face clustering
-            val clusterRequest = OneTimeWorkRequestBuilder<FaceClusteringWorker>()
-                .setBackoffCriteria(
-                    androidx.work.BackoffPolicy.LINEAR,
-                    5,
-                    java.util.concurrent.TimeUnit.MINUTES
-                ).build()
+            // A normal indexing pass then triggers face clustering; an OCR-only re-scan doesn't
+            // change faces, so it skips that.
+            if (!reOcrOnly) {
+                val clusterRequest = OneTimeWorkRequestBuilder<FaceClusteringWorker>()
+                    .setBackoffCriteria(
+                        androidx.work.BackoffPolicy.LINEAR,
+                        5,
+                        java.util.concurrent.TimeUnit.MINUTES
+                    ).build()
 
-            WorkManager.getInstance(applicationContext)
-                .beginUniqueWork(
-                    "GalleryClustering_OneTime",
-                    ExistingWorkPolicy.KEEP,
-                    clusterRequest
-                )
-                .enqueue()
+                WorkManager.getInstance(applicationContext)
+                    .beginUniqueWork(
+                        "GalleryClustering_OneTime",
+                        ExistingWorkPolicy.KEEP,
+                        clusterRequest
+                    )
+                    .enqueue()
+            }
 
             Result.success()
         } catch (e: Throwable) {
             Log.e("GalleryIndexerWorker", "Indexing failed, will retry", e)
             Result.retry()
+        } finally {
+            // Clear the wording flag once the pass is fully done (a mid-pause worker is still inside
+            // the try above, so this only runs when work actually completes/cancels).
+            isArabicPass = false
         }
     }
 
@@ -177,10 +203,11 @@ class GalleryIndexerWorker(
         val pauseIcon = Icon.createWithResource(applicationContext, R.drawable.ic_notif_pause)
         val pauseAction = Notification.Action.Builder(pauseIcon, "", pausePendingIntent).build()
 
-        val contentText = if (total == 0) {
-            "Preparing photo indexing…"
-        } else {
-            "Indexed $processed of $total photos"
+        val contentText = when {
+            total == 0 && isArabicPass -> "Preparing Arabic text scan…"
+            total == 0 -> "Preparing photo indexing…"
+            isArabicPass -> "Scanned $processed of $total for Arabic text"
+            else -> "Indexed $processed of $total photos"
         }
 
         val notification = Notification.Builder(applicationContext, CHANNEL_ID)

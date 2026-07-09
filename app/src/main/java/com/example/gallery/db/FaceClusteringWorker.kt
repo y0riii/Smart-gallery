@@ -45,7 +45,7 @@ class FaceClusteringWorker(
         }
 
         return try {
-            val galleryService = GalleryService(applicationContext)
+            val galleryService = GalleryService.getInstance(applicationContext)
             var didRun = false
             GalleryService.mlExecutionLock.withLock {
                 GalleryService.isClusteringRunning = true
@@ -57,6 +57,25 @@ class FaceClusteringWorker(
             }
             nm.cancel(NOTIFICATION_ID)
             if (didRun) {
+                // Third pipeline step: run the Arabic OCR pass, but only if it's enabled AND there
+                // are actually images it hasn't scanned yet (avoids a no-op worker + notification
+                // flash on every run). This keeps the order strictly index → cluster → arabic.
+                if (galleryService.hasPendingArabicOcr()) {
+                    val arabicRequest = androidx.work.OneTimeWorkRequestBuilder<GalleryIndexerWorker>()
+                        .setInputData(
+                            androidx.work.workDataOf(GalleryIndexerWorker.KEY_RE_OCR_ONLY to true)
+                        )
+                        .setBackoffCriteria(
+                            androidx.work.BackoffPolicy.LINEAR, 5, java.util.concurrent.TimeUnit.MINUTES
+                        ).build()
+                    androidx.work.WorkManager.getInstance(applicationContext)
+                        .beginUniqueWork(
+                            "GalleryArabicOcr_OneTime",
+                            androidx.work.ExistingWorkPolicy.KEEP,
+                            arabicRequest
+                        )
+                        .enqueue()
+                }
                 Result.success()
             } else {
                 // Another clustering run is active — retry later.

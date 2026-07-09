@@ -15,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.Locale
 
 object VideoUtils {
 
@@ -154,6 +155,50 @@ fun Long.toVideoUri(): Uri =
  */
 fun Uri.isVideoUri(): Boolean =
     toString().startsWith(MediaStore.Video.Media.EXTERNAL_CONTENT_URI.toString())
+
+/**
+ * Composable that loads a video's duration (in milliseconds) asynchronously from MediaStore.
+ * Returns null until loaded, or if the URI isn't a queryable video. Cheap single-column query.
+ */
+@Composable
+fun rememberVideoDuration(uri: Uri): Long? {
+    val context = LocalContext.current
+    var durationMs by remember(uri) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(uri) {
+        durationMs = withContext(Dispatchers.IO) {
+            try {
+                context.contentResolver.query(
+                    uri,
+                    arrayOf(MediaStore.Video.Media.DURATION),
+                    null, null, null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val idx = cursor.getColumnIndex(MediaStore.Video.Media.DURATION)
+                        if (idx >= 0 && !cursor.isNull(idx)) cursor.getLong(idx) else null
+                    } else null
+                }
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+    return durationMs
+}
+
+/**
+ * Formats a duration in milliseconds as "m:ss" (or "h:mm:ss" for videos an hour or longer).
+ */
+fun formatVideoDuration(ms: Long): String {
+    val totalSeconds = ms / 1000
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) {
+        String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(Locale.US, "%d:%02d", minutes, seconds)
+    }
+}
 
 /**
  * Composable that loads a video thumbnail Bitmap asynchronously.

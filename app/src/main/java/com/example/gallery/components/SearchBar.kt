@@ -69,6 +69,9 @@ fun SearchBar(
     onSearch: () -> Unit,
     onClear: () -> Unit,
     allNames: List<String>,
+    // True while a search/filter is applied but not yet cleared — keeps the Clear button available
+    // even if the user has emptied the text field.
+    searchActive: Boolean = false,
     showDates: Boolean = true,
     // Feature 5: optional map of person name → thumbnail URI, forwarded to SearchInputField
     // for showing circular avatars in the @mention dropdown. Defaults to empty (no avatars).
@@ -121,7 +124,7 @@ fun SearchBar(
             )
             Spacer(modifier = Modifier.width(8.dp))
 
-            if (prompt.text.isNotEmpty() || fromDate != null || toDate != null) {
+            if (prompt.text.isNotEmpty() || fromDate != null || toDate != null || searchActive) {
                 TextButton(onClick = onClear) {
                     Text("Clear")
                 }

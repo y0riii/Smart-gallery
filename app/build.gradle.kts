@@ -82,6 +82,7 @@ dependencies {
     ksp(libs.androidx.room.compiler)
 
     implementation(libs.text.recognition)
+    implementation(libs.tesseract4android)
     implementation(libs.face.detection)
     implementation(libs.androidx.work.runtime.ktx)
 

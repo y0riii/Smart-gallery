@@ -1,11 +1,9 @@
 package com.example.gallery.db
 
 import android.content.Context
-import androidx.work.ExistingWorkPolicy
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
 import androidx.work.Worker
 import androidx.work.WorkerParameters
+import com.example.gallery.GalleryService
 
 class GalleryPeriodicTriggerWorker(
     appContext: Context,
@@ -13,21 +11,10 @@ class GalleryPeriodicTriggerWorker(
 ) : Worker(appContext, workerParams) {
 
     override fun doWork(): Result {
-        val indexRequest = OneTimeWorkRequestBuilder<GalleryIndexerWorker>()
-            .setBackoffCriteria(
-                androidx.work.BackoffPolicy.LINEAR,
-                5,
-                java.util.concurrent.TimeUnit.MINUTES
-            ).build()
-            
-        WorkManager.getInstance(applicationContext)
-            .beginUniqueWork(
-                "GalleryIndexing_OneTime",
-                ExistingWorkPolicy.KEEP,
-                indexRequest
-            )
-            .enqueue()
-            
+        // Route through the service so the priority flag (indexingRequested) is raised too — this
+        // makes any in-progress Arabic OCR pass yield so the 6-hour indexing runs first, exactly
+        // like an app-open trigger. KEEP semantics (force = false) so it won't stomp a running pass.
+        GalleryService.getInstance(applicationContext).startIndexingWorkManager(force = false)
         return Result.success()
     }
 }

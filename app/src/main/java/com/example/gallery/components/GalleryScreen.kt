@@ -14,6 +14,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.SearchOff
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomAppBar
@@ -79,6 +81,8 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
 
     // Feature 1: confirmation dialog state before bulk delete
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    // Settings dialog (Arabic OCR toggle, etc.)
+    var showSettings by remember { mutableStateOf(false) }
 
     val intentSenderLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -113,13 +117,21 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
                 viewModel.isSelecting && columnCount < GALLERY_PREVIEW_HIDE_THRESHOLD
 
             Column(modifier = Modifier.fillMaxSize()) {
-                Text(
-                    text = "Gallery",
-                    style = MaterialTheme.typography.titleLarge,
+                Row(
                     modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .padding(top = 16.dp, bottom = 4.dp)
-                )
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 4.dp, top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Gallery",
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { showSettings = true }) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    }
+                }
                 SearchBar(
                     prompt = viewModel.prompt,
                     onPromptChange = { viewModel.prompt = it },
@@ -137,6 +149,7 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
                         viewModel.clearSearch()
                     },
                     allNames = allNames,
+                    searchActive = viewModel.isSearchActive,
                     // Feature 5: pass thumbnails so avatars appear in the @mention dropdown
                     nameThumbnails = nameThumbnails
                 )
@@ -154,8 +167,12 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
 
                 // Grid, or a premium empty state when there's nothing to show. A search/date
                 // filter being active changes the empty message from "no photos" to "no matches".
-                val isFilterActive = viewModel.prompt.text.isNotBlank() ||
-                    viewModel.fromDate != null || viewModel.toDate != null
+                //
+                // Keyed off the committed-search flag (isSearchActive), NOT the live input fields:
+                // the displayed results and their formatting must stay put when the user empties the
+                // search box — only pressing Clear resets the view. Deriving this from prompt.text
+                // would make the grid re-group by date the moment the last character is deleted.
+                val isFilterActive = viewModel.isSearchActive
 
                 // Result count for an active search. For a scored (semantic) search we report the
                 // number of RELEVANT matches (above the threshold); otherwise the total.
@@ -310,6 +327,19 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
                     Text("Cancel")
                 }
             }
+        )
+    }
+
+    // Settings dialog (Arabic OCR opt-in)
+    if (showSettings) {
+        SettingsDialog(
+            themeMode = viewModel.themeMode,
+            onThemeModeChange = { viewModel.updateThemeMode(it) },
+            autoReclusterEnabled = viewModel.autoReclusterEnabled,
+            onAutoReclusterChange = { viewModel.updateAutoReclusterEnabled(it) },
+            arabicOcrEnabled = viewModel.arabicOcrEnabled,
+            onArabicOcrChange = { viewModel.updateArabicOcrEnabled(it) },
+            onDismiss = { showSettings = false }
         )
     }
 

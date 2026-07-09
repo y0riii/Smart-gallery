@@ -5,6 +5,9 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
+import com.example.gallery.db.entities.ArabicOcrDoneEntity
 import com.example.gallery.db.daos.CategoryDao
 import com.example.gallery.db.daos.FaceDao
 import com.example.gallery.db.daos.MediaDao
@@ -29,9 +32,10 @@ import com.example.gallery.db.entities.CollectionMediaCrossRef
         MediaCategoryCrossRef::class,
         FaceEntity::class,
         CollectionEntity::class,
-        CollectionMediaCrossRef::class
+        CollectionMediaCrossRef::class,
+        ArabicOcrDoneEntity::class
     ],
-    version = 21,
+    version = 22,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -47,6 +51,17 @@ abstract class AppDatabase : RoomDatabase() {
         private var INSTANCE: AppDatabase? = null
         private const val DB_NAME = "media_ocr_db"
 
+        // v21 → v22: add the arabic_ocr_done marker table (additive; nothing else changes, so
+        // existing media/persons/collections/FTS are preserved).
+        private val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `arabic_ocr_done` " +
+                        "(`mediaId` INTEGER NOT NULL, PRIMARY KEY(`mediaId`))"
+                )
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: buildDatabase(context.applicationContext).also { INSTANCE = it }
@@ -58,6 +73,7 @@ abstract class AppDatabase : RoomDatabase() {
                 AppDatabase::class.java,
                 DB_NAME
             )
+                .addMigrations(MIGRATION_21_22)
                 .fallbackToDestructiveMigration(false)
                 .build()
         }

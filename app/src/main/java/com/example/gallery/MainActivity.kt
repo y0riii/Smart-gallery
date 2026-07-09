@@ -69,8 +69,10 @@ import com.example.gallery.db.AppDatabase
 import com.example.gallery.folders.AlbumsFolderRepository
 import com.example.gallery.folders.CategoryFolderRepository
 import com.example.gallery.folders.PersonFolderRepository
+import androidx.compose.foundation.isSystemInDarkTheme
 import com.example.gallery.ui.theme.AppConfig
 import com.example.gallery.ui.theme.GalleryTheme
+import com.example.gallery.ui.theme.ThemeMode
 import com.example.gallery.viewModels.AlbumsViewModel
 import com.example.gallery.viewModels.CategoryViewModel
 import com.example.gallery.viewModels.GalleryViewModel
@@ -101,7 +103,7 @@ class MainActivity : ComponentActivity() {
 
     private val db by lazy { AppDatabase.getDatabase(applicationContext) }
 
-    private val galleryService by lazy { GalleryService(applicationContext) }
+    private val galleryService by lazy { GalleryService.getInstance(applicationContext) }
 
     private val galleryViewModel: GalleryViewModel by viewModels {
         GalleryViewModelFactory(db.personDao(), galleryService)
@@ -140,7 +142,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         requestBatteryOptimizationExemptionOnce()
         setContent {
-            GalleryTheme {
+            // Appearance: SYSTEM follows the OS setting; LIGHT/DARK pin the scheme. Reading the
+            // ViewModel's themeMode here means changing it in Settings recomposes the whole app live.
+            val darkTheme = when (galleryViewModel.themeMode) {
+                ThemeMode.SYSTEM -> isSystemInDarkTheme()
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+            }
+            GalleryTheme(darkTheme = darkTheme) {
                 GalleryApp(galleryViewModel, peopleViewModel, categoryViewModel, albumsViewModel, collectionsViewModel, galleryService)
             }
         }
