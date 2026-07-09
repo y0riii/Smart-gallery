@@ -324,6 +324,14 @@ class GalleryService private constructor(val context: Context) {
                 pending.forEachIndexed { index, entity ->
                     if (!kotlinx.coroutines.currentCoroutineContext().isActive) return@withContext
 
+                    // User turned Arabic OCR off mid-run — shut the pass down (checked live from prefs
+                    // each image). Already-scanned images keep their markers; clustering won't
+                    // re-enqueue this pass while the setting is off (hasPendingArabicOcr sees it too).
+                    if (!arabicOcrEnabled) {
+                        Log.d(TAG, "Arabic OCR disabled mid-run — stopping the pass")
+                        return@withContext
+                    }
+
                     // Yield to a freshly-triggered indexing pass (Arabic is lowest priority). Return
                     // here so the enclosing withLock releases mlExecutionLock, letting indexing →
                     // clustering run first. Already-processed images stay marked done, and the
@@ -348,15 +356,26 @@ class GalleryService private constructor(val context: Context) {
                                 Log.d(TAG, "Paused Arabic OCR pass yielding to a requested indexing pass")
                                 return@withContext
                             }
+                            // Turned off while paused — shut down instead of holding the lock forever.
+                            if (!arabicOcrEnabled) {
+                                Log.d(TAG, "Arabic OCR disabled while paused — stopping the pass")
+                                return@withContext
+                            }
                             kotlinx.coroutines.delay(1000)
                         }
                         progress.value = index / total.toFloat()
                     }
 
                     try {
-                        val bitmap = ImageUtils.getBitmapFromUri(context, entity.mediaId.toMediaUri())
+                        // High-resolution decode dedicated to OCR (see ImageUtils.getBitmapForOcr).
+                        // It's a large bitmap, so recycle it as soon as recognition is done.
+                        val bitmap = ImageUtils.getBitmapForOcr(context, entity.mediaId.toMediaUri())
                         if (bitmap != null) {
-                            val ar = withContext(Dispatchers.Default) { arabic!!.recognizeText(bitmap) }
+                            val ar = try {
+                                withContext(Dispatchers.Default) { arabic!!.recognizeText(bitmap) }
+                            } finally {
+                                bitmap.recycle()
+                            }
                             // Update text + mark-done ATOMICALLY, so an interruption can't leave the
                             // Arabic text appended without the "done" marker (which would append it
                             // again next run — a double scan). Either both land or neither does.

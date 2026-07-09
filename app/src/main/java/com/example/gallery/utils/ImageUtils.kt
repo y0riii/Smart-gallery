@@ -74,6 +74,38 @@ object ImageUtils {
         }
     }
 
+    // Long-edge target for the OCR decode. Much larger than the 1024 used above so text glyphs stay
+    // tall enough for Tesseract (~30px / 300dpi-equivalent). RGB_565 halves the memory of the bigger
+    // bitmap; OCR desaturates to grayscale anyway, so colour depth is irrelevant.
+    private const val OCR_MAX_DIMENSION = 4096
+
+    /**
+     * Decodes a bitmap tuned for OCR accuracy: near-native resolution (so small/scene text is
+     * legible) capped at [OCR_MAX_DIMENSION] on the long edge, in RGB_565 to keep memory in check.
+     * Used only by the (opt-in, one-image-at-a-time) Arabic OCR pass, not by indexing/CLIP.
+     */
+    fun getBitmapForOcr(context: Context, uri: Uri, maxDimension: Int = OCR_MAX_DIMENSION): Bitmap? {
+        return try {
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, options)
+            }
+            // Power-of-two subsample that keeps the long edge >= maxDimension where possible.
+            var sample = 1
+            val longEdge = max(options.outWidth, options.outHeight)
+            while (longEdge / (sample * 2) >= maxDimension) sample *= 2
+            options.inSampleSize = sample
+            options.inJustDecodeBounds = false
+            options.inPreferredConfig = Bitmap.Config.RGB_565
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, options)
+            }
+        } catch (e: Exception) {
+            Log.e("ImageUtils", "getBitmapForOcr failed", e)
+            null
+        }
+    }
+
     fun scaleRect(rect: Rect, scale: Float): Rect {
         val centerX = rect.exactCenterX()
         val centerY = rect.exactCenterY()

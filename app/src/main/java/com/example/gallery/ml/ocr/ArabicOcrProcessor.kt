@@ -35,6 +35,11 @@ class ArabicOcrProcessor(context: Context) : AutoCloseable {
             copyTrainedDataIfNeeded(context, baseDir)
             val api = TessBaseAPI()
             if (api.init(baseDir.absolutePath, LANG)) {
+                // Sparse-text segmentation finds scattered text in photos (signs, labels, captions)
+                // far better than Tesseract's default full-page assumption; the DPI hint stops its
+                // internal scale guesswork now that we feed it a high-resolution image.
+                api.setPageSegMode(TessBaseAPI.PageSegMode.PSM_SPARSE_TEXT)
+                api.setVariable("user_defined_dpi", "300")
                 tess = api
             } else {
                 api.recycle()
@@ -71,7 +76,10 @@ class ArabicOcrProcessor(context: Context) : AutoCloseable {
         }
     }
 
-    /** Desaturated copy of [src] (Tesseract's internal thresholding works better on grayscale). */
+    /** Desaturated copy of [src] (Tesseract's internal thresholding works better on grayscale).
+     *  MUST be ARGB_8888 — tesseract4android's setImage reads 32-bit bitmaps; feeding it RGB_565
+     *  makes it see a blank image and return no text. (The source bitmap may still be RGB_565; only
+     *  this copy, which is what setImage receives, has to be ARGB_8888.) */
     private fun toGrayscale(src: Bitmap): Bitmap {
         val out = createBitmap(src.width, src.height)
         val paint = Paint().apply {

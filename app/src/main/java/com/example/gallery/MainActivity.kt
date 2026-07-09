@@ -51,6 +51,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -259,10 +260,17 @@ fun GalleryApp(
     val tutorialContext = LocalContext.current
     val tutorialPrefs = remember { TutorialPrefs(tutorialContext) }
     var activeTutorial by remember { mutableStateOf<TutorialTab?>(null) }
-    LaunchedEffect(hasPermission, currentTab) {
+    LaunchedEffect(hasPermission) {
         if (!hasPermission) return@LaunchedEffect
-        val tab = TutorialTab.entries.getOrNull(currentTab) ?: return@LaunchedEffect
-        if (!tutorialPrefs.hasSeen(tab)) activeTutorial = tab
+        // Trigger a tab's tutorial only once the pager has SETTLED on it. Keying off currentPage
+        // (as before) fires for the intermediate pages that briefly become "current" while swiping
+        // or animating between tabs, so passing through an unseen tab would pop its tutorial by
+        // mistake. settledPage only advances when scrolling fully stops, so we land on the real tab.
+        snapshotFlow { pagerState.settledPage }
+            .collect { page ->
+                val tab = TutorialTab.entries.getOrNull(page) ?: return@collect
+                if (!tutorialPrefs.hasSeen(tab)) activeTutorial = tab
+            }
     }
 
     val permissionsToRequest = remember { getPermissionsToRequest() }
