@@ -49,6 +49,22 @@ class VectorUtils {
             return result
         }
 
+        /**
+         * Mean of several (normalized) embeddings, re-normalized to unit length — used to collapse a
+         * video's per-keyframe CLIP embeddings into one searchable vector. Returns an empty array for
+         * an empty input.
+         */
+        fun meanPool(vectors: List<FloatArray>): FloatArray {
+            if (vectors.isEmpty()) return FloatArray(0)
+            val dim = vectors[0].size
+            val sum = FloatArray(dim)
+            for (v in vectors) {
+                for (d in 0 until dim) sum[d] += v[d]
+            }
+            for (d in 0 until dim) sum[d] /= vectors.size
+            return normalize(sum)
+        }
+
         fun euclideanDistance(vecA: FloatArray, vecB: FloatArray): Float {
             var sum = 0.0f
             for (i in vecA.indices) {

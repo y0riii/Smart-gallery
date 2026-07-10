@@ -22,6 +22,7 @@ import com.example.gallery.db.entities.FaceEntity
 import com.example.gallery.db.entities.MediaCategoryCrossRef
 import com.example.gallery.db.entities.MediaEntity
 import com.example.gallery.db.previews.MediaDateInfo
+import com.example.gallery.db.previews.MediaOcrRef
 import com.example.gallery.ml.face.FaceClusterer
 import com.example.gallery.ml.face.FaceDetectionProcessor
 import com.example.gallery.ml.face.FaceEncoder
@@ -34,12 +35,16 @@ import com.example.gallery.utils.ArabicTextNormalizer
 import com.example.gallery.utils.ImageUtils
 import com.example.gallery.utils.VideoUtils
 import com.example.gallery.utils.VectorUtils
+import com.example.gallery.utils.isVideoUri
 import com.example.gallery.utils.toMediaUri
 import com.example.gallery.utils.toVideoUri
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
+import java.util.concurrent.Executors
 import kotlinx.coroutines.awaitAll
 import android.database.ContentObserver
 import kotlinx.coroutines.channels.awaitClose
@@ -218,6 +223,22 @@ class GalleryService private constructor(val context: Context) {
     }
 
     val db = AppDatabase.getDatabase(context)
+
+    // Heavy indexing ML (CLIP/OCR/face inference) runs here instead of Dispatchers.Default so its
+    // threads are BACKGROUND priority: the foreground UI thread and Coil's thumbnail decoding always
+    // win the CPU, so grid thumbnails keep loading smoothly while indexing runs (they were stalling
+    // because CPU-bound inference on normal-priority threads starved the decoder). One fewer thread
+    // than cores also leaves headroom. Created lazily so no threads exist until indexing runs.
+    private val mlWorkDispatcher: CoroutineDispatcher by lazy {
+        val threads = (Runtime.getRuntime().availableProcessors() - 1).coerceAtLeast(1)
+        Executors.newFixedThreadPool(threads) { runnable ->
+            Thread({
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+                runnable.run()
+            }, "ml-index")
+        }.asCoroutineDispatcher()
+    }
+
     private val mediaDao = db.mediaDao()
     private val personDao = db.personDao()
     private val categoryDao = db.categoryDao()
@@ -264,8 +285,10 @@ class GalleryService private constructor(val context: Context) {
             val deviceImages = ImageUtils.scanMediaStore(context)
             val deviceImageIds = deviceImages.map { it.first }.toSet()
 
-            // 2. Fetch IDs currently in the database
-            val dbImageIds = mediaDao.getAllMediaIds().toSet()
+            // 2. Fetch IMAGE ids currently in the database (isVideo=0). We intentionally exclude
+            //    video rows so this image diff never deletes them — videos are synced separately by
+            //    processAndIndexVideos below.
+            val dbImageIds = mediaDao.getAllImageIds().toSet()
 
             // 3. Calculate the differences (The Diff)
             val idsToDelete = dbImageIds - deviceImageIds // In DB, but missing from device
@@ -288,120 +311,309 @@ class GalleryService private constructor(val context: Context) {
                 Log.d(TAG, "Sync: Database is fully synced. No new images to process.")
                 progress.value = null
             }
+
+            // 6. Then sync videos (keyframe sampling → CLIP + OCR). Runs after images so photos —
+            //    the primary experience — finish first. Kept lightweight per video (≤8 frames).
+            //    Wrapped so a video-side failure never fails image indexing / clustering.
+            try {
+                processAndIndexVideos(onProgress)
+            } catch (e: Throwable) {
+                Log.e(TAG, "Video indexing pass failed (non-fatal)", e)
+                progress.value = null
+            }
         }
     }
 
-    /** True when Arabic OCR is enabled and there are images it hasn't scanned yet (cheap COUNT). */
-    suspend fun hasPendingArabicOcr(): Boolean = withContext(Dispatchers.IO) {
-        arabicOcrEnabled && mediaDao.countMediaPendingArabic() > 0
+    /**
+     * Ensures a media_items row exists for each uri so a collection cross-ref's foreign key is
+     * satisfied — this is what makes adding a not-yet-indexed item (notably a video) to an album
+     * safe instead of crashing. Missing items get an empty-embedding placeholder; the video indexer
+     * fills videos in later, and album display never depends on these rows anyway.
+     */
+    suspend fun ensureMediaRows(uris: Collection<Uri>) = withContext(Dispatchers.IO) {
+        val entries = uris.mapNotNull { uri ->
+            uri.lastPathSegment?.toLongOrNull()?.let { it to uri.isVideoUri() }
+        }
+        if (entries.isEmpty()) return@withContext
+        val existing = mediaDao.getExistingMediaIds(entries.map { it.first }).toSet()
+        val placeholders = entries
+            .filter { it.first !in existing }
+            .map { (id, isVideo) -> MediaEntity(id, 0L, isVideo, FloatArray(0), null) }
+        if (placeholders.isNotEmpty()) mediaDao.insertAll(placeholders)
     }
 
     /**
-     * Third pipeline step (after indexing + clustering): the incremental Arabic OCR pass.
+     * Video indexing (runs after image indexing). Samples up to 8 keyframes per video (~1 every 5s),
+     * computes a mean-pooled CLIP embedding + concatenated (English) OCR text, and stores it as a
+     * media_items row (isVideo=1) so videos become semantically & OCR searchable. Each indexed video
+     * is also matched against every existing AI album (category) from its embedding — the same way
+     * photos are — so videos can live in AI albums. Face clustering is intentionally NOT run on videos.
      *
-     * Processes exactly the media rows not yet marked in `arabic_ocr_done` — so it scans the whole
-     * library once when first enabled, then only new photos, and never re-scans an already-scanned
-     * one. For each image it runs Arabic OCR, appends it to the existing (English) text,
-     * re-normalizes, stores it, and marks it done **immediately** (per image, no batching) so a
-     * cancel/kill never re-processes it (which would otherwise duplicate its Arabic text). No-op when
-     * Arabic OCR is disabled.
+     * Arabic OCR is deliberately NOT done here: it's the last, opt-in pipeline step ([runArabicOcrPass])
+     * so it stays a single visible pass (images then videos) with its own notification, rather than
+     * being hidden inside "Indexing videos". A newly-indexed video is left un-marked in arabic_ocr_done,
+     * so the Arabic pass picks it up next.
+     *
+     * A video counts as indexed once it has an embedding; empty-embedding rows (placeholders from
+     * adding a video to an album before indexing) are treated as pending. Removed videos are cleaned
+     * up. ML runs background-priority.
      */
-    suspend fun runArabicOcrPass(onProgress: suspend (Int, Int) -> Unit) {
+    private suspend fun processAndIndexVideos(onProgress: suspend (Int, Int) -> Unit) {
         withContext(Dispatchers.IO) {
-            if (!arabicOcrEnabled) { progress.value = null; return@withContext }
+            val deviceVideos = VideoUtils.scanMediaStore(context)   // (id, timestampMs), newest first
+            val deviceVideoIds = deviceVideos.map { it.first }.toSet()
 
-            val pending = mediaDao.getMediaPendingArabic()
+            // Drop rows for videos no longer on the device (cascades their album/category rows).
+            val obsolete = mediaDao.getAllVideoIds().toSet() - deviceVideoIds
+            obsolete.forEach { deleteImageFromDb(it) }
+
+            // Pending = on device but not yet indexed (missing embedding).
+            val indexed = mediaDao.getIndexedVideoIds().toSet()
+            val pending = deviceVideos.filter { it.first !in indexed }
+            Log.d(TAG, "Video indexing: ${deviceVideos.size} on device, ${indexed.size} already indexed, " +
+                "${pending.size} pending, ${obsolete.size} removed")
             if (pending.isEmpty()) { progress.value = null; return@withContext }
 
-            var arabic: ArabicOcrProcessor? = null
+            var imageEncoder: ClipImageEncoder? = null
+            var ocrProcessor: OcrProcessor? = null
+            GalleryIndexerWorker.isVideoPass = true   // notification now says "videos"
             try {
-                arabic = ArabicOcrProcessor(context)
+                imageEncoder = ClipImageEncoder(context)
+                ocrProcessor = OcrProcessor()
                 val total = pending.size
                 progress.value = 0f
-                pending.forEachIndexed { index, entity ->
+                pending.forEachIndexed { index, (videoId, timestamp) ->
                     if (!kotlinx.coroutines.currentCoroutineContext().isActive) return@withContext
-
-                    // User turned Arabic OCR off mid-run — shut the pass down (checked live from prefs
-                    // each image). Already-scanned images keep their markers; clustering won't
-                    // re-enqueue this pass while the setting is off (hasPendingArabicOcr sees it too).
-                    if (!arabicOcrEnabled) {
-                        Log.d(TAG, "Arabic OCR disabled mid-run — stopping the pass")
-                        return@withContext
-                    }
-
-                    // Yield to a freshly-triggered indexing pass (Arabic is lowest priority). Return
-                    // here so the enclosing withLock releases mlExecutionLock, letting indexing →
-                    // clustering run first. Already-processed images stay marked done, and the
-                    // clustering step re-enqueues this pass afterwards, so it resumes where it left off.
-                    if (indexingRequested) {
-                        Log.d(TAG, "Arabic OCR pass yielding to a requested indexing pass")
-                        return@withContext
-                    }
-
-                    // Honor the pause button (the same flag indexing uses — they never run at the
-                    // same time, so sharing it is safe). While paused, stop advancing and wait; the
-                    // Tesseract instance is kept alive (a single model, unlike indexing's four) so
-                    // resuming is instant. Already-scanned images stay marked done, so a kill during
-                    // the pause simply resumes where we left off next run.
-                    if (GalleryIndexerWorker.isPaused) {
-                        progress.value = null
-                        while (GalleryIndexerWorker.isPaused) {
-                            if (!kotlinx.coroutines.currentCoroutineContext().isActive) return@withContext
-                            // Even while paused we must yield to indexing — a paused Arabic pass still
-                            // holds the ML lock, which would otherwise block indexing indefinitely.
-                            if (indexingRequested) {
-                                Log.d(TAG, "Paused Arabic OCR pass yielding to a requested indexing pass")
-                                return@withContext
-                            }
-                            // Turned off while paused — shut down instead of holding the lock forever.
-                            if (!arabicOcrEnabled) {
-                                Log.d(TAG, "Arabic OCR disabled while paused — stopping the pass")
-                                return@withContext
-                            }
-                            kotlinx.coroutines.delay(1000)
-                        }
-                        progress.value = index / total.toFloat()
-                    }
-
+                    if (GalleryIndexerWorker.isPaused) return@withContext  // yield; resumes next pass
                     try {
-                        // High-resolution decode dedicated to OCR (see ImageUtils.getBitmapForOcr).
-                        // It's a large bitmap, so recycle it as soon as recognition is done.
-                        val bitmap = ImageUtils.getBitmapForOcr(context, entity.mediaId.toMediaUri())
-                        if (bitmap != null) {
-                            val ar = try {
-                                withContext(Dispatchers.Default) { arabic!!.recognizeText(bitmap) }
-                            } finally {
-                                bitmap.recycle()
-                            }
-                            // Update text + mark-done ATOMICALLY, so an interruption can't leave the
-                            // Arabic text appended without the "done" marker (which would append it
-                            // again next run — a double scan). Either both land or neither does.
-                            // We only mark done once we've actually processed the bitmap; a transient
-                            // load failure (bitmap == null) stays pending and is retried next pass.
-                            db.withTransaction {
-                                if (!ar.isNullOrBlank()) {
-                                    val combined = listOfNotNull(entity.ocrText?.ifBlank { null }, ar)
-                                        .joinToString("\n")
-                                    mediaDao.updateOcrText(
-                                        entity.mediaId,
-                                        ArabicTextNormalizer.normalize(combined) ?: ""
-                                    )
+                        val frames = VideoUtils.extractKeyFrames(context, videoId.toVideoUri())
+                        if (frames.isNotEmpty()) {
+                            val (embedding, ocr) = withContext(mlWorkDispatcher) {
+                                val embeddings = frames.map { imageEncoder!!.getImageFeatures(it) }
+                                val texts = frames.mapNotNull {
+                                    ocrProcessor!!.recognizeText(it)?.takeIf { t -> t.isNotBlank() }
                                 }
-                                mediaDao.markArabicOcrDone(ArabicOcrDoneEntity(entity.mediaId))
+                                frames.forEach { it.recycle() }
+                                VectorUtils.meanPool(embeddings) to texts.joinToString("\n").ifBlank { null }
                             }
+                            // Match this video against every AI album (category) from its embedding,
+                            // exactly like photos. Categories are re-queried per video (per the
+                            // established convention) so albums created mid-pass are picked up.
+                            val crossRefs = withContext(Dispatchers.Default) {
+                                val allCategories = withContext(Dispatchers.IO) { categoryDao.getAllCategories() }
+                                allCategories.mapNotNull { category ->
+                                    val similarity = VectorUtils.dotProduct(embedding, category.embedding)
+                                    if (similarity > CATEGORY_MATCH_THRESHOLD)
+                                        MediaCategoryCrossRef(videoId, category.id, similarity)
+                                    else null
+                                }
+                            }
+                            // Upsert the full row + its category memberships. @Upsert updates a
+                            // placeholder in place (no cascade), so album membership survives; the
+                            // cross-refs use REPLACE so a re-index just refreshes them.
+                            db.withTransaction {
+                                mediaDao.upsertMedia(
+                                    MediaEntity(
+                                        mediaId = videoId,
+                                        timestampMs = timestamp,
+                                        isVideo = true,
+                                        embedding = embedding,
+                                        ocrText = ArabicTextNormalizer.normalize(ocr)
+                                    )
+                                )
+                                if (crossRefs.isNotEmpty()) categoryDao.insertCrossRefs(crossRefs)
+                            }
+                            invalidateMediaCache()
+                            Log.d(TAG, "Indexed video $videoId (${frames.size} frames, emb=${embedding.size}, " +
+                                "ocr=${ocr != null}, categories=${crossRefs.size})")
+                        } else {
+                            Log.w(TAG, "Video $videoId produced no frames — skipped (will retry next pass)")
                         }
                     } catch (e: Exception) {
-                        Log.e(TAG, "Arabic OCR failed for ${entity.mediaId}", e)
+                        Log.e(TAG, "Video indexing failed for $videoId", e)
                     } finally {
                         progress.value = (index + 1) / total.toFloat()
                         onProgress(index + 1, total)
                     }
                 }
             } finally {
+                imageEncoder?.close()
+                ocrProcessor?.close()
+                GalleryIndexerWorker.isVideoPass = false
                 progress.value = null
-                arabic?.close()
             }
         }
+    }
+
+    /** True when Arabic OCR is enabled and there are images OR videos it hasn't scanned yet (cheap
+     *  COUNTs). Videos count too, so the pass still fires when only videos remain to be Arabic-scanned. */
+    suspend fun hasPendingArabicOcr(): Boolean = withContext(Dispatchers.IO) {
+        arabicOcrEnabled &&
+            (mediaDao.countMediaPendingArabic() > 0 || mediaDao.countVideosPendingArabic() > 0)
+    }
+
+    /**
+     * Third pipeline step (after indexing + clustering): the incremental Arabic OCR pass.
+     *
+     * Runs in two phases — IMAGES first, then VIDEOS — over exactly the rows not yet marked in
+     * `arabic_ocr_done`. So it scans the whole library once when first enabled, then only new media,
+     * and never re-scans an already-scanned one. Each item's Arabic text is appended to its existing
+     * (English) text, re-normalized, stored, and marked done **immediately** (per item, no batching)
+     * so a cancel/kill never re-processes it (which would otherwise duplicate its Arabic text).
+     *
+     * Doing videos here (rather than inside video indexing) keeps Arabic a single, visible pass with
+     * its own notification: the video phase flips [GalleryIndexerWorker.isVideoPass] so the
+     * notification reads "…videos for Arabic text". No-op when Arabic OCR is disabled.
+     */
+    suspend fun runArabicOcrPass(onProgress: suspend (Int, Int) -> Unit) {
+        withContext(Dispatchers.IO) {
+            if (!arabicOcrEnabled) { progress.value = null; return@withContext }
+
+            val pendingImages = mediaDao.getMediaPendingArabic()
+            val pendingVideos = mediaDao.getVideosPendingArabic()
+            if (pendingImages.isEmpty() && pendingVideos.isEmpty()) {
+                progress.value = null; return@withContext
+            }
+
+            var arabic: ArabicOcrProcessor? = null
+            try {
+                arabic = ArabicOcrProcessor(context)
+                // Image phase (isVideoPass=false → "Scanned X of Y for Arabic text"). If it stops
+                // early (cancel / disabled / yield to indexing), skip videos too — next pass resumes.
+                if (pendingImages.isNotEmpty()) {
+                    if (!runArabicPhase(pendingImages, isVideo = false, arabic, onProgress)) return@withContext
+                }
+                // Video phase (isVideoPass=true → "Scanned X of Y videos for Arabic text"). This is
+                // where a video's Arabic text is filled in — it re-samples the video's frames, since
+                // the indexing pass no longer runs Arabic itself.
+                if (pendingVideos.isNotEmpty()) {
+                    GalleryIndexerWorker.isVideoPass = true
+                    try {
+                        runArabicPhase(pendingVideos, isVideo = true, arabic, onProgress)
+                    } finally {
+                        GalleryIndexerWorker.isVideoPass = false
+                    }
+                }
+            } finally {
+                progress.value = null
+                arabic?.close()
+                GalleryIndexerWorker.isVideoPass = false
+            }
+        }
+    }
+
+    /**
+     * One phase of the Arabic OCR pass over [pending] — [isVideo]=false for images, true for videos.
+     * Reads Arabic text from each item (high-res decode for an image; sampled frames for a video),
+     * appends it to the stored (English) text, and marks the item done — atomically, per item, so an
+     * interruption never double-appends. Honors the same cancel / disabled / pause / yield-to-indexing
+     * rules as the rest of the pass. Returns false when the whole pass should stop (cancelled,
+     * disabled, or yielding to a newly-requested indexing run); true when the phase finished normally.
+     */
+    private suspend fun runArabicPhase(
+        pending: List<MediaOcrRef>,
+        isVideo: Boolean,
+        arabic: ArabicOcrProcessor,
+        onProgress: suspend (Int, Int) -> Unit
+    ): Boolean {
+        val total = pending.size
+        progress.value = 0f
+        pending.forEachIndexed { index, entity ->
+            if (!kotlinx.coroutines.currentCoroutineContext().isActive) return false
+
+            // User turned Arabic OCR off mid-run — shut the pass down (checked live from prefs each
+            // item). Already-scanned items keep their markers; clustering won't re-enqueue this pass
+            // while the setting is off (hasPendingArabicOcr sees it too).
+            if (!arabicOcrEnabled) {
+                Log.d(TAG, "Arabic OCR disabled mid-run — stopping the pass")
+                return false
+            }
+
+            // Yield to a freshly-triggered indexing pass (Arabic is lowest priority). Returning here
+            // lets the enclosing withLock release mlExecutionLock so indexing → clustering run first.
+            // Already-processed items stay marked done, and clustering re-enqueues this pass afterwards.
+            if (indexingRequested) {
+                Log.d(TAG, "Arabic OCR pass yielding to a requested indexing pass")
+                return false
+            }
+
+            // Honor the pause button (the same flag indexing uses — they never run at the same time,
+            // so sharing it is safe). While paused, stop advancing and wait; the Tesseract instance is
+            // kept alive so resuming is instant. Already-scanned items stay marked done.
+            if (GalleryIndexerWorker.isPaused) {
+                progress.value = null
+                while (GalleryIndexerWorker.isPaused) {
+                    if (!kotlinx.coroutines.currentCoroutineContext().isActive) return false
+                    // Even while paused we must yield to indexing — a paused Arabic pass still holds
+                    // the ML lock, which would otherwise block indexing indefinitely.
+                    if (indexingRequested) {
+                        Log.d(TAG, "Paused Arabic OCR pass yielding to a requested indexing pass")
+                        return false
+                    }
+                    // Turned off while paused — shut down instead of holding the lock forever.
+                    if (!arabicOcrEnabled) {
+                        Log.d(TAG, "Arabic OCR disabled while paused — stopping the pass")
+                        return false
+                    }
+                    kotlinx.coroutines.delay(1000)
+                }
+                progress.value = index / total.toFloat()
+            }
+
+            try {
+                // Read Arabic text for this item. `processed` distinguishes "couldn't load it, leave
+                // pending and retry next pass" from "scanned it, found nothing" (which still marks
+                // done so we never re-scan it).
+                var processed = false
+                var arText: String? = null
+                if (isVideo) {
+                    // Re-sample the video's frames (same ~1/5s, ≤8) and OCR each.
+                    val frames = VideoUtils.extractKeyFrames(context, entity.mediaId.toVideoUri())
+                    if (frames.isNotEmpty()) {
+                        processed = true
+                        arText = withContext(Dispatchers.Default) {
+                            val texts = frames.mapNotNull {
+                                arabic.recognizeText(it)?.takeIf { t -> t.isNotBlank() }
+                            }
+                            frames.forEach { it.recycle() }
+                            texts.joinToString("\n").ifBlank { null }
+                        }
+                    }
+                } else {
+                    // High-resolution decode dedicated to OCR (see ImageUtils.getBitmapForOcr).
+                    val bitmap = ImageUtils.getBitmapForOcr(context, entity.mediaId.toMediaUri())
+                    if (bitmap != null) {
+                        processed = true
+                        arText = try {
+                            withContext(Dispatchers.Default) { arabic.recognizeText(bitmap) }
+                        } finally {
+                            bitmap.recycle()
+                        }
+                    }
+                }
+                if (processed) {
+                    // Update text + mark-done ATOMICALLY, so an interruption can't leave the Arabic
+                    // text appended without the "done" marker (which would append it again next run).
+                    db.withTransaction {
+                        if (!arText.isNullOrBlank()) {
+                            val combined = listOfNotNull(entity.ocrText?.ifBlank { null }, arText)
+                                .joinToString("\n")
+                            mediaDao.updateOcrText(
+                                entity.mediaId,
+                                ArabicTextNormalizer.normalize(combined) ?: ""
+                            )
+                        }
+                        mediaDao.markArabicOcrDone(ArabicOcrDoneEntity(entity.mediaId))
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Arabic OCR failed for ${entity.mediaId}", e)
+            } finally {
+                progress.value = (index + 1) / total.toFloat()
+                onProgress(index + 1, total)
+            }
+        }
+        return true
     }
 
     private suspend fun processAndInsertImages(imagesToProcess: List<Pair<Long, Long>>, onProgress: suspend (Int, Int) -> Unit) {
@@ -513,7 +725,7 @@ class GalleryService private constructor(val context: Context) {
                 try {
                     val bitmap = ImageUtils.getBitmapFromUri(context, mediaId.toMediaUri())
                     if (bitmap != null) {
-                        val (features, text, faces) = withContext(Dispatchers.Default) {
+                        val (features, text, faces) = withContext(mlWorkDispatcher) {
                             val featuresDeferred = async { imageEncoder!!.getImageFeatures(bitmap) }
                             // English-only (ML Kit) here; Arabic OCR is a separate later step.
                             val latinDeferred = async { ocrProcessor!!.recognizeText(bitmap) }
@@ -528,7 +740,7 @@ class GalleryService private constructor(val context: Context) {
                         }
 
                         // Compute face embeddings + category assignments, then queue for a batched insert.
-                        withContext(Dispatchers.Default) {
+                        withContext(mlWorkDispatcher) {
                             val faceEntities = faces.map { face ->
                                 val croppedImage = faceDetector!!.alignFace(bitmap, face)
                                 val faceFeatures = faceEncoder!!.getFaceFeatures(croppedImage)
@@ -733,15 +945,17 @@ class GalleryService private constructor(val context: Context) {
         withContext(Dispatchers.IO) {
             val categoryId =
                 categoryDao.insertCategory(CategoryEntity(name = prompt, embedding = textFeatures))
-            val allImages = getAllMediaCached()
+            // AI albums match photos AND indexed videos (both carry a CLIP embedding). Skip only
+            // placeholder rows that have no embedding yet. (Faces/People stay image-only elsewhere.)
+            val allMedia = getAllMediaCached().filter { it.embedding.isNotEmpty() }
 
             withContext(Dispatchers.Default) {
-                allImages.forEach { image ->
-                    val similarity = VectorUtils.dotProduct(image.embedding, textFeatures)
+                allMedia.forEach { media ->
+                    val similarity = VectorUtils.dotProduct(media.embedding, textFeatures)
                     if (similarity > CATEGORY_MATCH_THRESHOLD) {
                         categoryDao.insertCrossRef(
                             MediaCategoryCrossRef(
-                                image.mediaId,
+                                media.mediaId,
                                 categoryId,
                                 similarity
                             )
@@ -798,7 +1012,12 @@ class GalleryService private constructor(val context: Context) {
     // Three entry points: semantic CLIP search (search / searchWithin), OCR document search
     // (searchDocuments), and date-only browsing. @name mentions are resolved by findNamesInPrompt.
 
-    suspend fun search(prompt: String, fromDate: Long? = null, toDate: Long? = null): SearchResult {
+    suspend fun search(
+        prompt: String,
+        fromDate: Long? = null,
+        toDate: Long? = null,
+        includeVideos: Boolean = false
+    ): SearchResult {
         return withContext(Dispatchers.IO) {
             val (names, cleanPrompt) = findNamesInPrompt(prompt)
 
@@ -815,7 +1034,7 @@ class GalleryService private constructor(val context: Context) {
                 )
             }
 
-            // Semantic/text/name search: images only, no videos
+            // Semantic/text/name search.
             initJob.await()
             val encoder = textEncoder
 
@@ -825,14 +1044,24 @@ class GalleryService private constructor(val context: Context) {
                 personDao.getImagesByNames(names, names.size)
             }
 
+            // Drop placeholder rows (no embedding — added to an album before indexing) and, unless
+            // the "Search in videos" toggle is on, drop video rows entirely.
+            images = images.filter { it.embedding.isNotEmpty() && (includeVideos || !it.isVideo) }
             images = filterByDate(images, fromDate, toDate)
 
             if (images.isEmpty()) return@withContext SearchResult.all(emptyList())
 
+            // Which result ids are videos → pick the video URI scheme for them.
+            val videoIds = images.filter { it.isVideo }.map { it.mediaId }.toSet()
+            if (includeVideos) {
+                Log.d(TAG, "Semantic search: includeVideos=true, ${videoIds.size} indexed videos in a pool of ${images.size}")
+            }
+            fun Long.toResultUri(): Uri = if (this in videoIds) toVideoUri() else toMediaUri()
+
             if (encoder == null) {
                 // No model → fall back to date order; nothing to score against, so no separator.
                 return@withContext SearchResult.all(
-                    images.sortedByDescending { it.timestampMs }.map { it.mediaId.toMediaUri() }
+                    images.sortedByDescending { it.timestampMs }.map { it.mediaId.toResultUri() }
                 )
             }
 
@@ -854,7 +1083,7 @@ class GalleryService private constructor(val context: Context) {
 
             // Sorted best-first, so the strong matches are the leading run above the threshold.
             val relevantCount = sortedImages.count { it.second >= SEARCH_RELEVANCE_THRESHOLD }
-            SearchResult(sortedImages.map { it.first.toMediaUri() }, relevantCount)
+            SearchResult(sortedImages.map { it.first.toResultUri() }, relevantCount)
         }
     }
 
@@ -940,29 +1169,37 @@ class GalleryService private constructor(val context: Context) {
         useClip: Boolean,
         fromDate: Long?,
         toDate: Long?,
-        sortMode: SortMode? = SortMode.RELEVANCE
+        sortMode: SortMode? = SortMode.RELEVANCE,
+        includeVideos: Boolean = false
     ): SearchResult {
         if (prompt.isNullOrBlank()) {
             return withContext(Dispatchers.IO) {
+                // Members can include videos now (AI albums match videos too), so build the right
+                // content-URI scheme per id instead of assuming every member is an image. Chunked to
+                // stay under SQLite's ~999-variable IN(...) limit for large albums.
+                val memberVideoIds = mediaIds.chunked(900)
+                    .flatMap { mediaDao.getVideoIdsAmong(it) }.toSet()
+                fun Long.toMemberUri(): Uri = if (this in memberVideoIds) toVideoUri() else toMediaUri()
+
                 if (sortMode == null){
                     val originalSet = mediaIds.toSet()
                     val images = getDeviceImagesWithDateFilter(fromDate, toDate)
                     val intersection = images.filter { it in originalSet }
-                    return@withContext SearchResult.all(intersection.map { it.toMediaUri() })
+                    return@withContext SearchResult.all(intersection.map { it.toMemberUri() })
                 }
                 val images = mediaDao.getMediaDatesByIds(mediaIds)
                 val filtered = filterByDateInfo(images, fromDate, toDate)
 
                 if (sortMode == SortMode.DATE_DESC) {
                     SearchResult.all(
-                        filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toMediaUri() }
+                        filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toMemberUri() }
                     )
                 } else {
                     // Maintain original order of mediaIds (important for Category similarity sort)
                     val idToIndex = mediaIds.withIndex().associate { it.value to it.index }
                     SearchResult.all(
                         filtered.sortedBy { idToIndex[it.mediaId] ?: Int.MAX_VALUE }
-                            .map { it.mediaId.toMediaUri() }
+                            .map { it.mediaId.toMemberUri() }
                     )
                 }
             }
@@ -987,19 +1224,28 @@ class GalleryService private constructor(val context: Context) {
             }
             var filtered = filterByDate(images, fromDate, toDate)
 
+            // Drop placeholder rows (no embedding — can't be scored, and dot-product would crash on
+            // an empty array) and, unless the toggle is on, video rows. This is what makes video
+            // search work inside a folder/album — otherwise videos were silently excluded.
+            filtered = filtered.filter { it.embedding.isNotEmpty() && (includeVideos || !it.isVideo) }
+
             if (filtered.isEmpty()) return@withContext SearchResult.all(emptyList())
+
+            // Video members need the video URI scheme; images use the image one.
+            val withinVideoIds = filtered.filter { it.isVideo }.map { it.mediaId }.toSet()
+            fun Long.toWithinUri(): Uri = if (this in withinVideoIds) toVideoUri() else toMediaUri()
 
             if (useClip) {
                 initJob.await()
                 val encoder = textEncoder
                     ?: return@withContext SearchResult.all(
-                        filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toMediaUri() }
+                        filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toWithinUri() }
                     )
 
                 // If cleanPrompt is blank but names were found, we just show filtered results sorted by date
                 if (cleanPrompt.isBlank() && names.isNotEmpty()) {
                     return@withContext SearchResult.all(
-                        filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toMediaUri() }
+                        filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toWithinUri() }
                     )
                 }
 
@@ -1026,20 +1272,20 @@ class GalleryService private constructor(val context: Context) {
                     // Date order: no relevance split.
                     SearchResult.all(
                         sorted.sortedByDescending { it.first.timestampMs }
-                            .map { it.first.mediaId.toMediaUri() }
+                            .map { it.first.mediaId.toWithinUri() }
                     )
                 } else {
                     // Relevance order: split strong matches from weak ones at the threshold.
                     val ranked = sorted.sortedByDescending { it.second }
                     val relevantCount = ranked.count { it.second >= SEARCH_RELEVANCE_THRESHOLD }
-                    SearchResult(ranked.map { it.first.mediaId.toMediaUri() }, relevantCount)
+                    SearchResult(ranked.map { it.first.mediaId.toWithinUri() }, relevantCount)
                 }
             } else {
                 // OCR search within — substring match, date-ordered, no similarity score.
                 filtered =
                     filtered.filter { it.ocrText?.contains(cleanPrompt, ignoreCase = true) == true }
                 SearchResult.all(
-                    filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toMediaUri() }
+                    filtered.sortedByDescending { it.timestampMs }.map { it.mediaId.toWithinUri() }
                 )
             }
         }
@@ -1048,7 +1294,8 @@ class GalleryService private constructor(val context: Context) {
     suspend fun searchDocuments(
         text: String,
         fromDate: Long? = null,
-        toDate: Long? = null
+        toDate: Long? = null,
+        includeVideos: Boolean = false
     ): SearchResult {
         return withContext(Dispatchers.IO) {
             Log.d(TAG, "Is FTS supported: $ftsSupported")
@@ -1081,7 +1328,9 @@ class GalleryService private constructor(val context: Context) {
             // Filter by dates
             results = filterByDate(results, fromDate, toDate)
 
-            SearchResult.all(results.map { it.mediaId.toMediaUri() })
+            // Exclude videos unless the "Search in videos" toggle is on; then use video URIs for them.
+            if (!includeVideos) results = results.filter { !it.isVideo }
+            SearchResult.all(results.map { if (it.isVideo) it.mediaId.toVideoUri() else it.mediaId.toMediaUri() })
         }
     }
 

@@ -45,11 +45,12 @@ fun tutorialContentFor(tab: TutorialTab): TutorialContent = when (tab) {
             "so it can understand what's in them. This happens in the background — you can keep " +
             "using the app while it runs.",
         tips = listOf(
-            "The first time you open the app, it scans all your photos so it can search them. This can take a while if you have a lot, so just leave it running.",
-            "You can follow how it's going on the progress bar at the bottom of the screen and in the notification.",
+            "The first time you open the app, it scans all your photos — and your videos — so it can search them. This can take a while if you have a lot, so just leave it running.",
+            "You can follow how it's going on the progress bar at the bottom of the screen and in the notification (it shows photos first, then videos).",
             "Tap Pause or Resume on the notification anytime — processing picks up right where it left off.",
             "Once processed, type what you're looking for in plain words, like \"sunset at the beach\", and AI finds matching photos.",
             "Flip the toggle to Document search to find text inside pictures — receipts, notes, screenshots.",
+            "Turn on \"Search in videos\" to include videos in your searches too (off by default — it searches photos only).",
             "Type \"@\" then a name to find photos of a specific person.",
             "Tap the date field to narrow results to a time range.",
             "Tap the gear icon (top-right) for Settings — switch between Light, Dark, or System theme, toggle automatic face re-grouping, and turn on Arabic text search.",

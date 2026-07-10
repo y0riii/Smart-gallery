@@ -54,10 +54,13 @@ class PersonFolderRepository(
         useClip: Boolean,
         fromDate: Long?,
         toDate: Long?,
-        sortMode: SortMode
+        sortMode: SortMode,
+        includeVideos: Boolean
     ): Flow<com.example.gallery.SearchResult> {
+        // A person's media are all images (faces aren't detected in videos), so includeVideos is a
+        // no-op here — passed through only to satisfy the interface.
         return personDao.getImagesIdsByPersonIdFlow(bucketId).map { mediaIds ->
-            service.searchWithin(mediaIds, prompt, useClip, fromDate, toDate, sortMode)
+            service.searchWithin(mediaIds, prompt, useClip, fromDate, toDate, sortMode, includeVideos)
         }.flowOn(Dispatchers.IO)
     }
 

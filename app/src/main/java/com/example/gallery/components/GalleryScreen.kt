@@ -137,6 +137,13 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
                     onPromptChange = { viewModel.prompt = it },
                     useClip = viewModel.useClip,
                     onUseClipChange = { viewModel.useClip = it },
+                    searchVideos = viewModel.searchVideos,
+                    onSearchVideosChange = {
+                        viewModel.searchVideos = it
+                        // Re-run immediately so results update without pressing Go again.
+                        if (viewModel.isSearchActive) viewModel.search()
+                    },
+                    showVideoToggle = true,
                     fromDate = viewModel.fromDate,
                     onFromDateChange = { viewModel.fromDate = it },
                     toDate = viewModel.toDate,

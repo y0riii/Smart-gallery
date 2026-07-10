@@ -30,8 +30,9 @@ class AlbumsViewModel(
         viewModelScope.launch {
             if (name.isNotBlank() && collectionDao.getCollectionByName(name) == null) {
                 collectionDao.insertCollection(CollectionEntity(name = name))
-                // Scroll the folder grid up so the new album (in "Your albums" near the top) is visible.
-                shouldScrollFoldersToTop = true
+                // Request the folder grid scroll up so the new album (in "Your albums", near the top)
+                // is visible.
+                scrollFoldersToTopEvent++
             }
         }
     }
@@ -43,6 +44,9 @@ class AlbumsViewModel(
      */
     fun addMediaToAlbum(uris: Set<Uri>, albumId: Long) {
         viewModelScope.launch {
+            // Ensure a media_items row exists for each item first, so the cross-ref's foreign key is
+            // satisfied — otherwise adding a not-yet-indexed item (notably a video) crashes.
+            service.ensureMediaRows(uris)
             val refs = uris.mapNotNull { uri ->
                 uri.lastPathSegment?.toLongOrNull()?.let { mediaId ->
                     CollectionMediaCrossRef(

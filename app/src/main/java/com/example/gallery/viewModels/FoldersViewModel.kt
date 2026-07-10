@@ -53,15 +53,19 @@ abstract class FoldersViewModel(
 
     var prompt by mutableStateOf(TextFieldValue(""))
     var useClip by mutableStateOf(true)
+    // Opt-in: include videos in this folder's semantic/OCR search (off = photos only).
+    var searchVideos by mutableStateOf(false)
     var fromDate by mutableStateOf<Long?>(null)
     var toDate by mutableStateOf<Long?>(null)
     var sortMode by mutableStateOf(SortMode.RELEVANCE)
 
     var shouldScrollToTop by mutableStateOf(false)
 
-    // Set to request the FOLDER grid (not the open-folder image grid) scroll to the top — used after
-    // creating an album so the user sees it appear at the top.
-    var shouldScrollFoldersToTop by mutableStateOf(false)
+    // Incremented to request the FOLDER grid (not the open-folder image grid) scroll to the top —
+    // used after creating an album. A counter (not a Boolean flag) so each request reliably re-fires
+    // the effect, and there's no reset that could change the effect's key and cancel it mid-run
+    // (that self-cancel is why the earlier flag versions never scrolled).
+    var scrollFoldersToTopEvent by mutableStateOf(0)
 
     // Feature 3: remembers the folders-grid scroll position so we can restore it when the user
     // navigates back from an open folder.
@@ -169,7 +173,8 @@ abstract class FoldersViewModel(
                 useClip = useClip,
                 fromDate = fromDate,
                 toDate = toDate,
-                sortMode = sortMode
+                sortMode = sortMode,
+                includeVideos = searchVideos
             ).collect { result ->
                 images = result.uris
                 // Raw relevant count (null for non-scored searches); the grid guards when to draw

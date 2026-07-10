@@ -3,9 +3,11 @@ package com.example.gallery.utils
 import android.content.ContentUris
 import android.content.Context
 import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -18,6 +20,11 @@ import kotlinx.coroutines.withContext
 import java.util.Locale
 
 object VideoUtils {
+
+    // ⚠️ TEMPORARY DEBUG CAP — only the newest N videos are scanned so video indexing finishes fast
+    // while testing. Remove (or raise) for production. Like the image cap, videos already indexed
+    // beyond the newest N are treated as "deleted" and dropped from the DB.
+    private const val DEBUG_VIDEO_LIMIT = 10
 
     /**
      * Scans MediaStore for all videos on the device.
@@ -42,6 +49,8 @@ object VideoUtils {
                 val id = cursor.getLong(idIdx)
                 val timestamp = cursor.getLong(dateIdx) * 1000L
                 list.add(id to timestamp)
+                // Debug cap: cursor is sorted newest-first, so this keeps the newest N.
+                if (list.size >= DEBUG_VIDEO_LIMIT) break
             }
         }
         return list
@@ -141,6 +150,70 @@ object VideoUtils {
             }
         }
         return set
+    }
+
+    /**
+     * Extracts evenly-spaced frames for indexing: roughly **one frame per 5 seconds**, capped at
+     * **8** (so a video longer than 40 s gets 8 frames at even times). Frames are scaled toward
+     * CLIP's input size. Returns an empty list on any failure (unreadable/corrupt video) so the
+     * caller can just skip it.
+     *
+     * One MediaMetadataRetriever session is opened per video and released in `finally`, so the
+     * codec seek/decode cost is amortized across all the frames of that video.
+     */
+    fun extractKeyFrames(context: Context, videoUri: Uri): List<Bitmap> {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(context, videoUri)
+            val durationMs = retriever
+                .extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: 0L
+            // ~1 frame per 5 s, at least 1, capped at 8 (≥40 s videos → 8 frames).
+            val count = Math.ceil(durationMs / 5000.0).toInt().coerceIn(1, 8)
+            (1..count).mapNotNull { i ->
+                // Even interior positions: for 4 frames → 20/40/60/80% of the duration.
+                val timeMs = durationMs * i / (count + 1)
+                try {
+                    // Prefer the pre-scaled frame; some devices/codecs return null for scaled
+                    // extraction, so fall back to a full-size frame (CLIP resizes it anyway).
+                    retriever.getScaledFrameAtTime(
+                        timeMs * 1000L,                                  // API wants microseconds
+                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                        256, 256
+                    ) ?: retriever.getFrameAtTime(
+                        timeMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                    )
+                } catch (e: Exception) {
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("VideoUtils", "Frame extraction failed for $videoUri", e)
+            emptyList()
+        } finally {
+            try { retriever.release() } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Of the given MediaStore ids, returns the subset that are **videos** (the rest are images).
+     * Album membership stores a bare mediaId with no type, so this lets the album view build the
+     * correct content URI (image vs. video) for each member. The ids come from our own DB (trusted
+     * Longs), so inlining them into the IN clause is safe.
+     */
+    fun videoIdsAmong(context: Context, ids: Collection<Long>): Set<Long> {
+        if (ids.isEmpty()) return emptySet()
+        val result = mutableSetOf<Long>()
+        context.contentResolver.query(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Video.Media._ID),
+            "${MediaStore.Video.Media._ID} IN (${ids.joinToString(",")})",
+            null, null
+        )?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+            while (cursor.moveToNext()) result.add(cursor.getLong(idCol))
+        }
+        return result
     }
 }
 

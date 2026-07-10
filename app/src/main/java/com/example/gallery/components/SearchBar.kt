@@ -73,6 +73,9 @@ fun SearchBar(
     // even if the user has emptied the text field.
     searchActive: Boolean = false,
     showDates: Boolean = true,
+    searchVideos: Boolean = false,
+    onSearchVideosChange: (Boolean) -> Unit = {},
+    showVideoToggle: Boolean = false,
     // Feature 5: optional map of person name → thumbnail URI, forwarded to SearchInputField
     // for showing circular avatars in the @mention dropdown. Defaults to empty (no avatars).
     nameThumbnails: Map<String, android.net.Uri?> = emptyMap()
@@ -227,6 +230,9 @@ fun SearchBar(
                 Spacer(modifier = Modifier.height(8.dp))
                 SearchModeToggle(useClip) {
                     onUseClipChange(it)
+                }
+                if (showVideoToggle) {
+                    VideoSearchToggle(searchVideos, onSearchVideosChange)
                 }
             }
         }

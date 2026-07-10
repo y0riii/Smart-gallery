@@ -8,6 +8,7 @@ import com.example.gallery.GalleryService
 import com.example.gallery.SearchResult
 import com.example.gallery.SortMode
 import com.example.gallery.db.daos.CollectionDao
+import com.example.gallery.utils.VideoUtils
 import com.example.gallery.utils.toMediaUri
 import com.example.gallery.utils.toVideoUri
 import kotlinx.coroutines.CoroutineScope
@@ -51,12 +52,17 @@ class AlbumsFolderRepository(
     /** User-created albums, reactively followed from Room. */
     private fun userAlbumsFlow(): Flow<List<FolderItem>> =
         collectionDao.getCollectionsWithMediaIdsFlow().map { collections ->
+            // One query to find which member ids (across all albums) are videos, so thumbnails use
+            // the right URI scheme — a video built as an image URI renders as a broken thumbnail.
+            val videoIds = VideoUtils.videoIdsAmong(context, collections.flatMap { it.second })
             collections.map { (collection, mediaIds) ->
                 FolderItem(
                     bucketId = -collection.id,
                     name = collection.name,
                     photoCount = mediaIds.size,
-                    thumbnailUris = mediaIds.map { it.toMediaUri() }.topFourThumbnails(),
+                    thumbnailUris = mediaIds
+                        .map { if (it in videoIds) it.toVideoUri() else it.toMediaUri() }
+                        .topFourThumbnails(),
                     insideFolderThumbnail = null,
                     isUserAlbum = true
                 )
@@ -99,19 +105,31 @@ class AlbumsFolderRepository(
         useClip: Boolean,
         fromDate: Long?,
         toDate: Long?,
-        sortMode: SortMode
+        sortMode: SortMode,
+        includeVideos: Boolean
     ): Flow<SearchResult> {
         // Negative bucketId → a user album (collection). Follow its membership reactively from Room.
         if (bucketId < 0) {
             return collectionDao.getImagesIdsByCollectionFlow(-bucketId).map { mediaIds ->
-                service.searchWithin(mediaIds, prompt, useClip, fromDate, toDate, sortMode)
+                // Default browse (no search / no date filter): show ALL members, images AND videos,
+                // in date-added order, building each id's correct content URI. For a search/date
+                // filter, searchWithin scores the members — now including video members when the
+                // "Search in videos" toggle is on (includeVideos).
+                if (prompt.isNullOrBlank() && fromDate == null && toDate == null) {
+                    val videoIds = VideoUtils.videoIdsAmong(context, mediaIds)
+                    SearchResult.all(
+                        mediaIds.map { if (it in videoIds) it.toVideoUri() else it.toMediaUri() }
+                    )
+                } else {
+                    service.searchWithin(mediaIds, prompt, useClip, fromDate, toDate, sortMode, includeVideos)
+                }
             }.flowOn(Dispatchers.IO)
         }
         return callbackFlow {
             val scope = CoroutineScope(Dispatchers.IO)
             fun load() {
                 scope.launch {
-                    trySend(getMedia(bucketId, prompt, useClip, fromDate, toDate, sortMode))
+                    trySend(getMedia(bucketId, prompt, useClip, fromDate, toDate, sortMode, includeVideos))
                 }
             }
             load()
@@ -204,15 +222,17 @@ class AlbumsFolderRepository(
         useClip: Boolean,
         fromDate: Long?,
         toDate: Long?,
-        sortMode: SortMode
+        sortMode: SortMode,
+        includeVideos: Boolean
     ): SearchResult = withContext(Dispatchers.IO) {
         // No search active: merge images + videos sorted by date (no relevance split).
         if (prompt.isNullOrBlank() && sortMode != SortMode.RELEVANCE) {
             return@withContext SearchResult.all(getMergedAlbumMedia(bucketId, fromDate, toDate))
         }
 
-        // With a prompt (semantic search): images only, videos excluded
-        val imageIds = mutableListOf<Long>()
+        // With a prompt (semantic/OCR search): search the folder's images, plus its videos when the
+        // "Search in videos" toggle is on (searchWithin scores them from the Room video index).
+        val searchIds = mutableListOf<Long>()
         context.contentResolver.query(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
             arrayOf(MediaStore.Images.Media._ID),
@@ -221,7 +241,10 @@ class AlbumsFolderRepository(
             "${MediaStore.Images.Media.DATE_ADDED} DESC"
         )?.use { cursor ->
             val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-            while (cursor.moveToNext()) imageIds.add(cursor.getLong(idCol))
+            while (cursor.moveToNext()) searchIds.add(cursor.getLong(idCol))
+        }
+        if (includeVideos) {
+            searchIds.addAll(VideoUtils.scanAlbumVideos(context, bucketId, fromDate, toDate))
         }
 
         if (prompt.isNullOrBlank()) {
@@ -229,7 +252,7 @@ class AlbumsFolderRepository(
             return@withContext SearchResult.all(getMergedAlbumMedia(bucketId, fromDate, toDate))
         }
 
-        service.searchWithin(imageIds, prompt, useClip, fromDate, toDate, null)
+        service.searchWithin(searchIds, prompt, useClip, fromDate, toDate, null, includeVideos)
     }
 
     /**

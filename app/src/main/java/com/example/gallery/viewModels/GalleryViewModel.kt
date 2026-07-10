@@ -48,6 +48,8 @@ class GalleryViewModel(
 
     var prompt by mutableStateOf(TextFieldValue(""))
     var useClip by mutableStateOf(true)
+    // Opt-in: when off (default), semantic & OCR search cover photos only; on = also search videos.
+    var searchVideos by mutableStateOf(false)
     var fromDate by mutableStateOf<Long?>(null)
     var toDate by mutableStateOf<Long?>(null)
 
@@ -169,9 +171,9 @@ class GalleryViewModel(
             }
 
             val result = if (useClip)
-                service.search(prompt.text, finalFrom, finalTo)
+                service.search(prompt.text, finalFrom, finalTo, searchVideos)
             else
-                service.searchDocuments(prompt.text, finalFrom, finalTo)
+                service.searchDocuments(prompt.text, finalFrom, finalTo, searchVideos)
 
             images = result.uris
             // Raw relevant count (null for non-scored searches). The grid decides when to actually

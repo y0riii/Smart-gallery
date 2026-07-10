@@ -169,14 +169,19 @@ fun FoldersScreen(
         }
     }
 
-    // Scroll the FOLDER grid to the top when signaled (after creating an album), so the new album is
-    // visible. Also clears the saved scroll position so a later folder-return doesn't jump back down.
-    LaunchedEffect(viewModel.shouldScrollFoldersToTop) {
-        if (viewModel.shouldScrollFoldersToTop) {
-            foldersGridState.scrollToItem(0)
+    // Scroll the FOLDER grid to the top after creating an album, so the new "Your albums" section is
+    // visible. Keyed on a COUNTER (not a Boolean) so there's no reset that changes the key and cancels
+    // the effect mid-run — the self-cancel that broke every earlier flag-based attempt. The album is
+    // inserted asynchronously (Room flow → recompose → grid relayout), and this effect may run either
+    // BEFORE or AFTER that relayout, so we scroll to top twice: an instant jump now (covers the
+    // already-updated case) and a smooth scroll after a short settle (covers the not-yet-updated case).
+    LaunchedEffect(viewModel.scrollFoldersToTopEvent) {
+        if (viewModel.scrollFoldersToTopEvent > 0) {
             viewModel.savedGridFirstIndex = 0
             viewModel.savedGridFirstScrollOffset = 0
-            viewModel.shouldScrollFoldersToTop = false
+            foldersGridState.scrollToItem(0)
+            kotlinx.coroutines.delay(350)
+            foldersGridState.animateScrollToItem(0)
         }
     }
 
@@ -467,6 +472,12 @@ fun FoldersScreen(
                     onPromptChange = { viewModel.prompt = it },
                     useClip = viewModel.useClip,
                     onUseClipChange = { viewModel.useClip = it },
+                    searchVideos = viewModel.searchVideos,
+                    onSearchVideosChange = {
+                        viewModel.searchVideos = it
+                        if (viewModel.isSearchActive) viewModel.applyFilters(scrollToTop = true)
+                    },
+                    showVideoToggle = true,
                     fromDate = viewModel.fromDate,
                     onFromDateChange = { viewModel.onDateRangeChanged(it, viewModel.toDate) },
                     toDate = viewModel.toDate,

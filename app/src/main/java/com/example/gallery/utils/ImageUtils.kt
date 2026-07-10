@@ -17,6 +17,12 @@ import kotlin.math.max
 
 object ImageUtils {
 
+    // ⚠️ TEMPORARY DEBUG CAP — only the newest N images are scanned so indexing finishes fast on a
+    // real device. Set to a large value (or remove the `break` below) for production. NOTE: because
+    // indexing is a device-vs-DB diff, images already indexed beyond the newest N are treated as
+    // "deleted" and dropped from the DB. Fine for testing; remove before shipping.
+    private const val DEBUG_MEDIA_LIMIT = 100
+
     /**
      * Scans the device MediaStore for all images, returning (imageId, dateAddedMs) pairs
      * sorted newest-first. Timestamps are converted from MediaStore's seconds to milliseconds.
@@ -42,6 +48,8 @@ object ImageUtils {
                 val id = cursor.getLong(idIdx)
                 val timestamp = cursor.getLong(dateIdx) * 1000L
                 list.add(id to timestamp)
+                // Debug cap: cursor is sorted newest-first, so this keeps the newest N.
+                if (list.size >= DEBUG_MEDIA_LIMIT) break
             }
         }
 

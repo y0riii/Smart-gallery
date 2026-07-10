@@ -15,6 +15,7 @@ interface FolderSource {
         useClip: Boolean = true,
         fromDate: Long? = null,
         toDate: Long? = null,
-        sortMode: SortMode = SortMode.RELEVANCE
+        sortMode: SortMode = SortMode.RELEVANCE,
+        includeVideos: Boolean = false
     ): Flow<SearchResult>
 }

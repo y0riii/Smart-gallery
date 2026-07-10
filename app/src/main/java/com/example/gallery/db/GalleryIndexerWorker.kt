@@ -47,6 +47,11 @@ class GalleryIndexerWorker(
         @Volatile
         var isArabicPass = false
 
+        // True while normal indexing is in its VIDEO phase (after photos) — makes the notification
+        // say "videos" instead of "photos". Set/cleared by GalleryService.processAndIndexVideos.
+        @Volatile
+        var isVideoPass = false
+
         /**
          * Immediately post the "paused" notification, reusing the same
          * NOTIFICATION_ID so it replaces the active one in-place.
@@ -68,7 +73,7 @@ class GalleryIndexerWorker(
             val notification = Notification.Builder(context, CHANNEL_ID)
                 .setContentTitle("Smart Gallery")
                 .setContentText(
-                    if (isArabicPass) "Arabic text scan is paused" else "Photo indexing is paused"
+                    if (isArabicPass) "Arabic text scan is paused" else "Image indexing is paused"
                 )
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setOngoing(true)
@@ -180,9 +185,10 @@ class GalleryIndexerWorker(
             Log.e("GalleryIndexerWorker", "Indexing failed, will retry", e)
             Result.retry()
         } finally {
-            // Clear the wording flag once the pass is fully done (a mid-pause worker is still inside
+            // Clear the wording flags once the pass is fully done (a mid-pause worker is still inside
             // the try above, so this only runs when work actually completes/cancels).
             isArabicPass = false
+            isVideoPass = false
         }
     }
 
@@ -205,9 +211,14 @@ class GalleryIndexerWorker(
 
         val contentText = when {
             total == 0 && isArabicPass -> "Preparing Arabic text scan…"
-            total == 0 -> "Preparing photo indexing…"
-            isArabicPass -> "Scanned $processed of $total for Arabic text"
-            else -> "Indexed $processed of $total photos"
+            total == 0 && isVideoPass -> "Preparing video indexing…"
+            total == 0 -> "Preparing Image indexing…"
+            // Arabic pass runs images first, then videos; isVideoPass marks the video phase so the
+            // user sees Arabic move on to videos instead of it being silent.
+            isArabicPass && isVideoPass -> "Scanned $processed of $total videos for Arabic text"
+            isArabicPass -> "Scanned $processed of $total images for Arabic text"
+            isVideoPass -> "Indexed $processed of $total videos"
+            else -> "Indexed $processed of $total images"
         }
 
         val notification = Notification.Builder(applicationContext, CHANNEL_ID)

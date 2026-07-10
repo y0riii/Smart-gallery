@@ -42,3 +42,33 @@ fun SearchModeToggle(
         )
     }
 }
+
+/** Opt-in toggle (sits under [SearchModeToggle]) to include videos in semantic & text search. */
+@Composable
+fun VideoSearchToggle(
+    searchVideos: Boolean,
+    onChange: (Boolean) -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Search in videos",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Text(
+                text = "Also match videos (off = photos only)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(
+            checked = searchVideos,
+            onCheckedChange = onChange
+        )
+    }
+}
