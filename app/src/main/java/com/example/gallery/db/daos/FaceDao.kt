@@ -10,9 +10,6 @@ import com.example.gallery.db.entities.FaceEntity
 interface FaceDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertFace(face: FaceEntity): Long
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFaces(faces: List<FaceEntity>)
 
     @Query("SELECT * FROM faces")
@@ -29,8 +26,4 @@ interface FaceDao {
 
     @Query("UPDATE faces SET personId = NULL")
     suspend fun clearAllPersonAssignments()
-
-
-    @Query("SELECT COUNT(*) FROM faces")
-    suspend fun countFaces(): Int
 }

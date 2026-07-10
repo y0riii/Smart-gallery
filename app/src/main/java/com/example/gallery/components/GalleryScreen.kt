@@ -19,9 +19,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -83,6 +85,8 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     // Settings dialog (Arabic OCR toggle, etc.)
     var showSettings by remember { mutableStateOf(false) }
+    // Remove-duplicates: info/confirmation dialog that explains the action before scanning.
+    var showDuplicatesInfo by remember { mutableStateOf(false) }
 
     val intentSenderLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -128,6 +132,9 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
                         style = MaterialTheme.typography.titleLarge,
                         modifier = Modifier.weight(1f)
                     )
+                    IconButton(onClick = { showDuplicatesInfo = true }) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Remove duplicates")
+                    }
                     IconButton(onClick = { showSettings = true }) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
                     }
@@ -348,6 +355,80 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
             onArabicOcrChange = { viewModel.updateArabicOcrEnabled(it) },
             onDismiss = { showSettings = false }
         )
+    }
+
+    // ── Remove duplicates: explain → scan → confirm count → delete ──────────────
+    // Step 1: explain what the action does, before doing anything.
+    if (showDuplicatesInfo) {
+        AlertDialog(
+            onDismissRequest = { showDuplicatesInfo = false },
+            title = { Text("Remove duplicates") },
+            text = {
+                Text(
+                    "This scans your whole gallery for duplicate photos and videos — exact copies of " +
+                        "the same file. For each set of duplicates it keeps the earliest one and " +
+                        "permanently deletes the rest from your device. You'll see how many were found " +
+                        "and confirm before anything is deleted."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDuplicatesInfo = false
+                    viewModel.scanForDuplicates()
+                }) { Text("Scan for duplicates") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDuplicatesInfo = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Step 2: progress while scanning (hashing files can take a moment on large libraries).
+    if (viewModel.isScanningDuplicates) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("Scanning for duplicates") },
+            text = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text("Checking your photos and videos…")
+                }
+            },
+            confirmButton = { }
+        )
+    }
+
+    // Step 3: show the result — either "none found" or a confirm-to-delete with the count.
+    viewModel.duplicateScanResult?.let { dupes ->
+        if (dupes.isEmpty()) {
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissDuplicateResult() },
+                title = { Text("No duplicates found") },
+                text = { Text("Your gallery has no duplicate photos or videos.") },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.dismissDuplicateResult() }) { Text("OK") }
+                }
+            )
+        } else {
+            val plural = if (dupes.size == 1) "" else "s"
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissDuplicateResult() },
+                title = { Text("Remove ${dupes.size} duplicate$plural?") },
+                text = {
+                    Text(
+                        "Found ${dupes.size} duplicate item$plural. The earliest copy of each is kept; " +
+                            "the rest will be permanently deleted from your device."
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.confirmRemoveDuplicates() }) { Text("Remove") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.dismissDuplicateResult() }) { Text("Cancel") }
+                }
+            )
+        }
     }
 
     // Feature 1: Back cancels selection mode (only when not in full screen)

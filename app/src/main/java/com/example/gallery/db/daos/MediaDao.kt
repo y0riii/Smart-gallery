@@ -18,22 +18,13 @@ interface MediaDao {
     suspend fun insertAll(media: List<MediaEntity>)
 
     @Delete
-    suspend fun deleteAll(list: List<MediaEntity>)
-
-    @Delete
     suspend fun delete(entity: MediaEntity)
-
-    @Query("DELETE FROM media_items WHERE mediaId IN (:ids)")
-    suspend fun deleteByIds(ids: List<Long>)
 
     @Query("UPDATE media_items SET ocrText = :text WHERE mediaId = :mediaId")
     suspend fun updateOcrText(mediaId: Long, text: String)
 
     @Query("SELECT * FROM media_items ORDER BY timestampMs DESC")
     suspend fun getAllMedia(): List<MediaEntity>
-
-    @Query("SELECT mediaId FROM media_items")
-    suspend fun getAllMediaIds(): List<Long>
 
     // ===== IMAGE / VIDEO SPLIT (media_items holds both; isVideo=0 image, isVideo=1 video) =====
 

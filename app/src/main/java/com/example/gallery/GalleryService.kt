@@ -872,11 +872,6 @@ class GalleryService private constructor(val context: Context) {
     // Direct reads of the device's photo/video store (no Room). Used to browse "all media" and
     // to resolve date-filtered id lists that search/albums then refine.
 
-    suspend fun getAllDeviceImages(): List<Uri> =
-        withContext(Dispatchers.IO) {
-            ImageUtils.scanMediaStore(context).map { (id, _) -> id.toMediaUri() }
-        }
-
     /**
      * Returns all images AND videos merged and sorted by date descending.
      * Videos are included only when no semantic/text search is active.
@@ -921,15 +916,109 @@ class GalleryService private constructor(val context: Context) {
         }
     }.flowOn(Dispatchers.IO)
 
+    // ═══════════════════════════ DUPLICATE DETECTION ═══════════════════════════
+
+    /** One MediaStore item considered for de-duplication. */
+    private data class DedupItem(val id: Long, val size: Long, val dateAdded: Long, val isVideo: Boolean) {
+        fun toUri(): Uri = if (isVideo) id.toVideoUri() else id.toMediaUri()
+    }
+
     /**
-     * Returns video URIs filtered by an optional date range.
-     * Used when a search is date-only (no text/name filters).
+     * Finds duplicate media (images AND videos) across the WHOLE device and returns the URIs that
+     * should be deleted — i.e. every copy EXCEPT the earliest of each duplicate set.
+     *
+     * "Duplicate" means byte-for-byte identical content, detected conservatively so this never deletes
+     * a photo that merely looks similar: items are first grouped by exact file size (cheap), and only
+     * within a same-size group is each file's **double** content hash computed — SHA-256 and MD5 of the
+     * same bytes (see [hashUriContent]). Two files count as duplicates only when **both** hashes match,
+     * so a collision in either algorithm alone can never trigger a wrong deletion. The earliest by
+     * DATE_ADDED (ties broken by the lower id — added first) is kept and the rest are returned for
+     * deletion. Any file that can't be read is skipped, never deleted. This scans the entire library
+     * (not the debug-capped indexing scan).
+     *
+     * Cheap I/O + hashing only; the actual delete goes through the normal MediaStore delete-request
+     * flow (system confirmation) so nothing is removed without the user's OK.
      */
-    suspend fun getDeviceVideosWithDateFilter(fromDate: Long?, toDate: Long?): List<Uri> =
-        withContext(Dispatchers.IO) {
-            VideoUtils.scanMediaStoreWithDateFilter(context, fromDate, toDate)
-                .map { it.toVideoUri() }
+    suspend fun findDuplicateUrisToDelete(): List<Uri> = withContext(Dispatchers.IO) {
+        val items = mutableListOf<DedupItem>()
+
+        context.contentResolver.query(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.SIZE, MediaStore.Images.Media.DATE_ADDED),
+            null, null, null
+        )?.use { c ->
+            val idCol = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+            val sizeCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
+            val dateCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+            while (c.moveToNext()) {
+                items.add(DedupItem(c.getLong(idCol), c.getLong(sizeCol), c.getLong(dateCol), false))
+            }
         }
+        context.contentResolver.query(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.SIZE, MediaStore.Video.Media.DATE_ADDED),
+            null, null, null
+        )?.use { c ->
+            val idCol = c.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+            val sizeCol = c.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
+            val dateCol = c.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
+            while (c.moveToNext()) {
+                items.add(DedupItem(c.getLong(idCol), c.getLong(sizeCol), c.getLong(dateCol), true))
+            }
+        }
+
+        // Only same-size groups of 2+ can contain duplicates — that's where we spend hashing effort.
+        val sameSizeGroups = items.groupBy { it.size }.values.filter { it.size > 1 }
+        val toDelete = mutableListOf<Uri>()
+
+        for (group in sameSizeGroups) {
+            if (!isActive) return@withContext emptyList()  // scan cancelled — delete nothing
+            val byHash = HashMap<String, MutableList<DedupItem>>()
+            for (item in group) {
+                if (!isActive) return@withContext emptyList()
+                val hash = hashUriContent(item.toUri()) ?: continue  // unreadable → never a delete candidate
+                byHash.getOrPut(hash) { mutableListOf() }.add(item)
+            }
+            for (dupes in byHash.values) {
+                if (dupes.size < 2) continue
+                // Keep the earliest (DATE_ADDED asc, then id asc); everything after it is a duplicate.
+                dupes.sortedWith(compareBy({ it.dateAdded }, { it.id }))
+                    .drop(1)
+                    .forEach { toDelete.add(it.toUri()) }
+            }
+        }
+        Log.d(TAG, "Duplicate scan: ${items.size} media, ${toDelete.size} duplicates to remove")
+        toDelete
+    }
+
+    /**
+     * DOUBLE content hash of a media file: SHA-256 **and** MD5 of the exact same bytes, computed in a
+     * single streamed pass (chunked so large videos don't blow memory) and joined as
+     * `"<sha256>:<md5>"`. Two files are only ever treated as duplicates when this combined key matches
+     * — i.e. **both** independent hashes agree — so a (already astronomically unlikely) collision in
+     * one algorithm can never on its own cause a wrong deletion. Returns null if the file can't be read.
+     */
+    private fun hashUriContent(uri: Uri): String? {
+        return try {
+            val sha256 = java.security.MessageDigest.getInstance("SHA-256")
+            val md5 = java.security.MessageDigest.getInstance("MD5")
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val buffer = ByteArray(1 shl 16) // 64 KB
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read == -1) break
+                    // Feed each chunk to BOTH digests — one file read, two independent hashes.
+                    sha256.update(buffer, 0, read)
+                    md5.update(buffer, 0, read)
+                }
+            } ?: return null
+            fun ByteArray.toHex() = joinToString("") { "%02x".format(it) }
+            "${sha256.digest().toHex()}:${md5.digest().toHex()}"
+        } catch (e: Exception) {
+            Log.e(TAG, "Duplicate hash failed for $uri", e)
+            null
+        }
+    }
 
     suspend fun createCategory(prompt: String) {
         try {

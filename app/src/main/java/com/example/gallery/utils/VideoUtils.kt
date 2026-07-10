@@ -21,11 +21,6 @@ import java.util.Locale
 
 object VideoUtils {
 
-    // ⚠️ TEMPORARY DEBUG CAP — only the newest N videos are scanned so video indexing finishes fast
-    // while testing. Remove (or raise) for production. Like the image cap, videos already indexed
-    // beyond the newest N are treated as "deleted" and dropped from the DB.
-    private const val DEBUG_VIDEO_LIMIT = 10
-
     /**
      * Scans MediaStore for all videos on the device.
      * Returns a list of (videoId, timestampMs) pairs, sorted by date descending.
@@ -49,8 +44,6 @@ object VideoUtils {
                 val id = cursor.getLong(idIdx)
                 val timestamp = cursor.getLong(dateIdx) * 1000L
                 list.add(id to timestamp)
-                // Debug cap: cursor is sorted newest-first, so this keeps the newest N.
-                if (list.size >= DEBUG_VIDEO_LIMIT) break
             }
         }
         return list
@@ -131,25 +124,6 @@ object VideoUtils {
             }
         }
         return list
-    }
-
-    /**
-     * Returns the set of bucket IDs that contain at least one video.
-     * Used to decide which albums should include videos.
-     */
-    fun getVideoBucketIds(context: Context): Set<Long> {
-        val set = mutableSetOf<Long>()
-        context.contentResolver.query(
-            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-            arrayOf(MediaStore.Video.Media.BUCKET_ID),
-            null, null, null
-        )?.use { cursor ->
-            val col = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.BUCKET_ID)
-            while (cursor.moveToNext()) {
-                set.add(cursor.getLong(col))
-            }
-        }
-        return set
     }
 
     /**

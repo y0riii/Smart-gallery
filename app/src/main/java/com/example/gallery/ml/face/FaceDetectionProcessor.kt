@@ -15,9 +15,6 @@ import java.lang.AutoCloseable
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 import kotlin.math.abs
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.sin
 import kotlin.math.sqrt
 
 class FaceDetectionProcessor : AutoCloseable {
@@ -290,56 +287,6 @@ class FaceDetectionProcessor : AutoCloseable {
             floatArrayOf(x, y),
             floatArrayOf(-y, x)
         )
-    }
-
-    /**
-     * Analytic SVD for a 2×2 matrix.
-     *
-     * Returns **U** (row-major 2×2, 4 floats) and **Vᵀ** (row-major 2×2,
-     * 4 floats).  We only need U and Vᵀ to compute the rotation; the
-     * singular values are not returned.
-     */
-    private fun svd2x2(
-        a: Float, b: Float,
-        c: Float, d: Float
-    ): Pair<FloatArray, FloatArray> {
-        // AᵀA = [[a² + c², ab + cd], [ab + cd, b² + d²]]
-        val ata00 = a * a + c * c
-        val ata01 = a * b + c * d
-        val ata11 = b * b + d * d
-
-        // Eigenvalues of the symmetric 2×2 AᵀA
-        val avg = (ata00 + ata11) * 0.5f
-        val diff = (ata00 - ata11) * 0.5f
-        val disc = sqrt(diff * diff + ata01 * ata01)
-        val s1sq = avg + disc
-        val s2sq = (avg - disc).coerceAtLeast(0f)
-
-        val s1 = sqrt(s1sq).coerceAtLeast(1e-10f)
-        val s2 = sqrt(s2sq).coerceAtLeast(1e-10f)
-
-        // Eigenvectors of AᵀA → columns of V
-        val theta = atan2(2f * ata01, ata00 - ata11) / 2f
-        val cosT = cos(theta)
-        val sinT = sin(theta)
-
-        // V  = [[cosT, -sinT], [sinT, cosT]]
-        // Vᵀ = [[cosT, sinT], [-sinT, cosT]]
-        val vt = floatArrayOf(cosT, sinT, -sinT, cosT)
-
-        // U = A · V · Σ⁻¹
-        // AV columns
-        val av0x = a * cosT + b * sinT
-        val av0y = c * cosT + d * sinT
-        val av1x = -a * sinT + b * cosT
-        val av1y = -c * sinT + d * cosT
-
-        val u = floatArrayOf(
-            av0x / s1, av1x / s2,
-            av0y / s1, av1y / s2
-        )
-
-        return Pair(u, vt)
     }
 
     override fun close() {

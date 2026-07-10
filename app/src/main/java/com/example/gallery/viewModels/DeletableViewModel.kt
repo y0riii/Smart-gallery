@@ -119,7 +119,15 @@ abstract class DeletableViewModel(protected val service: GalleryService) : ViewM
      * automatically triggers the next batch until all images are deleted.
      */
     fun deleteSelectedImages() {
-        val uris = selectedUris.toList()
+        deleteUris(selectedUris.toList())
+    }
+
+    /**
+     * Deletes an arbitrary list of URIs through the same batched system-dialog flow as
+     * [deleteSelectedImages] (used by e.g. the remove-duplicates feature, which isn't tied to the
+     * on-screen selection). No-op on an empty list.
+     */
+    fun deleteUris(uris: List<Uri>) {
         if (uris.isEmpty()) return
         // Partition into batches and queue them; confirmedDeleteUris starts empty.
         pendingDeleteBatches = ArrayDeque(uris.chunked(BATCH_SIZE))

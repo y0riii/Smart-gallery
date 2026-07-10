@@ -10,10 +10,12 @@ import androidx.lifecycle.viewModelScope
 import com.example.gallery.GalleryService
 import com.example.gallery.db.daos.PersonDao
 import com.example.gallery.ui.theme.ThemeMode
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
 import java.io.File
 
@@ -95,6 +97,48 @@ class GalleryViewModel(
 
     private fun prefs() = service.context
         .getSharedPreferences("gallery_prefs", android.content.Context.MODE_PRIVATE)
+
+    // ── Remove duplicates ───────────────────────────────────────────────────────
+    // Scan the whole gallery for byte-identical photos/videos, keep the earliest of each set, and
+    // delete the rest. Two steps so the user sees a count before anything is removed: scan → confirm.
+
+    /** True while the (potentially slow) duplicate scan is running — drives a progress dialog. */
+    var isScanningDuplicates by mutableStateOf(false)
+        private set
+
+    /** Result of the last scan: the URIs that WOULD be deleted (empty = none found). Non-null means
+     *  "show the result dialog"; the UI clears it via [confirmRemoveDuplicates] or [dismissDuplicateResult]. */
+    var duplicateScanResult by mutableStateOf<List<Uri>?>(null)
+        private set
+
+    /** Scans the entire library for exact duplicates; publishes the result to [duplicateScanResult]. */
+    fun scanForDuplicates() {
+        if (isScanningDuplicates) return
+        viewModelScope.launch {
+            isScanningDuplicates = true
+            val dupes = try {
+                withContext(Dispatchers.IO) { service.findDuplicateUrisToDelete() }
+            } catch (e: Exception) {
+                emptyList()
+            } finally {
+                isScanningDuplicates = false
+            }
+            duplicateScanResult = dupes
+        }
+    }
+
+    /** Confirms deletion of the duplicates from the last scan (earliest copy of each is kept). Routes
+     *  through the shared batched delete-request flow, so the system shows its own confirmation. */
+    fun confirmRemoveDuplicates() {
+        val dupes = duplicateScanResult ?: return
+        duplicateScanResult = null
+        deleteUris(dupes)
+    }
+
+    /** Dismisses the duplicate-scan result dialog without deleting anything. */
+    fun dismissDuplicateResult() {
+        duplicateScanResult = null
+    }
 
     // Feature 4: use the sort-order-consistent query so the @mention dropdown everywhere
     // shows named people A-Z first and #p1/#p2… placeholders last — same as the folder grid.

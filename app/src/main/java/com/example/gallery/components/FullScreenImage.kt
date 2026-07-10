@@ -71,10 +71,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -671,24 +669,6 @@ fun FullScreenImage(
                     }
                 }
             }
-        }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun FullScreenImagePreview() {
-    val mockImages = List(3) {
-        "android.resource://com.example.gallery/drawable/ic_launcher_background".toUri()
-    }
-    MaterialTheme {
-        Surface {
-            FullScreenImage(
-                images = mockImages,
-                initialIndex = 0,
-                onClose = {},
-                onDelete = {}
-            )
         }
     }
 }

@@ -31,14 +31,6 @@ interface PersonDao {
     @Query("SELECT name FROM person")
     suspend fun getAllNames(): List<String>
 
-    @Query(
-        """
-        SELECT name FROM person
-        ORDER BY name ASC
-    """
-    )
-    fun getAllNamesFlow(): Flow<List<String>>
-
     /**
      * Feature 4: returns person names sorted identically to PersonFolderRepository.sortedPeople():
      * named people (not matching #p\d+) come first in A-Z order,
@@ -69,9 +61,6 @@ interface PersonDao {
         updateEmbeddingRaw(personId, Converters().fromFloatArray(embedding))
     }
 
-    @Query("UPDATE person SET count = count + 1 WHERE id = :personId")
-    suspend fun incrementPersonCounter(personId: Long)
-
     @Query("UPDATE person SET count = CASE WHEN count > 0 THEN count - 1 ELSE 0 END WHERE id = :personId")
     suspend fun decrementPersonCounter(personId: Long)
 
@@ -80,37 +69,6 @@ interface PersonDao {
 
     @Query("DELETE FROM person")
     suspend fun deleteAllPersons()
-
-    @Transaction
-    @Query(
-        """
-        SELECT DISTINCT p.* FROM person AS p
-        JOIN faces AS f ON p.id = f.personId
-        WHERE f.mediaId = :mediaId
-    """
-    )
-    suspend fun getPersonsForImage(mediaId: Long): List<PersonEntity>
-
-    @Query(
-        """
-        SELECT DISTINCT f.mediaId FROM faces AS f
-        JOIN media_items AS m ON f.mediaId = m.mediaId
-        WHERE f.personId = :personId
-        ORDER BY m.timestampMs DESC
-    """
-    )
-    suspend fun getImagesIdsByPersonId(personId: Long): List<Long>
-
-    @Transaction
-    @Query(
-        """
-        SELECT DISTINCT m.* FROM media_items AS m
-        JOIN faces AS f ON m.mediaId = f.mediaId
-        WHERE f.personId = :personId
-        ORDER BY m.timestampMs DESC
-    """
-    )
-    suspend fun getImagesByPersonIdFull(personId: Long): List<MediaEntity>
 
     @Transaction
     @Query(
@@ -136,9 +94,6 @@ interface PersonDao {
     """
     )
     suspend fun getMediaIdsByNames(names: List<String>, count: Int): List<Long>
-
-    @Query("SELECT COUNT(*) FROM person")
-    suspend fun countPersons(): Int
 
     @Query("DELETE FROM person WHERE id = :personId")
     suspend fun deletePerson(personId: Long)

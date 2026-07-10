@@ -48,6 +48,7 @@ fun tutorialContentFor(tab: TutorialTab): TutorialContent = when (tab) {
             "The first time you open the app, it scans all your photos — and your videos — so it can search them. This can take a while if you have a lot, so just leave it running.",
             "You can follow how it's going on the progress bar at the bottom of the screen and in the notification (it shows photos first, then videos).",
             "Tap Pause or Resume on the notification anytime — processing picks up right where it left off.",
+            "Tap the duplicates icon (top-right, next to the gear) to find and remove exact-duplicate photos and videos — it keeps the earliest copy of each and asks before deleting anything.",
             "Once processed, type what you're looking for in plain words, like \"sunset at the beach\", and AI finds matching photos.",
             "Flip the toggle to Document search to find text inside pictures — receipts, notes, screenshots.",
             "Turn on \"Search in videos\" to include videos in your searches too (off by default — it searches photos only).",
@@ -106,11 +107,6 @@ class TutorialPrefs(context: Context) {
 
     fun markSeen(tab: TutorialTab) {
         prefs.edit().putBoolean(key(tab), true).apply()
-    }
-
-    /** Clears all "seen" flags so every tutorial shows again — handy for QA / a future "replay" option. */
-    fun resetAll() {
-        prefs.edit().clear().apply()
     }
 
     private fun key(tab: TutorialTab) = "seen_${tab.prefsKey}"
