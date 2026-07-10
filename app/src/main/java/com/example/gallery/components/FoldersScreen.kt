@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -50,6 +51,7 @@ import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -83,6 +85,29 @@ import com.example.gallery.folders.FolderItem
 import com.example.gallery.ui.theme.AppConfig
 import com.example.gallery.viewModels.FoldersViewModel
 
+/**
+ * Full-width labeled separator for the Albums tab sections (Favorites / Your albums / Default
+ * albums): a centered caption flanked by divider lines.
+ */
+@Composable
+private fun FolderSectionHeader(title: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 12.dp)
+        )
+        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FoldersScreen(
@@ -91,6 +116,9 @@ fun FoldersScreen(
     onRenameClick: (() -> Unit)? = null,
     canSort: Boolean = false,
     showDates: Boolean = true,
+    // When true (the Albums tab), the grid is split into full-width sections: Favorites, then
+    // user-created albums, then default (device) folders — each introduced by a labeled separator.
+    albumSections: Boolean = false,
     folderGridHeader: @Composable ColumnScope.() -> Unit = {},
     selectedFolderActions: @Composable RowScope.(FolderItem) -> Unit = {},
     additionalSelectionActions: @Composable RowScope.() -> Unit = {},
@@ -138,6 +166,17 @@ fun FoldersScreen(
         if (viewModel.shouldScrollToTop) {
             imagesGridState.scrollToItem(0)
             viewModel.shouldScrollToTop = false
+        }
+    }
+
+    // Scroll the FOLDER grid to the top when signaled (after creating an album), so the new album is
+    // visible. Also clears the saved scroll position so a later folder-return doesn't jump back down.
+    LaunchedEffect(viewModel.shouldScrollFoldersToTop) {
+        if (viewModel.shouldScrollFoldersToTop) {
+            foldersGridState.scrollToItem(0)
+            viewModel.savedGridFirstIndex = 0
+            viewModel.savedGridFirstScrollOffset = 0
+            viewModel.shouldScrollFoldersToTop = false
         }
     }
 
@@ -249,6 +288,42 @@ fun FoldersScreen(
                             modifier = Modifier.weight(1f)
                         )
                     } else {
+                        // One tile renderer reused by every section, so selection/favorite/open all
+                        // behave identically. The Modifier is passed in so callers can supply
+                        // Modifier.animateItem() from inside the LazyGrid item scope.
+                        val folderTile: @Composable (FolderItem, Modifier) -> Unit = { folder, tileModifier ->
+                            FolderTile(
+                                folder = folder,
+                                isSelecting = viewModel.isSelectingFolders,
+                                isSelected = viewModel.selectedFolderBucketIds.contains(folder.bucketId),
+                                isFavorite = viewModel.favoriteFolderIds.contains(folder.bucketId),
+                                onClick = {
+                                    if (viewModel.isSelectingFolders) {
+                                        viewModel.toggleFolderSelection(folder.bucketId)
+                                    } else {
+                                        // Feature 3: save foldersGridState position before opening a folder
+                                        viewModel.savedGridFirstIndex =
+                                            foldersGridState.firstVisibleItemIndex
+                                        viewModel.savedGridFirstScrollOffset =
+                                            foldersGridState.firstVisibleItemScrollOffset
+                                        viewModel.loadFolder(folder.bucketId)
+                                    }
+                                },
+                                onLongClick = {
+                                    viewModel.toggleFolderSelection(folder.bucketId)
+                                },
+                                onFavoriteClick = {
+                                    val firstIndex = foldersGridState.firstVisibleItemIndex
+                                    val firstOffset = foldersGridState.firstVisibleItemScrollOffset
+                                    viewModel.toggleFavoriteFolder(folder.bucketId)
+                                    coroutineScope.launch {
+                                        foldersGridState.scrollToItem(firstIndex, firstOffset)
+                                    }
+                                },
+                                modifier = tileModifier
+                            )
+                        }
+
                         LazyVerticalGrid(
                             columns = GridCells.Adaptive(minSize = 160.dp),
                             state = foldersGridState,   // Feature 3: dedicated state, never shared with image grid
@@ -259,39 +334,39 @@ fun FoldersScreen(
                             verticalArrangement = Arrangement.spacedBy(AppConfig.FolderGridSpacing),
                             horizontalArrangement = Arrangement.spacedBy(AppConfig.FolderGridSpacing)
                         ) {
-                            items(viewModel.filteredFolders, key = { it.bucketId }) { folder ->
-                                val isSelected = viewModel.selectedFolderBucketIds.contains(folder.bucketId)
-                                val isFavorite = viewModel.favoriteFolderIds.contains(folder.bucketId)
-                                FolderTile(
-                                    folder = folder,
-                                    isSelecting = viewModel.isSelectingFolders,
-                                    isSelected = isSelected,
-                                    isFavorite = isFavorite,
-                                    onClick = {
-                                        if (viewModel.isSelectingFolders) {
-                                            viewModel.toggleFolderSelection(folder.bucketId)
-                                        } else {
-                                            // Feature 3: save foldersGridState position before opening a folder
-                                            viewModel.savedGridFirstIndex =
-                                                foldersGridState.firstVisibleItemIndex
-                                            viewModel.savedGridFirstScrollOffset =
-                                                foldersGridState.firstVisibleItemScrollOffset
-                                            viewModel.loadFolder(folder.bucketId)
-                                        }
-                                    },
-                                    onLongClick = {
-                                        viewModel.toggleFolderSelection(folder.bucketId)
-                                    },
-                                    onFavoriteClick = {
-                                        val firstIndex = foldersGridState.firstVisibleItemIndex
-                                        val firstOffset = foldersGridState.firstVisibleItemScrollOffset
-                                        viewModel.toggleFavoriteFolder(folder.bucketId)
-                                        coroutineScope.launch {
-                                            foldersGridState.scrollToItem(firstIndex, firstOffset)
-                                        }
-                                    },
-                                    modifier = Modifier.animateItem()
-                                )
+                            if (albumSections) {
+                                // Albums tab: Favorites first (user + device, whichever are starred),
+                                // then your own albums, then the device's default folders. Each section
+                                // is introduced by a labeled full-width separator, and is sorted A–Z
+                                // (filteredFolders already orders favorites-first, then by name).
+                                val all = viewModel.filteredFolders
+                                val favIds = viewModel.favoriteFolderIds
+                                val favorites = all.filter { it.bucketId in favIds }
+                                val userAlbums = all.filter { it.bucketId !in favIds && it.isUserAlbum }
+                                val deviceFolders = all.filter { it.bucketId !in favIds && !it.isUserAlbum }
+
+                                if (favorites.isNotEmpty()) {
+                                    item(key = "hdr_favorites", span = { GridItemSpan(maxLineSpan) }) {
+                                        FolderSectionHeader("Favorites")
+                                    }
+                                    items(favorites, key = { it.bucketId }) { folderTile(it, Modifier.animateItem()) }
+                                }
+                                if (userAlbums.isNotEmpty()) {
+                                    item(key = "hdr_user_albums", span = { GridItemSpan(maxLineSpan) }) {
+                                        FolderSectionHeader("Your albums")
+                                    }
+                                    items(userAlbums, key = { it.bucketId }) { folderTile(it, Modifier.animateItem()) }
+                                }
+                                if (deviceFolders.isNotEmpty()) {
+                                    item(key = "hdr_device_folders", span = { GridItemSpan(maxLineSpan) }) {
+                                        FolderSectionHeader("Default albums")
+                                    }
+                                    items(deviceFolders, key = { it.bucketId }) { folderTile(it, Modifier.animateItem()) }
+                                }
+                            } else {
+                                items(viewModel.filteredFolders, key = { it.bucketId }) { folder ->
+                                    folderTile(folder, Modifier.animateItem())
+                                }
                             }
                         }
                     }

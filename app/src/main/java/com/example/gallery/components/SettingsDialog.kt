@@ -80,7 +80,7 @@ fun SettingsDialog(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Auto re-group faces", style = MaterialTheme.typography.titleSmall)
                         Text(
-                            text = "Periodically re-cluster all faces (after every 300 new ones) to " +
+                            text = "Periodically re-cluster all faces (after every 150 new ones) to " +
                                 "correct grouping drift. Named people and favorites are preserved.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant

@@ -7,7 +7,10 @@ data class FolderItem(
     val name: String,
     val photoCount: Int,
     val thumbnailUris: List<Uri>,   // up to 4 preview images
-    val insideFolderThumbnail: Uri?
+    val insideFolderThumbnail: Uri?,
+    // True for user-created albums (Room-backed, keyed by a negative bucketId) vs. read-only device
+    // MediaStore folders. Only user albums can be renamed-into / deleted / have media added.
+    val isUserAlbum: Boolean = false
 )
 
 /**

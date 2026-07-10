@@ -90,7 +90,6 @@ import com.example.gallery.db.FaceClusteringWorker
 import androidx.core.net.toUri
 import com.example.gallery.db.previews.CollectionPreview
 import com.example.gallery.components.CollectionPickerDialog
-import com.example.gallery.components.CollectionsFoldersScreen
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
@@ -126,14 +125,7 @@ class MainActivity : ComponentActivity() {
 
     private val albumsViewModel: AlbumsViewModel by viewModels {
         AlbumsViewModelFactory(
-            AlbumsFolderRepository(applicationContext, galleryService),
-            galleryService
-        )
-    }
-
-    private val collectionsViewModel: com.example.gallery.viewModels.CollectionsViewModel by viewModels {
-        com.example.gallery.viewModels.factories.CollectionsViewModelFactory(
-            com.example.gallery.folders.CollectionFolderRepository(db.collectionDao(), galleryService),
+            AlbumsFolderRepository(applicationContext, galleryService, db.collectionDao()),
             db.collectionDao(),
             galleryService
         )
@@ -151,7 +143,7 @@ class MainActivity : ComponentActivity() {
                 ThemeMode.DARK -> true
             }
             GalleryTheme(darkTheme = darkTheme) {
-                GalleryApp(galleryViewModel, peopleViewModel, categoryViewModel, albumsViewModel, collectionsViewModel, galleryService)
+                GalleryApp(galleryViewModel, peopleViewModel, categoryViewModel, albumsViewModel, galleryService)
             }
         }
     }
@@ -243,12 +235,11 @@ fun GalleryApp(
     peopleViewModel: PeopleViewModel,
     categoryViewModel: CategoryViewModel,
     albumsViewModel: AlbumsViewModel,
-    collectionsViewModel: com.example.gallery.viewModels.CollectionsViewModel,
     galleryService: GalleryService
 ) {
 
     var hasPermission by remember { mutableStateOf(false) }
-    val pagerState = rememberPagerState(pageCount = { 5 })
+    val pagerState = rememberPagerState(pageCount = { 4 })
     val coroutineScope = rememberCoroutineScope()
     val currentTab = if (hasPermission) pagerState.currentPage else 0
 
@@ -295,7 +286,6 @@ fun GalleryApp(
             peopleViewModel.onPermissionGranted()
             categoryViewModel.onPermissionGranted()
             albumsViewModel.onPermissionGranted()
-            collectionsViewModel.onPermissionGranted()
         }
     }
 
@@ -305,7 +295,6 @@ fun GalleryApp(
         currentTab == 1 -> peopleViewModel.fullScreenIndex != null
         currentTab == 2 -> categoryViewModel.fullScreenIndex != null
         currentTab == 3 -> albumsViewModel.fullScreenIndex != null
-        currentTab == 4 -> collectionsViewModel.fullScreenIndex != null
         else -> false
     }
 
@@ -315,7 +304,6 @@ fun GalleryApp(
         currentTab == 1 -> peopleViewModel.isSelecting
         currentTab == 2 -> categoryViewModel.isSelecting
         currentTab == 3 -> albumsViewModel.isSelecting
-        currentTab == 4 -> collectionsViewModel.isSelecting
         else -> false
     }
 
@@ -324,7 +312,6 @@ fun GalleryApp(
         currentTab == 1 -> peopleViewModel.isSelectingFolders
         currentTab == 2 -> categoryViewModel.isSelectingFolders
         currentTab == 3 -> albumsViewModel.isSelectingFolders
-        currentTab == 4 -> collectionsViewModel.isSelectingFolders
         else -> false
     }
 
@@ -332,13 +319,12 @@ fun GalleryApp(
         1 -> peopleViewModel.selectedFolder != null
         2 -> categoryViewModel.selectedFolder != null
         3 -> albumsViewModel.selectedFolder != null
-        4 -> collectionsViewModel.selectedFolder != null
         else -> false
     }
 
     val pagerScrollEnabled = !isFullScreen && !isSelecting && !isFolderOpen && !isSelectingFolders
 
-    // Collection picker dialog state
+    // Add-to-album picker dialog state (albums are the user-created, Room-backed folders).
     var showCollectionPicker by remember { mutableStateOf(false) }
     var pendingUrisForCollection by remember { mutableStateOf<Set<Uri>>(emptySet()) }
     var availableCollections by remember { mutableStateOf<List<CollectionPreview>>(emptyList()) }
@@ -346,7 +332,7 @@ fun GalleryApp(
     val onAddToCollection: (Set<Uri>) -> Unit = { uris ->
         pendingUrisForCollection = uris
         coroutineScope.launch {
-            availableCollections = collectionsViewModel.getCollectionsList()
+            availableCollections = albumsViewModel.getAlbumsList()
             showCollectionPicker = true
         }
     }
@@ -433,23 +419,6 @@ fun GalleryApp(
                             colors = navColors,
                             alwaysShowLabel = true
                         )
-                        NavigationBarItem(
-                            selected = currentTab == 4,
-                            onClick = {
-                                coroutineScope.launch {
-                                    pagerState.animateScrollToPage(4)
-                                }
-                            },
-                            icon = {
-                                Icon(
-                                    Icons.Default.Folder,
-                                    contentDescription = "Collections"
-                                )
-                            },
-                            label = { Text("Collections", textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            colors = navColors,
-                            alwaysShowLabel = true
-                        )
                     }
                 }
             }
@@ -477,24 +446,26 @@ fun GalleryApp(
                         )
                         2 -> CategoryFoldersScreen(categoryViewModel, allNames, onAddToCollection = onAddToCollection)
                         3 -> AlbumsFoldersScreen(albumsViewModel, allNames, onAddToCollection = onAddToCollection)
-                        4 -> CollectionsFoldersScreen(collectionsViewModel, allNames, onAddToCollection = onAddToCollection)
                     }
                 }
             }
         }
     }
 
-    // Collection picker dialog
+    // Add-to-album picker dialog
     if (showCollectionPicker) {
         CollectionPickerDialog(
             collections = availableCollections,
-            favoriteCollectionIds = collectionsViewModel.favoriteFolderIds,
+            // Album favorites are stored under the folder's negative bucketId (= -collectionId);
+            // map them back to positive collection ids so the picker highlights the right ones.
+            favoriteCollectionIds = albumsViewModel.favoriteFolderIds
+                .mapNotNull { if (it < 0) -it else null }.toSet(),
             onDismiss = {
                 showCollectionPicker = false
                 pendingUrisForCollection = emptySet()
             },
             onSelect = { collection ->
-                collectionsViewModel.addMediaToCollection(pendingUrisForCollection, collection.id)
+                albumsViewModel.addMediaToAlbum(pendingUrisForCollection, collection.id)
                 showCollectionPicker = false
                 pendingUrisForCollection = emptySet()
                 // Clear selection on the active view model
@@ -503,7 +474,6 @@ fun GalleryApp(
                     1 -> peopleViewModel.clearSelection()
                     2 -> categoryViewModel.clearSelection()
                     3 -> albumsViewModel.clearSelection()
-                    4 -> collectionsViewModel.clearSelection()
                 }
             }
         )

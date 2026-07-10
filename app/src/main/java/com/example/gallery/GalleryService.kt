@@ -162,10 +162,7 @@ class GalleryService private constructor(val context: Context) {
         private const val TAG = "GalleryService"
         private const val CATEGORY_MATCH_THRESHOLD = 0.22f
 
-        // After this many new faces have been assigned incrementally, run a full re-cluster to
-        // correct any drift (name-preserving — see runFullClustering). Prevents incremental
-        // mistakes from accumulating forever.
-        private const val FULL_RECLUSTER_THRESHOLD = 300
+        // (The full-recluster threshold now lives in FaceClusterer, which owns clustering.)
         private const val PREF_FACES_SINCE_FULL = "faces_since_full_cluster"
 
         // Minimum CLIP text↔image similarity for a search hit to count as a "strong" match.

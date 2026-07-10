@@ -48,11 +48,11 @@ fun CollectionPickerDialog(
                 Text("Cancel")
             }
         },
-        title = { Text("Add to Collection") },
+        title = { Text("Add to album") },
         text = {
             if (collections.isEmpty()) {
                 Text(
-                    "No collections yet. Create one from the Collections tab first.",
+                    "No albums yet. Create one from the Albums tab first.",
                     style = MaterialTheme.typography.bodyMedium
                 )
             } else {
@@ -89,7 +89,8 @@ fun CollectionPickerDialog(
                         item {
                             HorizontalDivider(
                                 modifier = Modifier.padding(vertical = 8.dp),
-                                color = MaterialTheme.colorScheme.outlineVariant
+                                thickness = 2.dp,
+                                color = MaterialTheme.colorScheme.outline
                             )
                         }
                     }

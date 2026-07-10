@@ -7,6 +7,7 @@ import android.provider.MediaStore
 import com.example.gallery.GalleryService
 import com.example.gallery.SearchResult
 import com.example.gallery.SortMode
+import com.example.gallery.db.daos.CollectionDao
 import com.example.gallery.utils.toMediaUri
 import com.example.gallery.utils.toVideoUri
 import kotlinx.coroutines.CoroutineScope
@@ -15,7 +16,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -31,10 +34,37 @@ import kotlinx.coroutines.withContext
  */
 class AlbumsFolderRepository(
     private val context: Context,
-    private val service: GalleryService
+    private val service: GalleryService,
+    private val collectionDao: CollectionDao
 ) : FolderSource {
 
+    // The Albums tab is a COMBINED view: user-created albums (Room-backed "collections", deletable,
+    // media can be added) plus the device's own MediaStore folders (Camera/Screenshots/…, read-only).
+    // User albums are keyed by a NEGATIVE bucketId (= -collectionId) so they never collide with real
+    // MediaStore bucket ids and can be routed apart in getImagesFlow / deletes.
     override fun getFoldersFlow(): Flow<List<FolderItem>> {
+        return combine(userAlbumsFlow(), deviceFoldersFlow()) { albums, device ->
+            albums + device
+        }.flowOn(Dispatchers.IO)
+    }
+
+    /** User-created albums, reactively followed from Room. */
+    private fun userAlbumsFlow(): Flow<List<FolderItem>> =
+        collectionDao.getCollectionsWithMediaIdsFlow().map { collections ->
+            collections.map { (collection, mediaIds) ->
+                FolderItem(
+                    bucketId = -collection.id,
+                    name = collection.name,
+                    photoCount = mediaIds.size,
+                    thumbnailUris = mediaIds.map { it.toMediaUri() }.topFourThumbnails(),
+                    insideFolderThumbnail = null,
+                    isUserAlbum = true
+                )
+            }.sortedBy { it.name }
+        }
+
+    /** The device's MediaStore folders, re-emitted on any media change via a ContentObserver. */
+    private fun deviceFoldersFlow(): Flow<List<FolderItem>> {
         return callbackFlow {
             // A dedicated scope so each MediaStore change can launch a fresh (re)load off the
             // observer's callback thread; cancelled in awaitClose to avoid leaking work.
@@ -60,7 +90,7 @@ class AlbumsFolderRepository(
                 context.contentResolver.unregisterContentObserver(observer)
                 scope.cancel()
             }
-        }.flowOn(Dispatchers.IO)
+        }
     }
 
     override fun getImagesFlow(
@@ -71,6 +101,12 @@ class AlbumsFolderRepository(
         toDate: Long?,
         sortMode: SortMode
     ): Flow<SearchResult> {
+        // Negative bucketId → a user album (collection). Follow its membership reactively from Room.
+        if (bucketId < 0) {
+            return collectionDao.getImagesIdsByCollectionFlow(-bucketId).map { mediaIds ->
+                service.searchWithin(mediaIds, prompt, useClip, fromDate, toDate, sortMode)
+            }.flowOn(Dispatchers.IO)
+        }
         return callbackFlow {
             val scope = CoroutineScope(Dispatchers.IO)
             fun load() {

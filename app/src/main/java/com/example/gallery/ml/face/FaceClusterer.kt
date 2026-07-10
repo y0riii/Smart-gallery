@@ -39,7 +39,7 @@ class FaceClusterer(
 
         // After this many new faces have been assigned incrementally, run a full re-cluster to
         // correct any drift (name-preserving). Prevents incremental mistakes from accumulating.
-        private const val FULL_RECLUSTER_THRESHOLD = 300
+        private const val FULL_RECLUSTER_THRESHOLD = 150
         private const val PREF_FACES_SINCE_FULL = "faces_since_full_cluster"
     }
 

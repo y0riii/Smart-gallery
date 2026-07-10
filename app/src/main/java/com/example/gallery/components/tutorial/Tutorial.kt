@@ -18,8 +18,7 @@ enum class TutorialTab(val prefsKey: String) {
     HOME("home"),
     PEOPLE("people"),
     AI_ALBUMS("ai_albums"),
-    ALBUMS("albums"),
-    COLLECTIONS("collections")
+    ALBUMS("albums")
 }
 
 /**
@@ -46,8 +45,8 @@ fun tutorialContentFor(tab: TutorialTab): TutorialContent = when (tab) {
             "so it can understand what's in them. This happens in the background — you can keep " +
             "using the app while it runs.",
         tips = listOf(
-            "Please wait while your photos are processed — the first run can take a while on a large library.",
-            "Watch the progress in the notification and in the progress bar at the bottom of the screen.",
+            "The first time you open the app, it scans all your photos so it can search them. This can take a while if you have a lot, so just leave it running.",
+            "You can follow how it's going on the progress bar at the bottom of the screen and in the notification.",
             "Tap Pause or Resume on the notification anytime — processing picks up right where it left off.",
             "Once processed, type what you're looking for in plain words, like \"sunset at the beach\", and AI finds matching photos.",
             "Flip the toggle to Document search to find text inside pictures — receipts, notes, screenshots.",
@@ -83,22 +82,13 @@ fun tutorialContentFor(tab: TutorialTab): TutorialContent = when (tab) {
     TutorialTab.ALBUMS -> TutorialContent(
         icon = Icons.Default.PhotoAlbum,
         title = "Albums",
-        summary = "Your device's own folders — Camera, Screenshots, Downloads, and the rest — " +
-            "including videos.",
+        summary = "Your device's own folders (Camera, Screenshots, and the rest, including videos), " +
+            "plus your own custom albums that you fill with any photos and videos you choose.",
         tips = listOf(
-            "Tap a folder to browse everything inside it.",
-            "Once a folder is open, you can search or filter within it.",
-            "These come straight from your phone's storage, so they mirror your other gallery apps."
-        )
-    )
-    TutorialTab.COLLECTIONS -> TutorialContent(
-        icon = Icons.Default.Folder,
-        title = "Collections",
-        summary = "Your own hand-picked groups of photos, organized exactly how you want.",
-        tips = listOf(
-            "Tap Create to start a new collection.",
-            "From any screen, long-press photos and choose \"Add to collection\".",
-            "Tap the star on a collection to pin it to the top."
+            "Tap any folder or album to browse everything inside it.",
+            "Tap Create to make your own album, then long-press photos anywhere and choose \"Add to album\".",
+            "Open one of your own albums and tap Delete to remove it — your photos are never deleted from the device.",
+            "Once a folder is open, you can search or filter within it."
         )
     )
 }

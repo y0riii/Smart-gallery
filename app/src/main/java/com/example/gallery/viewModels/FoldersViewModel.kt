@@ -59,6 +59,10 @@ abstract class FoldersViewModel(
 
     var shouldScrollToTop by mutableStateOf(false)
 
+    // Set to request the FOLDER grid (not the open-folder image grid) scroll to the top — used after
+    // creating an album so the user sees it appear at the top.
+    var shouldScrollFoldersToTop by mutableStateOf(false)
+
     // Feature 3: remembers the folders-grid scroll position so we can restore it when the user
     // navigates back from an open folder.
     var savedGridFirstIndex by mutableStateOf(0)
