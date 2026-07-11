@@ -251,10 +251,9 @@ fun ImageGridScreen(
                         showDeleteConfirmDialog = false
                         onDeleteSelected() // triggers ViewModel's deleteSelectedImages()
                     }) {
-                        Text(
-                            if (removeFromFolderLabel != null) "Delete from device" else "Delete",
-                            color = MaterialTheme.colorScheme.error
-                        )
+                        // Always explicit that this removes the file from the device — clear even in
+                        // folders where "Delete from device" is the only option (device folders, People).
+                        Text("Delete from device", color = MaterialTheme.colorScheme.error)
                     }
                     TextButton(onClick = { showDeleteConfirmDialog = false }) { Text("Cancel") }
                 }

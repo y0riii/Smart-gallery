@@ -79,7 +79,8 @@ fun tutorialContentFor(tab: TutorialTab): TutorialContent = when (tab) {
         tips = listOf(
             "Tap Create and type a theme like \"food\", \"cars\", or \"mountains\".",
             "The app scans your library and automatically adds whatever matches — both photos and videos.",
-            "Open an album anytime; newly matching photos and videos are added as they're indexed."
+            "Open an album anytime; newly matching photos and videos are added as they're indexed.",
+            "Deleting a photo inside an album lets you choose: \"Remove from album\" takes it out of just this AI album (the file stays on your device), or \"Delete from device\" removes it everywhere."
         )
     )
     TutorialTab.ALBUMS -> TutorialContent(
@@ -91,6 +92,8 @@ fun tutorialContentFor(tab: TutorialTab): TutorialContent = when (tab) {
             "Tap any folder or album to browse everything inside it.",
             "Tap Create to make your own album, then long-press photos anywhere and choose \"Add to album\".",
             "Long-press one of your own albums to select it, then tap Rename to rename it or Delete to remove it — your photos are never deleted from the device.",
+            "Inside an open folder, deleting a photo gives you a choice: \"Remove from album\" takes it out of just that album but keeps it on your device, while \"Delete from device\" removes it everywhere.",
+            "You can only \"Remove from album\" in albums you created — the phone's own folders (Camera, Screenshots, …) only offer \"Delete from device\", since the photo actually lives there.",
             "The \"Detected Duplicates\" album is filled for you when you use Group duplicates on the Home screen — it gathers every copy of each duplicate, side by side, for easy review.",
             "Once a folder is open, you can search or filter within it."
         )
