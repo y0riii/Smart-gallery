@@ -224,6 +224,30 @@ abstract class FoldersViewModel(
         applyFilters(scrollToTop = true)
     }
 
+    // ── Remove-from-folder (vs delete-from-device) ─────────────────────────────
+    /**
+     * Label for the "remove from this folder" delete option for [folder], or null if the folder has
+     * no removable membership (device MediaStore folders, People). Overridden by tabs that support it
+     * (user albums, AI albums). Null → the delete dialog only offers "delete from device".
+     */
+    open fun removeFromFolderLabel(folder: FolderItem): String? = null
+
+    /** The remove-from-folder label for the currently open folder, or null if unsupported. */
+    fun currentRemoveFromFolderLabel(): String? = selectedFolder?.let { removeFromFolderLabel(it) }
+
+    /** Removes the current selection from the open folder only (keeps the files on the device). */
+    fun removeSelectedFromFolder() {
+        val folder = selectedFolder ?: return
+        if (removeFromFolderLabel(folder) == null) return
+        val ids = selectedUris.mapNotNull { it.lastPathSegment?.toLongOrNull() }
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            folderSource.removeMediaFromFolder(folder.bucketId, ids)
+            clearSelection()
+            // The open folder observes a reactive membership flow (Room), so the grid updates itself.
+        }
+    }
+
     override suspend fun onDeleteSuccess(uris: List<Uri>) {
         if (uris.isEmpty()) return
         val deletedIndex = images.indexOf(uris[0])

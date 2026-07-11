@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.viewModelScope
 import com.example.gallery.GalleryService
 import com.example.gallery.folders.CategoryFolderRepository
+import com.example.gallery.folders.FolderItem
 import kotlinx.coroutines.launch
 
 class CategoryViewModel(
@@ -14,6 +15,9 @@ class CategoryViewModel(
 ) : FoldersViewModel(categoryFolderRepository, service) {
     var isCreatingCategory by mutableStateOf(false)
         private set
+
+    // An AI album has membership, so it supports "remove from album" (the file stays on the device).
+    override fun removeFromFolderLabel(folder: FolderItem): String? = "Remove from album"
 
     fun createCategory(name: String) {
         viewModelScope.launch {

@@ -30,6 +30,11 @@ interface CategoryDao {
     @Delete
     suspend fun deleteCrossRef(ref: MediaCategoryCrossRef)
 
+    /** Removes specific media from a category WITHOUT deleting the files (the "remove from album"
+     *  delete option). */
+    @Query("DELETE FROM media_category_join WHERE categoryId = :categoryId AND mediaId IN (:mediaIds)")
+    suspend fun removeImagesFromCategory(categoryId: Long, mediaIds: List<Long>)
+
     @Query("DELETE FROM category WHERE id = :categoryId")
     suspend fun deleteCategory(categoryId: Long)
 

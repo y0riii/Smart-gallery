@@ -43,6 +43,11 @@ interface CollectionDao {
     @Query("SELECT * FROM collection_media_join WHERE collectionId = :collectionId")
     suspend fun getCrossRefsForCollection(collectionId: Long): List<CollectionMediaCrossRef>
 
+    /** Removes specific media from a collection WITHOUT deleting the files (the "remove from album"
+     *  delete option). */
+    @Query("DELETE FROM collection_media_join WHERE collectionId = :collectionId AND mediaId IN (:mediaIds)")
+    suspend fun removeImagesFromCollection(collectionId: Long, mediaIds: List<Long>)
+
     /** Names of the user albums a given media item currently belongs to (for the single-item Info panel). */
     @Query(
         """

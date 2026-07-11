@@ -10,6 +10,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -70,6 +71,10 @@ fun ImageGridScreen(
     onAddToCollectionSelected: (() -> Unit)? = null,
     // Shown only when exactly one item is selected; opens its Info panel (size / path / albums).
     onInfoSelected: (() -> Unit)? = null,
+    // When non-null, the delete dialog also offers "remove from this folder" (keeps the files on the
+    // device) using this label; the callback removes the selection's membership. Null = device-only.
+    removeFromFolderLabel: String? = null,
+    onRemoveFromFolder: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
 
@@ -219,23 +224,39 @@ fun ImageGridScreen(
 
     // ── Feature 1: bulk delete confirmation dialog ───────────────────────────
     if (showDeleteConfirmDialog) {
+        val count = selectedUris.size
+        val plural = if (count == 1) "" else "s"
         AlertDialog(
             onDismissRequest = { showDeleteConfirmDialog = false },
-            title = { Text("Delete ${selectedUris.size} photo(s)?") },
-            text = { Text("Are you sure you want to delete the selected photos? This cannot be undone.") },
+            title = { Text("Delete $count item$plural?") },
+            text = {
+                Text(
+                    if (removeFromFolderLabel != null)
+                        "Remove them from this album (they stay on your device), or delete them from " +
+                            "your device? Deleting from the device can't be undone."
+                    else
+                        "This permanently deletes them from your device and can't be undone."
+                )
+            },
+            // Up to three stacked choices: remove-from-folder (optional), delete-from-device, cancel.
             confirmButton = {
-                TextButton(
-                    onClick = {
+                Column(horizontalAlignment = Alignment.End) {
+                    if (removeFromFolderLabel != null && onRemoveFromFolder != null) {
+                        TextButton(onClick = {
+                            showDeleteConfirmDialog = false
+                            onRemoveFromFolder()
+                        }) { Text(removeFromFolderLabel) }
+                    }
+                    TextButton(onClick = {
                         showDeleteConfirmDialog = false
                         onDeleteSelected() // triggers ViewModel's deleteSelectedImages()
+                    }) {
+                        Text(
+                            if (removeFromFolderLabel != null) "Delete from device" else "Delete",
+                            color = MaterialTheme.colorScheme.error
+                        )
                     }
-                ) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirmDialog = false }) {
-                    Text("Cancel")
+                    TextButton(onClick = { showDeleteConfirmDialog = false }) { Text("Cancel") }
                 }
             }
         )

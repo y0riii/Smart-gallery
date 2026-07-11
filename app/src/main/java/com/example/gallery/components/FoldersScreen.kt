@@ -541,7 +541,11 @@ fun FoldersScreen(
                         // Feature 1: share — pass context available in this composable scope
                         onShareSelected = { viewModel.shareSelectedImages(context) },
                         onAddToCollectionSelected = { onAddToCollection(viewModel.selectedUris) },
-                        onInfoSelected = { viewModel.showMediaInfo(viewModel.selectedUris.first()) }
+                        onInfoSelected = { viewModel.showMediaInfo(viewModel.selectedUris.first()) },
+                        // "Remove from album" for folders with membership (user/AI albums); null for
+                        // device folders and People, which get device-delete only.
+                        removeFromFolderLabel = viewModel.currentRemoveFromFolderLabel(),
+                        onRemoveFromFolder = { viewModel.removeSelectedFromFolder() }
                     )
 
                     if (viewModel.isLoading && viewModel.images.isEmpty()) {

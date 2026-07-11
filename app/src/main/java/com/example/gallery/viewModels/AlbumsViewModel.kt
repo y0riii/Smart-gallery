@@ -8,6 +8,7 @@ import com.example.gallery.db.daos.CollectionDao
 import com.example.gallery.db.entities.CollectionEntity
 import com.example.gallery.db.entities.CollectionMediaCrossRef
 import com.example.gallery.folders.AlbumsFolderRepository
+import com.example.gallery.folders.FolderItem
 import com.example.gallery.folders.collectionIdOf
 import com.example.gallery.folders.isUserAlbumBucket
 import kotlinx.coroutines.launch
@@ -29,6 +30,11 @@ class AlbumsViewModel(
     // performDeleteFolders below simply skips them.
     override val canDeleteFolders: Boolean
         get() = true
+
+    // "Remove from album" is offered only inside a user album; a device folder has no membership to
+    // remove from (the file physically lives there), so it only gets "delete from device".
+    override fun removeFromFolderLabel(folder: FolderItem): String? =
+        if (folder.isUserAlbum) "Remove from album" else null
 
     fun createAlbum(name: String) {
         val trimmed = name.trim()

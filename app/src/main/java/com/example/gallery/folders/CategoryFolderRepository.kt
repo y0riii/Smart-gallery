@@ -64,6 +64,13 @@ class CategoryFolderRepository(
         categoryDao.deleteCategory(bucketId)
     }
 
+    /** Removes media from this AI album's membership (bucketId is the category id). */
+    override suspend fun removeMediaFromFolder(bucketId: Long, mediaIds: List<Long>) {
+        if (mediaIds.isNotEmpty()) {
+            withContext(Dispatchers.IO) { categoryDao.removeImagesFromCategory(bucketId, mediaIds) }
+        }
+    }
+
     suspend fun getFolders(): List<FolderItem> = withContext(Dispatchers.IO) {
         val categories = categoryDao.getCategoriesWithMediaIds()
         categories.map { (category, mediaIds) ->

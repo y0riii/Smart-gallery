@@ -18,4 +18,11 @@ interface FolderSource {
         sortMode: SortMode = SortMode.RELEVANCE,
         includeVideos: Boolean = false
     ): Flow<SearchResult>
+
+    /**
+     * Removes [mediaIds] from the folder [bucketId] WITHOUT deleting the files — i.e. drops their
+     * membership (used by the "remove from album" delete option). Default no-op for folders that
+     * have no membership to remove (device MediaStore folders, People).
+     */
+    suspend fun removeMediaFromFolder(bucketId: Long, mediaIds: List<Long>) {}
 }

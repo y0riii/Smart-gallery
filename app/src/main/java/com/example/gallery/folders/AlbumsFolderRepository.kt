@@ -256,6 +256,15 @@ class AlbumsFolderRepository(
         getMergedAlbumMedia(name, null, null)
     }
 
+    /** Removes media from a USER album's membership (device folders have no membership → no-op). */
+    override suspend fun removeMediaFromFolder(bucketId: Long, mediaIds: List<Long>) {
+        if (isUserAlbumBucket(bucketId) && mediaIds.isNotEmpty()) {
+            withContext(Dispatchers.IO) {
+                collectionDao.removeImagesFromCollection(collectionIdOf(bucketId), mediaIds)
+            }
+        }
+    }
+
     // ── Album contents ───────────────────────────────────────────────────────
 
     private suspend fun getMedia(
