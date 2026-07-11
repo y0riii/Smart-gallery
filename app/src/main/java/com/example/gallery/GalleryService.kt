@@ -18,6 +18,7 @@ import com.example.gallery.db.FaceClusteringWorker
 import com.example.gallery.db.GalleryIndexerWorker
 import com.example.gallery.db.entities.ArabicOcrDoneEntity
 import com.example.gallery.db.entities.CategoryEntity
+import com.example.gallery.db.entities.CollectionEntity
 import com.example.gallery.db.entities.FaceEntity
 import com.example.gallery.db.entities.MediaCategoryCrossRef
 import com.example.gallery.db.entities.MediaEntity
@@ -47,6 +48,7 @@ import kotlinx.coroutines.async
 import java.util.concurrent.Executors
 import kotlinx.coroutines.awaitAll
 import android.database.ContentObserver
+import com.example.gallery.db.entities.CollectionMediaCrossRef
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -128,6 +130,39 @@ class GalleryService private constructor(val context: Context) {
     }
 
     /**
+     * Cancels any pending/running Arabic OCR pass. Called when the user disables Arabic OCR so a
+     * previously-enqueued (WorkManager-persisted) pass doesn't linger and keep showing its
+     * notification. Safe to call when nothing is enqueued.
+     */
+    fun cancelArabicOcrWork() {
+        WorkManager.getInstance(context).cancelUniqueWork("GalleryArabicOcr_OneTime")
+    }
+
+    /**
+     * Enqueues the video-indexing pass (a GalleryIndexerWorker in video-only mode). Runs after face
+     * clustering in the pipeline; the clustering worker calls this, and the video pass then triggers
+     * the Arabic pass. Does NOT raise [indexingRequested] — it's a downstream step, not a fresh
+     * indexing request. KEEP dedupes concurrent enqueues.
+     */
+    fun startVideoIndexingWorkManager() {
+        val request = OneTimeWorkRequestBuilder<GalleryIndexerWorker>()
+            .setInputData(androidx.work.workDataOf(GalleryIndexerWorker.KEY_VIDEO_ONLY to true))
+            .setBackoffCriteria(
+                androidx.work.BackoffPolicy.LINEAR,
+                5,
+                java.util.concurrent.TimeUnit.MINUTES
+            ).build()
+
+        WorkManager.getInstance(context)
+            .beginUniqueWork(
+                "GalleryVideoIndexing_OneTime",
+                ExistingWorkPolicy.KEEP,
+                request
+            )
+            .enqueue()
+    }
+
+    /**
      * Triggers a full Chinese Whispers re-clustering by resetting the
      * first-run flag and enqueuing a one-time FaceClusteringWorker.
      * Any existing clustering work is replaced.
@@ -166,6 +201,11 @@ class GalleryService private constructor(val context: Context) {
 
         private const val TAG = "GalleryService"
         private const val CATEGORY_MATCH_THRESHOLD = 0.22f
+
+        // Reserved name of the auto-populated user album that "Group duplicates" fills with every
+        // version of each duplicated file. Users can't create an album with this name (see
+        // AlbumsViewModel.createAlbum), so the app fully owns it.
+        const val DUPLICATES_ALBUM_NAME = "Detected Duplicates"
 
         // (The full-recluster threshold now lives in FaceClusterer, which owns clustering.)
         private const val PREF_FACES_SINCE_FULL = "faces_since_full_cluster"
@@ -243,6 +283,7 @@ class GalleryService private constructor(val context: Context) {
     private val personDao = db.personDao()
     private val categoryDao = db.categoryDao()
     private val faceDao = db.faceDao()
+    private val collectionDao = db.collectionDao()
 
     // The shared text encoder + its lazy init live in TextEncoderProvider; these getters just
     // adapt it to this instance's context.
@@ -274,10 +315,9 @@ class GalleryService private constructor(val context: Context) {
     // ARCHITECTURE.md for the full pipeline and crash-safety guarantees.
 
     /**
-     * Compares the device's MediaStore with the Room Database and syncs them.
-     *
-     * Returns true if indexing ran, false if skipped because another invocation
-     * was already in progress (callers should treat false as a no-op, not an error).
+     * Compares the device's MediaStore IMAGES with the Room Database and syncs them (add new / drop
+     * removed / compute ML features). Videos are handled separately by [indexVideosBackground], which
+     * the pipeline runs AFTER face clustering — order: images → cluster → videos → Arabic.
      */
     suspend fun indexImagesBackground(onProgress: suspend (Int, Int) -> Unit) {
         withContext(Dispatchers.IO) {
@@ -287,7 +327,7 @@ class GalleryService private constructor(val context: Context) {
 
             // 2. Fetch IMAGE ids currently in the database (isVideo=0). We intentionally exclude
             //    video rows so this image diff never deletes them — videos are synced separately by
-            //    processAndIndexVideos below.
+            //    indexVideosBackground.
             val dbImageIds = mediaDao.getAllImageIds().toSet()
 
             // 3. Calculate the differences (The Diff)
@@ -311,10 +351,16 @@ class GalleryService private constructor(val context: Context) {
                 Log.d(TAG, "Sync: Database is fully synced. No new images to process.")
                 progress.value = null
             }
+        }
+    }
 
-            // 6. Then sync videos (keyframe sampling → CLIP + OCR). Runs after images so photos —
-            //    the primary experience — finish first. Kept lightweight per video (≤8 frames).
-            //    Wrapped so a video-side failure never fails image indexing / clustering.
+    /**
+     * Video-indexing pass (keyframe sampling → mean-pooled CLIP + OCR → AI-album matching). Runs on
+     * its own, scheduled AFTER face clustering by [FaceClusteringWorker] (faces come from images only,
+     * so clustering doesn't need videos). Wrapped so a video-side failure is non-fatal to the pipeline.
+     */
+    suspend fun indexVideosBackground(onProgress: suspend (Int, Int) -> Unit) {
+        withContext(Dispatchers.IO) {
             try {
                 processAndIndexVideos(onProgress)
             } catch (e: Throwable) {
@@ -924,22 +970,16 @@ class GalleryService private constructor(val context: Context) {
     }
 
     /**
-     * Finds duplicate media (images AND videos) across the WHOLE device and returns the URIs that
-     * should be deleted — i.e. every copy EXCEPT the earliest of each duplicate set.
+     * Scans the WHOLE device (images AND videos) and returns the sets of byte-for-byte identical files
+     * as a list of groups. Each group has 2+ members (a file with at least one exact copy) and is
+     * ordered EARLIEST-first (DATE_ADDED asc, ties by lower id), so the original leads its copies.
      *
-     * "Duplicate" means byte-for-byte identical content, detected conservatively so this never deletes
-     * a photo that merely looks similar: items are first grouped by exact file size (cheap), and only
-     * within a same-size group is each file's **double** content hash computed — SHA-256 and MD5 of the
-     * same bytes (see [hashUriContent]). Two files count as duplicates only when **both** hashes match,
-     * so a collision in either algorithm alone can never trigger a wrong deletion. The earliest by
-     * DATE_ADDED (ties broken by the lower id — added first) is kept and the rest are returned for
-     * deletion. Any file that can't be read is skipped, never deleted. This scans the entire library
-     * (not the debug-capped indexing scan).
-     *
-     * Cheap I/O + hashing only; the actual delete goes through the normal MediaStore delete-request
-     * flow (system confirmation) so nothing is removed without the user's OK.
+     * "Duplicate" = identical content, detected conservatively: items are first grouped by exact file
+     * size (cheap), then within a same-size group each file's DOUBLE hash (SHA-256 + MD5, see
+     * [hashUriContent]) is computed; only files whose combined hash matches are grouped. Unreadable
+     * files are skipped. Cancellable mid-scan. Scans the entire library (not the debug-capped indexer).
      */
-    suspend fun findDuplicateUrisToDelete(): List<Uri> = withContext(Dispatchers.IO) {
+    private suspend fun scanDuplicateGroups(): List<List<DedupItem>> = withContext(Dispatchers.IO) {
         val items = mutableListOf<DedupItem>()
 
         context.contentResolver.query(
@@ -969,26 +1009,119 @@ class GalleryService private constructor(val context: Context) {
 
         // Only same-size groups of 2+ can contain duplicates — that's where we spend hashing effort.
         val sameSizeGroups = items.groupBy { it.size }.values.filter { it.size > 1 }
-        val toDelete = mutableListOf<Uri>()
+        val groups = mutableListOf<List<DedupItem>>()
 
         for (group in sameSizeGroups) {
-            if (!isActive) return@withContext emptyList()  // scan cancelled — delete nothing
+            if (!isActive) return@withContext emptyList()  // scan cancelled
             val byHash = HashMap<String, MutableList<DedupItem>>()
             for (item in group) {
                 if (!isActive) return@withContext emptyList()
-                val hash = hashUriContent(item.toUri()) ?: continue  // unreadable → never a delete candidate
+                val hash = hashUriContent(item.toUri()) ?: continue  // unreadable → skip
                 byHash.getOrPut(hash) { mutableListOf() }.add(item)
             }
             for (dupes in byHash.values) {
                 if (dupes.size < 2) continue
-                // Keep the earliest (DATE_ADDED asc, then id asc); everything after it is a duplicate.
-                dupes.sortedWith(compareBy({ it.dateAdded }, { it.id }))
-                    .drop(1)
-                    .forEach { toDelete.add(it.toUri()) }
+                // Earliest first (DATE_ADDED asc, then id asc) so the original leads its copies.
+                groups.add(dupes.sortedWith(compareBy({ it.dateAdded }, { it.id })))
             }
         }
-        Log.d(TAG, "Duplicate scan: ${items.size} media, ${toDelete.size} duplicates to remove")
-        toDelete
+        Log.d(TAG, "Duplicate scan: ${items.size} media, ${groups.size} duplicate groups")
+        groups
+    }
+
+    /**
+     * Scans for exact duplicates and gathers EVERY version of each duplicated file (the original and
+     * all its copies) into the reserved user album [DUPLICATES_ALBUM_NAME], with the members of each
+     * duplicate set placed adjacently (original first). The album is created if missing and its
+     * contents are REPLACED on each run. Returns the number of media grouped (0 = no duplicates).
+     */
+    suspend fun groupDuplicatesIntoAlbum(): Int = withContext(Dispatchers.IO) {
+        val groups = scanDuplicateGroups()
+        // Flatten in group order so duplicates stay adjacent (original then its copies, set by set).
+        val flat = groups.flatten()
+
+        val collectionId = getOrCreateDuplicatesAlbum()
+        // Replace the album's contents each run so it always reflects the latest scan.
+        collectionDao.clearCollectionMembers(collectionId)
+        if (flat.isEmpty()) return@withContext 0
+
+        // Album membership has a FK to media_items, and duplicates may be un-indexed — insert
+        // placeholders first (the indexer fills real rows in later; browsing doesn't need them).
+        ensureMediaRows(flat.map { it.toUri() })
+
+        // dateAddedMs is the album's browse sort key (ORDER BY dateAddedMs DESC). Assign a strictly
+        // DECREASING value across the flattened order so the album shows the grouped order exactly.
+        val base = System.currentTimeMillis()
+        val refs = flat.mapIndexed { index, item ->
+            CollectionMediaCrossRef(collectionId, item.id, base - index)
+        }
+        collectionDao.insertCrossRefs(refs)
+        Log.d(TAG, "Grouped ${flat.size} duplicate media into '$DUPLICATES_ALBUM_NAME'")
+        flat.size
+    }
+
+    /** Room collection id of the reserved duplicates album, creating it if it doesn't exist yet. */
+    private suspend fun getOrCreateDuplicatesAlbum(): Long {
+        collectionDao.getCollectionByName(DUPLICATES_ALBUM_NAME)?.let { return it.id }
+        return collectionDao.insertCollection(CollectionEntity(name = DUPLICATES_ALBUM_NAME))
+    }
+
+    // ═══════════════════════════ MEDIA INFO ═══════════════════════════
+
+    /** Details for the single-item "Info" panel: file name, byte size, full path, and the user albums
+     *  the item currently belongs to. */
+    data class MediaInfo(
+        val name: String,
+        val sizeBytes: Long,
+        val path: String,
+        val albums: List<String>,
+        val isVideo: Boolean
+    )
+
+    /** Loads [MediaInfo] for one [uri], or null if it isn't found in MediaStore. DATA (the absolute
+     *  file path) is deprecated but still the most informative "path" across API levels. */
+    @Suppress("DEPRECATION")
+    suspend fun getMediaInfo(uri: Uri): MediaInfo? = withContext(Dispatchers.IO) {
+        val id = uri.lastPathSegment?.toLongOrNull() ?: return@withContext null
+        var name = ""
+        var size = 0L
+        var path = ""
+        var bucket: String? = null
+        try {
+            context.contentResolver.query(
+                uri,
+                arrayOf(
+                    MediaStore.MediaColumns.DISPLAY_NAME,
+                    MediaStore.MediaColumns.SIZE,
+                    MediaStore.MediaColumns.DATA,
+                    MediaStore.MediaColumns.BUCKET_DISPLAY_NAME
+                ),
+                null, null, null
+            )?.use { c ->
+                if (c.moveToFirst()) {
+                    val ni = c.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                    val si = c.getColumnIndex(MediaStore.MediaColumns.SIZE)
+                    val di = c.getColumnIndex(MediaStore.MediaColumns.DATA)
+                    val bi = c.getColumnIndex(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME)
+                    if (ni >= 0 && !c.isNull(ni)) name = c.getString(ni)
+                    if (si >= 0 && !c.isNull(si)) size = c.getLong(si)
+                    if (di >= 0 && !c.isNull(di)) path = c.getString(di)
+                    if (bi >= 0 && !c.isNull(bi)) bucket = c.getString(bi)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "getMediaInfo query failed for $uri", e)
+        }
+        // The "default album" is the device folder the file physically lives in (its MediaStore
+        // bucket). Fall back to deriving the folder name from the path on older devices.
+        val deviceFolder = bucket
+            ?: path.substringBeforeLast('/', "").substringAfterLast('/').ifBlank { null }
+        // User albums the item is in, EXCLUDING the reserved auto "Detected Duplicates" album.
+        val userAlbums = collectionDao.getCollectionNamesForMedia(id)
+            .filterNot { it.equals(DUPLICATES_ALBUM_NAME, ignoreCase = true) }
+        // Device folder (default album) first, then the user albums.
+        val albums = listOfNotNull(deviceFolder) + userAlbums
+        MediaInfo(name = name, sizeBytes = size, path = path, albums = albums, isVideo = uri.isVideoUri())
     }
 
     /**

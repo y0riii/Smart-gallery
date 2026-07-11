@@ -35,6 +35,11 @@ class GalleryIndexerWorker(
         // normal device-vs-DB sync (used when the user enables Arabic OCR).
         const val KEY_RE_OCR_ONLY = "reOcrOnly"
 
+        // Input-data flag: when true this worker runs ONLY the video-indexing pass. Video indexing was
+        // moved out of the image pass so the pipeline order is images → cluster → videos → Arabic; the
+        // clustering worker enqueues this once faces are grouped.
+        const val KEY_VIDEO_ONLY = "videoOnly"
+
         // Minimum gap between progress/notification updates during indexing (see doWork).
         private const val PROGRESS_UPDATE_MS = 500L
 
@@ -107,8 +112,18 @@ class GalleryIndexerWorker(
 
     override suspend fun doWork(): Result {
         val reOcrOnly = inputData.getBoolean(KEY_RE_OCR_ONLY, false)
+        val videoOnly = inputData.getBoolean(KEY_VIDEO_ONLY, false)
+
+        // A stale Arabic pass may have been enqueued (and persisted by WorkManager across restarts)
+        // before the user turned Arabic OCR off. Bail BEFORE showing any foreground notification so it
+        // never flashes "Preparing Arabic text scan…" once the feature is disabled.
+        if (reOcrOnly && !GalleryService.getInstance(applicationContext).arabicOcrEnabled) {
+            return Result.success()
+        }
+
         // Set before the first notification so even "Preparing…" uses the right wording.
         isArabicPass = reOcrOnly
+        isVideoPass = videoOnly
 
         try {
             setForeground(createForegroundInfo(0, 0))
@@ -148,36 +163,50 @@ class GalleryIndexerWorker(
                     }
                 }
                 try {
-                    if (reOcrOnly) {
-                        service.runArabicOcrPass(onProgress)
-                    } else {
-                        service.indexImagesBackground(onProgress)
-                        // Indexing has run; the priority request is satisfied, so a subsequent Arabic
-                        // pass (enqueued after clustering) won't immediately yield.
-                        GalleryService.indexingRequested = false
+                    when {
+                        // Arabic OCR pass (images then videos) — the final pipeline step.
+                        reOcrOnly -> service.runArabicOcrPass(onProgress)
+                        // Video indexing — runs AFTER face clustering (enqueued by that worker).
+                        videoOnly -> service.indexVideosBackground(onProgress)
+                        // Image indexing — the first step.
+                        else -> {
+                            service.indexImagesBackground(onProgress)
+                            // Images have run; the priority request is satisfied, so a downstream
+                            // Arabic pass won't immediately yield.
+                            GalleryService.indexingRequested = false
+                        }
                     }
                 } finally {
                     GalleryService.isIndexingRunning = false
                 }
             }
 
-            // A normal indexing pass then triggers face clustering; an OCR-only re-scan doesn't
-            // change faces, so it skips that.
-            if (!reOcrOnly) {
-                val clusterRequest = OneTimeWorkRequestBuilder<FaceClusteringWorker>()
-                    .setBackoffCriteria(
-                        androidx.work.BackoffPolicy.LINEAR,
-                        5,
-                        java.util.concurrent.TimeUnit.MINUTES
-                    ).build()
-
-                WorkManager.getInstance(applicationContext)
-                    .beginUniqueWork(
-                        "GalleryClustering_OneTime",
-                        ExistingWorkPolicy.KEEP,
-                        clusterRequest
-                    )
-                    .enqueue()
+            // Pipeline chaining — order is images → cluster → videos → Arabic:
+            //  • after IMAGE indexing → enqueue face clustering,
+            //  • after VIDEO indexing → enqueue the Arabic pass (only if there's pending OCR),
+            //  • after the Arabic pass → end of chain.
+            when {
+                !reOcrOnly && !videoOnly -> {
+                    val clusterRequest = OneTimeWorkRequestBuilder<FaceClusteringWorker>()
+                        .setBackoffCriteria(
+                            androidx.work.BackoffPolicy.LINEAR,
+                            5,
+                            java.util.concurrent.TimeUnit.MINUTES
+                        ).build()
+                    WorkManager.getInstance(applicationContext)
+                        .beginUniqueWork(
+                            "GalleryClustering_OneTime",
+                            ExistingWorkPolicy.KEEP,
+                            clusterRequest
+                        )
+                        .enqueue()
+                }
+                videoOnly -> {
+                    // Skip the Arabic hand-off if we exited because of a pause (the video pass returns
+                    // on pause) — otherwise Arabic could run on partially-indexed videos. On resume the
+                    // whole images → cluster → videos → Arabic chain re-runs, keeping the order intact.
+                    if (!isPaused && service.hasPendingArabicOcr()) service.startArabicOcrWorkManager()
+                }
             }
 
             Result.success()

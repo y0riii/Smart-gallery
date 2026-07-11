@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.SearchOff
@@ -133,7 +134,7 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
                         modifier = Modifier.weight(1f)
                     )
                     IconButton(onClick = { showDuplicatesInfo = true }) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = "Remove duplicates")
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Group duplicates")
                     }
                     IconButton(onClick = { showSettings = true }) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
@@ -272,6 +273,21 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
                             .weight(1f)
                             .padding(start = 16.dp)
                     )
+                    // Info: enabled only when exactly one item is selected (size / path / albums);
+                    // greyed out and non-clickable while multiple are selected.
+                    val infoEnabled = viewModel.selectedUris.size == 1
+                    IconButton(
+                        onClick = { viewModel.showMediaInfo(viewModel.selectedUris.first()) },
+                        enabled = infoEnabled
+                    ) {
+                        Icon(
+                            Icons.Default.Info,
+                            contentDescription = "Info",
+                            tint = if (infoEnabled) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
                     IconButton(onClick = { viewModel.shareSelectedImages(context) }) {
                         Icon(
                             Icons.Default.Share,
@@ -357,25 +373,26 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
         )
     }
 
-    // ── Remove duplicates: explain → scan → confirm count → delete ──────────────
-    // Step 1: explain what the action does, before doing anything.
+    // ── Group duplicates: explain → scan + group → result ──────────────────────
+    // Step 1: explain what the action does, before doing anything. Non-destructive: it only gathers
+    // duplicates into an album for review, nothing is deleted.
     if (showDuplicatesInfo) {
         AlertDialog(
             onDismissRequest = { showDuplicatesInfo = false },
-            title = { Text("Remove duplicates") },
+            title = { Text("Group duplicates") },
             text = {
                 Text(
                     "This scans your whole gallery for duplicate photos and videos — exact copies of " +
-                        "the same file. For each set of duplicates it keeps the earliest one and " +
-                        "permanently deletes the rest from your device. You'll see how many were found " +
-                        "and confirm before anything is deleted."
+                        "the same file — and gathers every version of each (the original and all its " +
+                        "copies, side by side) into an album called \"Detected Duplicates\" so you can " +
+                        "review them. Nothing is deleted."
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
                     showDuplicatesInfo = false
-                    viewModel.scanForDuplicates()
-                }) { Text("Scan for duplicates") }
+                    viewModel.groupDuplicates()
+                }) { Text("Group duplicates") }
             },
             dismissButton = {
                 TextButton(onClick = { showDuplicatesInfo = false }) { Text("Cancel") }
@@ -383,11 +400,11 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
         )
     }
 
-    // Step 2: progress while scanning (hashing files can take a moment on large libraries).
-    if (viewModel.isScanningDuplicates) {
+    // Step 2: progress while scanning + grouping (hashing files can take a moment on large libraries).
+    if (viewModel.isGroupingDuplicates) {
         AlertDialog(
             onDismissRequest = { },
-            title = { Text("Scanning for duplicates") },
+            title = { Text("Grouping duplicates") },
             text = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp))
@@ -399,36 +416,31 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
         )
     }
 
-    // Step 3: show the result — either "none found" or a confirm-to-delete with the count.
-    viewModel.duplicateScanResult?.let { dupes ->
-        if (dupes.isEmpty()) {
-            AlertDialog(
-                onDismissRequest = { viewModel.dismissDuplicateResult() },
-                title = { Text("No duplicates found") },
-                text = { Text("Your gallery has no duplicate photos or videos.") },
-                confirmButton = {
-                    TextButton(onClick = { viewModel.dismissDuplicateResult() }) { Text("OK") }
-                }
-            )
-        } else {
-            val plural = if (dupes.size == 1) "" else "s"
-            AlertDialog(
-                onDismissRequest = { viewModel.dismissDuplicateResult() },
-                title = { Text("Remove ${dupes.size} duplicate$plural?") },
-                text = {
-                    Text(
-                        "Found ${dupes.size} duplicate item$plural. The earliest copy of each is kept; " +
-                            "the rest will be permanently deleted from your device."
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = { viewModel.confirmRemoveDuplicates() }) { Text("Remove") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { viewModel.dismissDuplicateResult() }) { Text("Cancel") }
-                }
-            )
-        }
+    // Step 3: show the result — how many were grouped (or none found).
+    viewModel.duplicatesGroupedCount?.let { count ->
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissDuplicatesResult() },
+            title = { Text(if (count == 0) "No duplicates found" else "Duplicates grouped") },
+            text = {
+                Text(
+                    if (count == 0) {
+                        "Your gallery has no duplicate photos or videos."
+                    } else {
+                        "Grouped $count duplicate item${if (count == 1) "" else "s"} into the " +
+                            "\"Detected Duplicates\" album (in the Albums tab). Nothing was deleted — " +
+                            "review them there and delete any copies you don't want."
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.dismissDuplicatesResult() }) { Text("OK") }
+            }
+        )
+    }
+
+    // Single-item Info panel (size / path / albums), shown from the selection bar.
+    viewModel.mediaInfo?.let { info ->
+        MediaInfoDialog(info = info, onDismiss = { viewModel.dismissMediaInfo() })
     }
 
     // Feature 1: Back cancels selection mode (only when not in full screen)

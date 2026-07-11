@@ -48,14 +48,15 @@ fun tutorialContentFor(tab: TutorialTab): TutorialContent = when (tab) {
             "The first time you open the app, it scans all your photos — and your videos — so it can search them. This can take a while if you have a lot, so just leave it running.",
             "You can follow how it's going on the progress bar at the bottom of the screen and in the notification (it shows photos first, then videos).",
             "Tap Pause or Resume on the notification anytime — processing picks up right where it left off.",
-            "Tap the duplicates icon (top-right, next to the gear) to find and remove exact-duplicate photos and videos — it keeps the earliest copy of each and asks before deleting anything.",
+            "Tap the duplicates icon (top-right, next to the gear) to find exact-duplicate photos and videos and gather every copy of each into a \"Detected Duplicates\" album (in the Albums tab) for review — nothing is deleted.",
             "Once processed, type what you're looking for in plain words, like \"sunset at the beach\", and AI finds matching photos.",
             "Flip the toggle to Document search to find text inside pictures — receipts, notes, screenshots.",
             "Turn on \"Search in videos\" to include videos in your searches too (off by default — it searches photos only).",
             "Type \"@\" then a name to find photos of a specific person.",
             "Tap the date field to narrow results to a time range.",
             "Tap the gear icon (top-right) for Settings — switch between Light, Dark, or System theme, toggle automatic face re-grouping, and turn on Arabic text search.",
-            "Long-press a photo to select or drag to select several, then share, delete, or add them to a collection."
+            "Long-press a photo to select or drag to select several, then share, delete, or add them to an album.",
+            "With exactly one photo selected — here or inside any folder — tap the Info icon to see its size, file path, and which albums it's in."
         )
     )
     TutorialTab.PEOPLE -> TutorialContent(
@@ -66,7 +67,7 @@ fun tutorialContentFor(tab: TutorialTab): TutorialContent = when (tab) {
         tips = listOf(
             "Tap a person to see every photo they appear in.",
             "Tap the name to rename them, e.g. from \"#p1\" to \"Mom\".",
-            "Select two or more groups and tap Merge if the same person was split up.",
+            "Long-press people to select them — then tap Rename to rename one, or Merge two or more that are the same person.",
             "People keep appearing as your photos finish processing — it can take a while on first launch."
         )
     )
@@ -77,8 +78,8 @@ fun tutorialContentFor(tab: TutorialTab): TutorialContent = when (tab) {
             "photo for you — no manual sorting.",
         tips = listOf(
             "Tap Create and type a theme like \"food\", \"cars\", or \"mountains\".",
-            "The app scans your library and automatically adds the photos that match.",
-            "Open an album anytime; newly matching photos are added as they're indexed."
+            "The app scans your library and automatically adds whatever matches — both photos and videos.",
+            "Open an album anytime; newly matching photos and videos are added as they're indexed."
         )
     )
     TutorialTab.ALBUMS -> TutorialContent(
@@ -89,7 +90,8 @@ fun tutorialContentFor(tab: TutorialTab): TutorialContent = when (tab) {
         tips = listOf(
             "Tap any folder or album to browse everything inside it.",
             "Tap Create to make your own album, then long-press photos anywhere and choose \"Add to album\".",
-            "Open one of your own albums and tap Delete to remove it — your photos are never deleted from the device.",
+            "Long-press one of your own albums to select it, then tap Rename to rename it or Delete to remove it — your photos are never deleted from the device.",
+            "The \"Detected Duplicates\" album is filled for you when you use Group duplicates on the Home screen — it gathers every copy of each duplicate, side by side, for easy review.",
             "Once a folder is open, you can search or filter within it."
         )
     )

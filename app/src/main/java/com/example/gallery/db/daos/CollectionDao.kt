@@ -32,6 +32,28 @@ interface CollectionDao {
     @Query("DELETE FROM collection WHERE id = :collectionId")
     suspend fun deleteCollection(collectionId: Long)
 
+    @Query("UPDATE collection SET name = :name WHERE id = :collectionId")
+    suspend fun updateCollectionName(collectionId: Long, name: String)
+
+    /** Removes ALL members of a collection (used to rebuild the auto "Detected Duplicates" album). */
+    @Query("DELETE FROM collection_media_join WHERE collectionId = :collectionId")
+    suspend fun clearCollectionMembers(collectionId: Long)
+
+    /** All member cross-refs of a collection (used to re-home members when merging albums). */
+    @Query("SELECT * FROM collection_media_join WHERE collectionId = :collectionId")
+    suspend fun getCrossRefsForCollection(collectionId: Long): List<CollectionMediaCrossRef>
+
+    /** Names of the user albums a given media item currently belongs to (for the single-item Info panel). */
+    @Query(
+        """
+        SELECT c.name FROM collection AS c
+        JOIN collection_media_join AS j ON c.id = j.collectionId
+        WHERE j.mediaId = :mediaId
+        ORDER BY c.name
+        """
+    )
+    suspend fun getCollectionNamesForMedia(mediaId: Long): List<String>
+
     @Query(
         """
         SELECT

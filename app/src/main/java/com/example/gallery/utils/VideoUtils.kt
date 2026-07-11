@@ -88,17 +88,19 @@ object VideoUtils {
     }
 
     /**
-     * Scans videos in a specific album (bucket), with optional date filter.
+     * Scans videos in a device folder identified by its DISPLAY NAME (not BUCKET_ID), with an optional
+     * date filter. Selecting by name merges same-named folders at different paths (e.g. legacy vs
+     * scoped-storage "WhatsApp Videos") into one album.
      */
-    fun scanAlbumVideos(
+    fun scanAlbumVideosByName(
         context: Context,
-        bucketId: Long,
+        bucketName: String,
         fromDate: Long? = null,
         toDate: Long? = null
     ): List<Long> {
         val list = mutableListOf<Long>()
-        val clauses = mutableListOf("${MediaStore.Video.Media.BUCKET_ID} = ?")
-        val args = mutableListOf(bucketId.toString())
+        val clauses = mutableListOf("${MediaStore.Video.Media.BUCKET_DISPLAY_NAME} = ?")
+        val args = mutableListOf(bucketName)
 
         if (fromDate != null) {
             clauses.add("${MediaStore.Video.Media.DATE_ADDED} >= ?")

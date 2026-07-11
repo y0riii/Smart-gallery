@@ -65,9 +65,14 @@ class GalleryViewModel(
     fun updateArabicOcrEnabled(enabled: Boolean) {
         prefs().edit().putBoolean(GalleryService.PREF_ARABIC_OCR, enabled).apply()
         arabicOcrEnabled = enabled
-        // Kick the pipeline so it runs index → cluster → Arabic OCR (the Arabic step now sees the
-        // flag and scans the library). No-op indexing/clustering just chain straight through.
-        if (enabled) service.startIndexingWorkManager()
+        if (enabled) {
+            // Kick the pipeline so it runs index → cluster → videos → Arabic OCR (the Arabic step now
+            // sees the flag and scans the library). No-op indexing/clustering just chain straight through.
+            service.startIndexingWorkManager()
+        } else {
+            // Stop any pending/running Arabic pass so it doesn't linger showing its notification.
+            service.cancelArabicOcrWork()
+        }
     }
 
     // Settings: periodic full re-cluster (drift correction after every 300 new faces). On by default.
@@ -98,46 +103,39 @@ class GalleryViewModel(
     private fun prefs() = service.context
         .getSharedPreferences("gallery_prefs", android.content.Context.MODE_PRIVATE)
 
-    // ── Remove duplicates ───────────────────────────────────────────────────────
-    // Scan the whole gallery for byte-identical photos/videos, keep the earliest of each set, and
-    // delete the rest. Two steps so the user sees a count before anything is removed: scan → confirm.
+    // ── Group duplicates ─────────────────────────────────────────────────────────
+    // Scan the whole gallery for byte-identical photos/videos and gather EVERY version of each set
+    // (original + all copies, adjacent) into the reserved "Detected Duplicates" user album. This is
+    // non-destructive — it only organizes for review, it never deletes.
 
-    /** True while the (potentially slow) duplicate scan is running — drives a progress dialog. */
-    var isScanningDuplicates by mutableStateOf(false)
+    /** True while the (potentially slow) duplicate scan + grouping is running — drives a progress dialog. */
+    var isGroupingDuplicates by mutableStateOf(false)
         private set
 
-    /** Result of the last scan: the URIs that WOULD be deleted (empty = none found). Non-null means
-     *  "show the result dialog"; the UI clears it via [confirmRemoveDuplicates] or [dismissDuplicateResult]. */
-    var duplicateScanResult by mutableStateOf<List<Uri>?>(null)
+    /** Number of duplicate items grouped by the last run (0 = none found); null = no result dialog. */
+    var duplicatesGroupedCount by mutableStateOf<Int?>(null)
         private set
 
-    /** Scans the entire library for exact duplicates; publishes the result to [duplicateScanResult]. */
-    fun scanForDuplicates() {
-        if (isScanningDuplicates) return
+    /** Scans for exact duplicates and gathers them into the "Detected Duplicates" album; publishes the
+     *  grouped count for a result dialog. */
+    fun groupDuplicates() {
+        if (isGroupingDuplicates) return
         viewModelScope.launch {
-            isScanningDuplicates = true
-            val dupes = try {
-                withContext(Dispatchers.IO) { service.findDuplicateUrisToDelete() }
+            isGroupingDuplicates = true
+            val count = try {
+                withContext(Dispatchers.IO) { service.groupDuplicatesIntoAlbum() }
             } catch (e: Exception) {
-                emptyList()
+                0
             } finally {
-                isScanningDuplicates = false
+                isGroupingDuplicates = false
             }
-            duplicateScanResult = dupes
+            duplicatesGroupedCount = count
         }
     }
 
-    /** Confirms deletion of the duplicates from the last scan (earliest copy of each is kept). Routes
-     *  through the shared batched delete-request flow, so the system shows its own confirmation. */
-    fun confirmRemoveDuplicates() {
-        val dupes = duplicateScanResult ?: return
-        duplicateScanResult = null
-        deleteUris(dupes)
-    }
-
-    /** Dismisses the duplicate-scan result dialog without deleting anything. */
-    fun dismissDuplicateResult() {
-        duplicateScanResult = null
+    /** Dismisses the group-duplicates result dialog. */
+    fun dismissDuplicatesResult() {
+        duplicatesGroupedCount = null
     }
 
     // Feature 4: use the sort-order-consistent query so the @mention dropdown everywhere

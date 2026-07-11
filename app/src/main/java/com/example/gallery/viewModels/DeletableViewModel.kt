@@ -85,6 +85,34 @@ abstract class DeletableViewModel(protected val service: GalleryService) : ViewM
         selectedUris = emptySet()
     }
 
+    // ── Single-item "Info" panel (size / path / albums) ────────────────────────
+    /** The media whose Info panel is currently shown; null = hidden. Set via [showMediaInfo]. */
+    var mediaInfo by mutableStateOf<GalleryService.MediaInfo?>(null)
+        private set
+
+    /** True while the Info details are being loaded (brief). */
+    var isLoadingMediaInfo by mutableStateOf(false)
+        private set
+
+    /** Loads and shows the Info panel for [uri] (name, size, path, and the albums it's in). */
+    fun showMediaInfo(uri: Uri) {
+        viewModelScope.launch {
+            isLoadingMediaInfo = true
+            mediaInfo = try {
+                service.getMediaInfo(uri)
+            } catch (e: Exception) {
+                null
+            } finally {
+                isLoadingMediaInfo = false
+            }
+        }
+    }
+
+    /** Hides the Info panel. */
+    fun dismissMediaInfo() {
+        mediaInfo = null
+    }
+
     // ── Full-screen navigation ─────────────────────────────────────────────────
 
     fun openFullScreen(index: Int) {

@@ -91,6 +91,8 @@ fun PeopleFoldersScreen(
                 )
             }
         },
+        // Every person folder is renameable (it just updates the person's name).
+        onRenameFolder = { bucketId, newName -> peopleViewModel.renameFolder(bucketId, newName) },
         nameThumbnails = nameThumbnails,   // Feature 5: avatar map for the @mention dropdown
         onAddToCollection = onAddToCollection
     )

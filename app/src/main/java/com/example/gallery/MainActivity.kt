@@ -70,6 +70,8 @@ import com.example.gallery.db.AppDatabase
 import com.example.gallery.folders.AlbumsFolderRepository
 import com.example.gallery.folders.CategoryFolderRepository
 import com.example.gallery.folders.PersonFolderRepository
+import com.example.gallery.folders.collectionIdOf
+import com.example.gallery.folders.isUserAlbumBucket
 import androidx.compose.foundation.isSystemInDarkTheme
 import com.example.gallery.ui.theme.AppConfig
 import com.example.gallery.ui.theme.GalleryTheme
@@ -456,10 +458,11 @@ fun GalleryApp(
     if (showCollectionPicker) {
         CollectionPickerDialog(
             collections = availableCollections,
-            // Album favorites are stored under the folder's negative bucketId (= -collectionId);
-            // map them back to positive collection ids so the picker highlights the right ones.
+            // Album favorites are stored under the user-album bucketId; map them back to Room
+            // collection ids so the picker highlights the right ones (device-folder favorites, which
+            // are not user albums, are dropped).
             favoriteCollectionIds = albumsViewModel.favoriteFolderIds
-                .mapNotNull { if (it < 0) -it else null }.toSet(),
+                .mapNotNull { if (isUserAlbumBucket(it)) collectionIdOf(it) else null }.toSet(),
             onDismiss = {
                 showCollectionPicker = false
                 pendingUrisForCollection = emptySet()

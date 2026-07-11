@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
@@ -67,6 +68,8 @@ fun ImageGridScreen(
     onDeleteSelected: () -> Unit = {},
     onShareSelected: () -> Unit = {},
     onAddToCollectionSelected: (() -> Unit)? = null,
+    // Shown only when exactly one item is selected; opens its Info panel (size / path / albums).
+    onInfoSelected: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
 
@@ -155,6 +158,21 @@ fun ImageGridScreen(
                         .weight(1f)
                         .padding(start = 16.dp)
                 )
+
+                // Info: enabled only when exactly one item is selected (size / path / albums); greyed
+                // out and non-clickable while multiple are selected.
+                if (onInfoSelected != null) {
+                    val infoEnabled = selectedUris.size == 1
+                    IconButton(onClick = onInfoSelected, enabled = infoEnabled) {
+                        Icon(
+                            Icons.Default.Info,
+                            contentDescription = "Info",
+                            tint = if (infoEnabled) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
 
                 // Share selected images
                 // Context is available here via LocalContext for the share intent

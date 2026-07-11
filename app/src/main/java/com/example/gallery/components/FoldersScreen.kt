@@ -122,6 +122,11 @@ fun FoldersScreen(
     folderGridHeader: @Composable ColumnScope.() -> Unit = {},
     selectedFolderActions: @Composable RowScope.(FolderItem) -> Unit = {},
     additionalSelectionActions: @Composable RowScope.() -> Unit = {},
+    // Rename from the folder MULTI-SELECT bar: non-null adds a Rename icon (enabled only when exactly
+    // one renameable folder is selected). null = the tab has no selection-bar rename (e.g. AI Albums).
+    onRenameFolder: ((bucketId: Long, newName: String) -> Unit)? = null,
+    // Which folders can be renamed (e.g. People: all; Albums: only user-created ones).
+    isFolderRenameable: (FolderItem) -> Boolean = { true },
     // Feature: customizable empty state
     emptyStateIcon: ImageVector = Icons.Default.PhotoAlbum,
     emptyStateTitle: String = "No items yet",
@@ -142,6 +147,10 @@ fun FoldersScreen(
     val coroutineScope = rememberCoroutineScope()
 
     var showSortMenu by remember { mutableStateOf(false) }
+
+    // The folder targeted by the multi-select "Rename" action (null = dialog hidden). Captured on tap
+    // so the dialog keeps a stable target even if the selection somehow changes underneath it.
+    var folderRenameTarget by remember { mutableStateOf<FolderItem?>(null) }
 
     val intentSenderLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -531,7 +540,8 @@ fun FoldersScreen(
                         onDeleteSelected = { viewModel.deleteSelectedImages() },
                         // Feature 1: share — pass context available in this composable scope
                         onShareSelected = { viewModel.shareSelectedImages(context) },
-                        onAddToCollectionSelected = { onAddToCollection(viewModel.selectedUris) }
+                        onAddToCollectionSelected = { onAddToCollection(viewModel.selectedUris) },
+                        onInfoSelected = { viewModel.showMediaInfo(viewModel.selectedUris.first()) }
                     )
 
                     if (viewModel.isLoading && viewModel.images.isEmpty()) {
@@ -585,6 +595,28 @@ fun FoldersScreen(
         }
     }
 
+    // Single-item Info panel (size / path / albums), shown from the open-folder selection bar.
+    viewModel.mediaInfo?.let { info ->
+        MediaInfoDialog(info = info, onDismiss = { viewModel.dismissMediaInfo() })
+    }
+
+    // Rename dialog for the multi-select "Rename" folder action.
+    folderRenameTarget?.let { target ->
+        if (onRenameFolder != null) {
+            CustomDialog(
+                placeholder = "Name",
+                currentText = target.name,
+                confirmText = "Rename",
+                onDismiss = { folderRenameTarget = null },
+                onConfirm = { newName ->
+                    onRenameFolder(target.bucketId, newName)
+                    folderRenameTarget = null
+                    viewModel.clearFolderSelection()
+                }
+            )
+        }
+    }
+
     AnimatedVisibility(
         visible = viewModel.isSelectingFolders && selectedFolder == null,
         enter = slideInVertically(
@@ -610,6 +642,27 @@ fun FoldersScreen(
                     .weight(1f)
                     .padding(start = 16.dp)
             )
+
+            // Rename: only for tabs that support it (People, user albums). Enabled only when exactly
+            // one renameable folder is selected; greyed out for multi-select or a non-renameable
+            // folder (device folder).
+            if (onRenameFolder != null) {
+                val singleFolder = viewModel.selectedFolderBucketIds.singleOrNull()
+                    ?.let { id -> viewModel.folders.find { it.bucketId == id } }
+                val renameEnabled = singleFolder != null && isFolderRenameable(singleFolder)
+                IconButton(
+                    onClick = { folderRenameTarget = singleFolder },
+                    enabled = renameEnabled
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Rename folder",
+                        tint = if (renameEnabled) MaterialTheme.colorScheme.primary
+                        else Color.Gray.copy(alpha = 0.5f)
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+            }
 
             additionalSelectionActions()
 
