@@ -44,6 +44,14 @@ android {
     buildFeatures {
         compose = true
     }
+
+    // Keep ONNX models (.ort) UNCOMPRESSED in the APK so they can be memory-mapped directly from it
+    // (ModelAssets.mappedModel) instead of being copied to internal storage — no on-disk duplication
+    // and no large Java-heap allocation at load. .ort is already near-incompressible, so the APK size
+    // impact is minimal.
+    androidResources {
+        noCompress += "ort"
+    }
 }
 
 // Export Room schemas to a tracked directory so future schema changes can ship real

@@ -6,7 +6,7 @@ import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.graphics.Bitmap
 import androidx.core.graphics.scale
-import com.example.gallery.ml.OrtAcceleration
+import com.example.gallery.ml.ModelAssets
 import com.example.gallery.utils.VectorUtils
 import java.lang.AutoCloseable
 import java.nio.ByteBuffer
@@ -39,49 +39,24 @@ class ClipImageEncoder(context: Context) : AutoCloseable {
     private val session: OrtSession
 
     init {
-        val modelBytes = context.assets.open("image_model.ort").readBytes()
-        val modelKey = "clip_image"
+        // Memory-map the model straight from the APK (no copy, off-heap), so large models don't
+        // balloon the Java heap and OOM on low-RAM devices.
+        val modelBuffer = ModelAssets.mappedModel(context, "image_model.ort")
 
-        fun buildCpuSession(): OrtSession {
-            return try {
-                val options = OrtSession.SessionOptions().apply {
-                    setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-                }
-                options.use { env.createSession(modelBytes, it) }
-            } catch (e: Throwable) {
-                android.util.Log.e("ClipImageEncoder", "Failed to initialize session, falling back to defaults", e)
-                env.createSession(modelBytes)
-            }
-        }
-
-        fun buildNnapiSession(): OrtSession? = try {
+        // CLIP runs on CPU ONLY — never NNAPI. On some budget SoCs (e.g. entry MediaTek/Unisoc) the
+        // NNAPI driver runs CLIP fast but numerically WRONG, producing near-identical garbage
+        // embeddings that make semantic search rank the whole gallery as equally relevant. CPU (ONNX
+        // Runtime's reference implementation) is correct on every device, and CLIP is small enough
+        // that the cost is acceptable. It's also critical that the image and text encoders use the
+        // SAME backend so their embeddings share one space — CPU for both guarantees that.
+        session = try {
             val options = OrtSession.SessionOptions().apply {
-                addNnapi()
                 setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
             }
-            options.use { env.createSession(modelBytes, it) }
+            options.use { env.createSession(modelBuffer.duplicate(), it) }
         } catch (e: Throwable) {
-            android.util.Log.e("ClipImageEncoder", "NNAPI session unavailable, will use CPU", e)
-            null
-        }
-
-        fun dummyInput(): OnnxTensor {
-            floatBuffer.rewind()
-            return OnnxTensor.createTensor(
-                env, floatBuffer, longArrayOf(1, 3, IMAGE_SIZE.toLong(), IMAGE_SIZE.toLong())
-            )
-        }
-
-        session = when (OrtAcceleration.cachedDecision(context, modelKey)) {
-            true -> buildNnapiSession() ?: buildCpuSession()
-            false -> buildCpuSession()
-            null -> OrtAcceleration.pickFasterSession(
-                context, modelKey,
-                cpuSession = buildCpuSession(),
-                nnapiSession = buildNnapiSession(),
-                inputName = "image",
-                makeInput = ::dummyInput
-            )
+            android.util.Log.e("ClipImageEncoder", "Failed to initialize session, falling back to defaults", e)
+            OrtSession.SessionOptions().use { env.createSession(modelBuffer.duplicate(), it) }
         }
     }
 

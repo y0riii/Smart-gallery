@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
+import android.os.PowerManager
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
@@ -52,8 +53,8 @@ class GalleryIndexerWorker(
         @Volatile
         var isArabicPass = false
 
-        // True while normal indexing is in its VIDEO phase (after photos) — makes the notification
-        // say "videos" instead of "photos". Set/cleared by GalleryService.processAndIndexVideos.
+        // True while normal indexing is in its VIDEO phase (after images) — makes the notification
+        // say "videos" instead of "images". Set/cleared by GalleryService.processAndIndexVideos.
         @Volatile
         var isVideoPass = false
 
@@ -102,7 +103,7 @@ class GalleryIndexerWorker(
                     "Gallery Indexing",
                     NotificationManager.IMPORTANCE_LOW
                 ).apply {
-                    description = "Shown while Smart Gallery indexes your photos in the background."
+                    description = "Shown while Smart Gallery indexes your images in the background."
                     setShowBadge(false)
                 }
                 manager.createNotificationChannel(channel)
@@ -121,12 +122,10 @@ class GalleryIndexerWorker(
             return Result.success()
         }
 
-        // Set before the first notification so even "Preparing…" uses the right wording.
-        isArabicPass = reOcrOnly
-        isVideoPass = videoOnly
-
+        // The initial "Preparing…" notification uses this worker's own mode (not the shared flags,
+        // which are set only inside the lock below).
         try {
-            setForeground(createForegroundInfo(0, 0))
+            setForeground(createForegroundInfo(0, 0, arabic = reOcrOnly, video = videoOnly))
         } catch (e: Exception) {
             Log.e("GalleryIndexerWorker", "setForeground failed (non-fatal)", e)
         }
@@ -134,12 +133,27 @@ class GalleryIndexerWorker(
         val notificationManager = applicationContext
             .getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
+        // Hold a partial wake lock for the whole pass so the CPU keeps running when the screen is off
+        // — the foreground service alone doesn't prevent SoC suspend, which is what stalls background
+        // indexing on low-end devices. Released in finally; the OS reclaims it if the process is killed.
+        val powerManager = applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager
+        val wakeLock = powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK, "SmartGallery:Indexing"
+        )
+        wakeLock.acquire()
+
         return try {
             val service = GalleryService.getInstance(applicationContext)
             // Indexing shares the ML lock with clustering: if a clustering pass is already running,
             // this simply waits for it to finish, then runs.
             GalleryService.mlExecutionLock.withLock {
                 GalleryService.isIndexingRunning = true
+                // Set the notification-wording flags ONLY while holding the lock, so another worker
+                // waiting for the lock can't stomp them (which made the video pass show "images").
+                // For the same reason they are NOT reset in finally — the next worker to acquire the
+                // lock overwrites them, and between runs no progress notification reads them.
+                isArabicPass = reOcrOnly
+                isVideoPass = videoOnly
                 // Throttle progress/notification updates: firing setProgress() (a WorkManager DB
                 // write) and notificationManager.notify() (a cross-process call) on every single
                 // image is a real cost on large libraries. Update at most every PROGRESS_UPDATE_MS,
@@ -187,19 +201,25 @@ class GalleryIndexerWorker(
             //  • after the Arabic pass → end of chain.
             when {
                 !reOcrOnly && !videoOnly -> {
-                    val clusterRequest = OneTimeWorkRequestBuilder<FaceClusteringWorker>()
-                        .setBackoffCriteria(
-                            androidx.work.BackoffPolicy.LINEAR,
-                            5,
-                            java.util.concurrent.TimeUnit.MINUTES
-                        ).build()
-                    WorkManager.getInstance(applicationContext)
-                        .beginUniqueWork(
-                            "GalleryClustering_OneTime",
-                            ExistingWorkPolicy.KEEP,
-                            clusterRequest
-                        )
-                        .enqueue()
+                    // Skip the clustering hand-off if we exited because of a pause (the image pass
+                    // returns on pause) — otherwise clustering would run while the user has paused.
+                    // On resume the image worker re-runs, finishes, and enqueues clustering then, so
+                    // the images → cluster → videos → Arabic order is preserved.
+                    if (!isPaused) {
+                        val clusterRequest = OneTimeWorkRequestBuilder<FaceClusteringWorker>()
+                            .setBackoffCriteria(
+                                androidx.work.BackoffPolicy.LINEAR,
+                                5,
+                                java.util.concurrent.TimeUnit.MINUTES
+                            ).build()
+                        WorkManager.getInstance(applicationContext)
+                            .beginUniqueWork(
+                                "GalleryClustering_OneTime",
+                                ExistingWorkPolicy.KEEP,
+                                clusterRequest
+                            )
+                            .enqueue()
+                    }
                 }
                 videoOnly -> {
                     // Skip the Arabic hand-off if we exited because of a pause (the video pass returns
@@ -214,16 +234,20 @@ class GalleryIndexerWorker(
             Log.e("GalleryIndexerWorker", "Indexing failed, will retry", e)
             Result.retry()
         } finally {
-            // Clear the wording flags once the pass is fully done (a mid-pause worker is still inside
-            // the try above, so this only runs when work actually completes/cancels).
-            isArabicPass = false
-            isVideoPass = false
+            if (wakeLock.isHeld) wakeLock.release()
         }
+        // NOTE: the wording flags are intentionally NOT reset here — resetting them would clobber the
+        // flags of a different worker that has already picked up the lock. The next worker sets them.
     }
 
     private fun createForegroundInfo(
         processed: Int,
-        total: Int
+        total: Int,
+        // Default to the shared flags (correct for progress updates, which fire only from the worker
+        // holding the lock). The initial "Preparing…" call passes explicit values so it's right even
+        // before the flags are set inside the lock.
+        arabic: Boolean = isArabicPass,
+        video: Boolean = isVideoPass
     ): ForegroundInfo {
         ensureChannel(applicationContext)
 
@@ -239,14 +263,14 @@ class GalleryIndexerWorker(
         val pauseAction = Notification.Action.Builder(pauseIcon, "", pausePendingIntent).build()
 
         val contentText = when {
-            total == 0 && isArabicPass -> "Preparing Arabic text scan…"
-            total == 0 && isVideoPass -> "Preparing video indexing…"
-            total == 0 -> "Preparing Image indexing…"
-            // Arabic pass runs images first, then videos; isVideoPass marks the video phase so the
+            total == 0 && arabic -> "Preparing Arabic text scan…"
+            total == 0 && video -> "Preparing video indexing…"
+            total == 0 -> "Preparing image indexing…"
+            // Arabic pass runs images first, then videos; `video` marks the video phase so the
             // user sees Arabic move on to videos instead of it being silent.
-            isArabicPass && isVideoPass -> "Scanned $processed of $total videos for Arabic text"
-            isArabicPass -> "Scanned $processed of $total images for Arabic text"
-            isVideoPass -> "Indexed $processed of $total videos"
+            arabic && video -> "Scanned $processed of $total videos for Arabic text"
+            arabic -> "Scanned $processed of $total images for Arabic text"
+            video -> "Indexed $processed of $total videos"
             else -> "Indexed $processed of $total images"
         }
 

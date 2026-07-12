@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.ServiceInfo
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
@@ -44,6 +45,15 @@ class FaceClusteringWorker(
             Log.e(TAG, "setForeground failed (non-fatal)", e)
         }
 
+        // Hold a partial wake lock while clustering runs — like indexing, the foreground service keeps
+        // the process alive but doesn't stop the CPU suspending when the screen is off. Released in
+        // finally; reclaimed by the OS if the process dies.
+        val powerManager = applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager
+        val wakeLock = powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK, "SmartGallery:Clustering"
+        )
+        wakeLock.acquire()
+
         return try {
             val galleryService = GalleryService.getInstance(applicationContext)
             var didRun = false
@@ -71,13 +81,9 @@ class FaceClusteringWorker(
             Log.e(TAG, "Clustering failed", e)
             nm.cancel(NOTIFICATION_ID)
             Result.retry()
+        } finally {
+            if (wakeLock.isHeld) wakeLock.release()
         }
-    }
-
-    private fun createForegroundInfo(): ForegroundInfo {
-        createNotificationChannel()
-        val notification = buildNotification()
-        return ForegroundInfo(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
     }
 
     private fun buildNotification(): Notification {
@@ -99,7 +105,7 @@ class FaceClusteringWorker(
                 "Face Clustering",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shown while Smart Gallery clusters detected faces."
+                description = "Shown while Smart Gallery clusters detected faces in the background."
                 setShowBadge(false)
             }
             manager.createNotificationChannel(channel)

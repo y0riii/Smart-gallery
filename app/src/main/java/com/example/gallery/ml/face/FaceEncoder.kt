@@ -7,6 +7,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import androidx.core.graphics.scale
+import com.example.gallery.ml.ModelAssets
 import com.example.gallery.ml.OrtAcceleration
 import java.lang.AutoCloseable
 import java.nio.ByteBuffer
@@ -31,7 +32,8 @@ class FaceEncoder(context: Context) : AutoCloseable {
     private val session: OrtSession
 
     init {
-        val modelBytes = context.assets.open("MobileFaceNet.ort").readBytes()
+        // Memory-map the model straight from the APK (no copy, off-heap) to keep the Java heap small.
+        val modelBuffer = ModelAssets.mappedModel(context, "MobileFaceNet.ort")
         val modelKey = "face_encoder"
 
         fun buildCpuSession(): OrtSession {
@@ -39,10 +41,10 @@ class FaceEncoder(context: Context) : AutoCloseable {
                 val options = OrtSession.SessionOptions().apply {
                     setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
                 }
-                options.use { env.createSession(modelBytes, it) }
+                options.use { env.createSession(modelBuffer.duplicate(), it) }
             } catch (e: Throwable) {
                 android.util.Log.e("FaceEncoder", "Failed to initialize session, falling back to defaults", e)
-                env.createSession(modelBytes)
+                OrtSession.SessionOptions().use { env.createSession(modelBuffer.duplicate(), it) }
             }
         }
 
@@ -51,7 +53,7 @@ class FaceEncoder(context: Context) : AutoCloseable {
                 addNnapi()
                 setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
             }
-            options.use { env.createSession(modelBytes, it) }
+            options.use { env.createSession(modelBuffer.duplicate(), it) }
         } catch (e: Throwable) {
             android.util.Log.e("FaceEncoder", "NNAPI session unavailable, will use CPU", e)
             null

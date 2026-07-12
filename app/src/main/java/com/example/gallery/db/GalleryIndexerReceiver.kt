@@ -68,7 +68,7 @@ class GalleryIndexerReceiver : BroadcastReceiver() {
             .setContentTitle("Smart Gallery")
             .setContentText(
                 if (GalleryIndexerWorker.isArabicPass) "Resuming Arabic text scan…"
-                else "Resuming photo indexing…"
+                else "Resuming image indexing…"
             )
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
