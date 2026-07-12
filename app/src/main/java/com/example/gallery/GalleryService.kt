@@ -217,7 +217,7 @@ class GalleryService private constructor(val context: Context) {
 
         // How many images to accumulate before committing them in one DB transaction.
         // Batching amortizes the per-commit fsync cost that dominates indexing on large libraries.
-        private const val INDEX_BATCH_SIZE = 10
+        private const val INDEX_BATCH_SIZE = 1
 
         // Opt-in flag (default off): Arabic OCR via Tesseract is slow, so it only runs when the
         // user enables it in settings. Kept in the shared gallery_prefs file.
