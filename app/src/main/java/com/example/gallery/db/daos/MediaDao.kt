@@ -66,8 +66,10 @@ interface MediaDao {
 
     // IMAGES only (isVideo = 0): the Arabic pass decodes an image per row, which can't work on a
     // video URI — including videos here would leave them permanently "pending" and retried forever.
-    /** Image rows not yet scanned by the Arabic OCR pass (the exact "pending" set), id + text only. */
-    @Query("SELECT mediaId, ocrText FROM media_items WHERE isVideo = 0 AND mediaId NOT IN (SELECT mediaId FROM arabic_ocr_done)")
+    /** Image rows not yet scanned by the Arabic OCR pass (the exact "pending" set), id + text only.
+     *  Newest-added first (timestampMs DESC) so recently-added photos become Arabic-searchable
+     *  soonest — matching the newest-first order of image/video indexing. */
+    @Query("SELECT mediaId, ocrText FROM media_items WHERE isVideo = 0 AND mediaId NOT IN (SELECT mediaId FROM arabic_ocr_done) ORDER BY timestampMs DESC, mediaId DESC")
     suspend fun getMediaPendingArabic(): List<MediaOcrRef>
 
     /** Count of image rows not yet Arabic-scanned (cheap check before enqueuing the pass). */
@@ -76,8 +78,9 @@ interface MediaDao {
 
     // Videos get their Arabic scan in the SAME Arabic OCR pass, as a second phase after images. Only
     // fully-indexed videos (LENGTH(embedding) > 0) qualify — a placeholder has no frames to sample yet.
-    /** Indexed-video rows not yet Arabic-scanned (the video half of the Arabic pass), id + text only. */
-    @Query("SELECT mediaId, ocrText FROM media_items WHERE isVideo = 1 AND LENGTH(embedding) > 0 AND mediaId NOT IN (SELECT mediaId FROM arabic_ocr_done)")
+    /** Indexed-video rows not yet Arabic-scanned (the video half of the Arabic pass), id + text only.
+     *  Newest-added first (timestampMs DESC), consistent with the images phase and video indexing. */
+    @Query("SELECT mediaId, ocrText FROM media_items WHERE isVideo = 1 AND LENGTH(embedding) > 0 AND mediaId NOT IN (SELECT mediaId FROM arabic_ocr_done) ORDER BY timestampMs DESC, mediaId DESC")
     suspend fun getVideosPendingArabic(): List<MediaOcrRef>
 
     /** Count of indexed-video rows not yet Arabic-scanned (cheap check before enqueuing the pass). */

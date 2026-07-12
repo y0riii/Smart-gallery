@@ -8,6 +8,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.core.net.toUri
 import androidx.lifecycle.viewModelScope
 import com.example.gallery.GalleryService
+import com.example.gallery.db.GalleryIndexerWorker
 import com.example.gallery.db.daos.PersonDao
 import com.example.gallery.ui.theme.ThemeMode
 import kotlinx.coroutines.Dispatchers
@@ -98,6 +99,18 @@ class GalleryViewModel(
     fun updateThemeMode(mode: ThemeMode) {
         prefs().edit().putString(GalleryService.PREF_THEME_MODE, mode.name).apply()
         themeMode = mode
+    }
+
+    /**
+     * Settings action: force an immediate re-scan of the device for new/changed media. This is
+     * NON-destructive — it does not wipe the index; the indexer diffs the device against the DB and
+     * processes only what's new or missing (and drops rows for deleted media). Also clears any pause
+     * so a previously-paused run resumes. Useful when the user just added photos and wants them
+     * processed now, or to nudge a stalled background pass.
+     */
+    fun rescanLibrary() {
+        GalleryIndexerWorker.isPaused = false
+        service.startIndexingWorkManager(force = true)
     }
 
     private fun prefs() = service.context

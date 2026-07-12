@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+      Android 12+ (API 31+) shows a system splash screen automatically on cold start. Here we simply
+      brand it — the app-icon foreground on the launcher-background colour — so the launch looks
+      intentional instead of a bare window. This is additive: it uses only platform splash attributes
+      under the values-v31 qualifier, needs no library or code, and leaves the base theme (used on
+      API 29–30, which have no system splash) completely unchanged.
+    -->
+    <style name="Theme.Gallery" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowSplashScreenBackground">@color/ic_launcher_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+    </style>
+</resources>

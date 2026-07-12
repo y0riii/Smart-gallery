@@ -64,6 +64,7 @@ import androidx.work.WorkManager
 import com.example.gallery.components.AlbumsFoldersScreen
 import com.example.gallery.components.CategoryFoldersScreen
 import com.example.gallery.components.GalleryScreen
+import com.example.gallery.components.PartialAccessBanner
 import com.example.gallery.components.PeopleFoldersScreen
 import com.example.gallery.components.PermissionRequestScreen
 import com.example.gallery.db.AppDatabase
@@ -211,6 +212,22 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * True on Android 14+ when the user granted only "selected photos" access — i.e.
+ * READ_MEDIA_VISUAL_USER_SELECTED is granted but full READ_MEDIA_IMAGES is not. Drives the
+ * "you've shared only some photos" banner. Always false below Android 14 (no partial access there).
+ */
+private fun isPartialMediaAccess(context: android.content.Context): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return false
+    val selectedGranted = ContextCompat.checkSelfPermission(
+        context, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+    ) == PackageManager.PERMISSION_GRANTED
+    val fullGranted = ContextCompat.checkSelfPermission(
+        context, Manifest.permission.READ_MEDIA_IMAGES
+    ) == PackageManager.PERMISSION_GRANTED
+    return selectedGranted && !fullGranted
+}
+
 private fun getPermissionsToRequest(): Array<String> {
     val permissions = mutableListOf<String>()
 
@@ -241,6 +258,10 @@ fun GalleryApp(
 ) {
 
     var hasPermission by remember { mutableStateOf(false) }
+    // Android 14+ "selected photos" (partial) access → drives the PartialAccessBanner. Refreshed
+    // whenever a permission request completes and when access is (re)granted.
+    val appContext = LocalContext.current
+    var partialAccess by remember { mutableStateOf(false) }
     val pagerState = rememberPagerState(pageCount = { 4 })
     val coroutineScope = rememberCoroutineScope()
     val currentTab = if (hasPermission) pagerState.currentPage else 0
@@ -274,6 +295,7 @@ fun GalleryApp(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
         hasPermission = result.values.any { it }
+        partialAccess = isPartialMediaAccess(appContext)
     }
 
     val progress by GalleryService.progress.collectAsState()
@@ -284,6 +306,7 @@ fun GalleryApp(
 
     LaunchedEffect(hasPermission) {
         if (hasPermission) {
+            partialAccess = isPartialMediaAccess(appContext)
             galleryViewModel.onPermissionGranted()
             peopleViewModel.onPermissionGranted()
             categoryViewModel.onPermissionGranted()
@@ -346,6 +369,22 @@ fun GalleryApp(
             if (hasPermission && !isFullScreen && !isSelecting && !isSelectingFolders) {
                 Column {
                     progress?.let {
+                        // Label the bar with the specific pass that's running (mirrors the
+                        // notification wording) so users can see what the app is doing. The flags are
+                        // set per pass by GalleryIndexerWorker; they're re-read on each progress tick,
+                        // which is emitted continuously while a pass runs.
+                        val phaseLabel = when (GalleryIndexerWorker.currentPhase()) {
+                            GalleryIndexerWorker.IndexingPhase.ARABIC_VIDEOS -> "Scanning videos for Arabic text"
+                            GalleryIndexerWorker.IndexingPhase.ARABIC_IMAGES -> "Scanning images for Arabic text"
+                            GalleryIndexerWorker.IndexingPhase.VIDEOS -> "Indexing videos"
+                            GalleryIndexerWorker.IndexingPhase.IMAGES -> "Indexing images"
+                        }
+                        Text(
+                            text = "$phaseLabel… ${(it * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
+                        )
                         LinearProgressIndicator(
                             progress = { it },
                             modifier = Modifier
@@ -433,21 +472,31 @@ fun GalleryApp(
                     onRequestPermission = { permissionLauncher.launch(permissionsToRequest) }
                 )
             } else {
-                HorizontalPager(
-                    state = pagerState,
-                    userScrollEnabled = pagerScrollEnabled,
-                    modifier = Modifier.fillMaxSize()
-                ) { page ->
-                    when (page) {
-                        0 -> GalleryScreen(galleryViewModel, onAddToCollection = onAddToCollection)
-                        1 -> PeopleFoldersScreen(
-                            peopleViewModel,
-                            allNames,
-                            onAddToCollection = onAddToCollection,
-                            onRecluster = { galleryService.forceRecluster() }
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Android 14+ partial-access notice (only shown when the user shared some photos).
+                    if (partialAccess) {
+                        PartialAccessBanner(
+                            onManage = { permissionLauncher.launch(permissionsToRequest) }
                         )
-                        2 -> CategoryFoldersScreen(categoryViewModel, allNames, onAddToCollection = onAddToCollection)
-                        3 -> AlbumsFoldersScreen(albumsViewModel, allNames, onAddToCollection = onAddToCollection)
+                    }
+                    HorizontalPager(
+                        state = pagerState,
+                        userScrollEnabled = pagerScrollEnabled,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                    ) { page ->
+                        when (page) {
+                            0 -> GalleryScreen(galleryViewModel, onAddToCollection = onAddToCollection)
+                            1 -> PeopleFoldersScreen(
+                                peopleViewModel,
+                                allNames,
+                                onAddToCollection = onAddToCollection,
+                                onRecluster = { galleryService.forceRecluster() }
+                            )
+                            2 -> CategoryFoldersScreen(categoryViewModel, allNames, onAddToCollection = onAddToCollection)
+                            3 -> AlbumsFoldersScreen(albumsViewModel, allNames, onAddToCollection = onAddToCollection)
+                        }
                     }
                 }
             }

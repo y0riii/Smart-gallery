@@ -8,11 +8,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
@@ -37,6 +42,10 @@ fun SettingsDialog(
     onAutoReclusterChange: (Boolean) -> Unit,
     arabicOcrEnabled: Boolean,
     onArabicOcrChange: (Boolean) -> Unit,
+    /** App version string (e.g. "1.0") shown in the About section. */
+    appVersion: String,
+    /** Forces an immediate, non-destructive re-scan of the device for new/changed media. */
+    onRescan: () -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
@@ -117,6 +126,59 @@ fun SettingsDialog(
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
+
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(12.dp))
+
+                // ── Library ───────────────────────────────────────────────────
+                Text("Library", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = "Check the device for new or changed photos and videos and process " +
+                        "anything that's missing. This won't erase what's already indexed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(10.dp))
+                // Prominent, full-width filled button so the re-scan action is easy to find.
+                Button(
+                    onClick = onRescan,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Re-scan library")
+                }
+
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(12.dp))
+
+                // ── Privacy ───────────────────────────────────────────────────
+                Text("Privacy", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = "Smart Gallery works entirely on your device. Your photos and videos are " +
+                        "analyzed locally and never leave your phone — nothing is uploaded, and the " +
+                        "app needs no internet connection.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(12.dp))
+
+                // ── About ─────────────────────────────────────────────────────
+                Text("About", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = "Smart Gallery • Version $appVersion",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } }

@@ -3,6 +3,7 @@ package com.example.gallery.components
 import android.app.Activity
 import android.content.Context
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -52,6 +53,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
+import com.example.gallery.GalleryService
 import com.example.gallery.ui.theme.AppConfig
 import com.example.gallery.viewModels.GalleryViewModel
 
@@ -73,6 +75,17 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
     val fullScreenIndex = viewModel.fullScreenIndex
     val gridState = rememberLazyGridState()
     val context = LocalContext.current
+
+    // Live indexing progress (0f..1f while a pass runs, null when idle) — used to tell the user that
+    // sparse search results are because indexing is still in flight, not because search is broken.
+    val indexingProgress by GalleryService.progress.collectAsState()
+
+    // App version for the Settings → About row (read once from the package manager).
+    val appVersion = remember {
+        runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull() ?: ""
+    }
 
     // ── Feature 2: column count persisted in SharedPreferences ──────────────
     var columnCount by remember {
@@ -234,13 +247,21 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
                     )
 
                     if (viewModel.images.isEmpty() && !viewModel.isSearching) {
+                        // While a pass is running, tell the user sparse results are due to indexing
+                        // still being in progress (not a broken search) — this is the exact confusion
+                        // that made search "return nothing" on a slow device mid-index.
+                        val indexingPct = indexingProgress?.let { (it * 100).toInt() }
                         EmptyState(
                             icon = if (isFilterActive) Icons.Default.SearchOff else Icons.Default.PhotoLibrary,
                             title = if (isFilterActive) "No matches" else "No photos yet",
-                            subtitle = if (isFilterActive) {
-                                "Try a different search or clear the filters."
-                            } else {
-                                "Your photos will appear here once they've been processed."
+                            subtitle = when {
+                                isFilterActive && indexingPct != null ->
+                                    "Still indexing your library ($indexingPct%). Search results will " +
+                                        "improve as it finishes."
+                                isFilterActive -> "Try a different search or clear the filters."
+                                indexingPct != null ->
+                                    "Indexing your library ($indexingPct%). Your photos will appear here as it runs."
+                                else -> "Your photos will appear here once they've been processed."
                             }
                         )
                     }
@@ -369,6 +390,12 @@ fun GalleryScreen(viewModel: GalleryViewModel, onAddToCollection: (Set<Uri>) -> 
             onAutoReclusterChange = { viewModel.updateAutoReclusterEnabled(it) },
             arabicOcrEnabled = viewModel.arabicOcrEnabled,
             onArabicOcrChange = { viewModel.updateArabicOcrEnabled(it) },
+            appVersion = appVersion,
+            onRescan = {
+                viewModel.rescanLibrary()
+                showSettings = false
+                Toast.makeText(context, "Re-scanning your library…", Toast.LENGTH_SHORT).show()
+            },
             onDismiss = { showSettings = false }
         )
     }

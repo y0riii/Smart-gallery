@@ -174,7 +174,7 @@ fun SearchBar(
                                 modifier = Modifier.fillMaxWidth(),
                                 trailingIcon = {
                                     IconButton(onClick = { showFromPicker = true }) {
-                                        Icon(Icons.Default.DateRange, null)
+                                        Icon(Icons.Default.DateRange, contentDescription = "Pick start date")
                                     }
                                 },
                                 shape = RoundedCornerShape(AppConfig.SearchFieldCornerRadius),
@@ -205,7 +205,7 @@ fun SearchBar(
                                 modifier = Modifier.fillMaxWidth(),
                                 trailingIcon = {
                                     IconButton(onClick = { showToPicker = true }) {
-                                        Icon(Icons.Default.DateRange, null)
+                                        Icon(Icons.Default.DateRange, contentDescription = "Pick end date")
                                     }
                                 },
                                 shape = RoundedCornerShape(AppConfig.SearchFieldCornerRadius),

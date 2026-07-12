@@ -28,6 +28,10 @@ class GalleryIndexerWorker(
     workerParams: WorkerParameters
 ) : CoroutineWorker(appContext, workerParams) {
 
+    /** Which indexing pass is currently active. Single source of truth shared by the foreground
+     *  notification and the in-app progress bar, so their wording can never disagree on the phase. */
+    enum class IndexingPhase { IMAGES, VIDEOS, ARABIC_IMAGES, ARABIC_VIDEOS }
+
     companion object {
         const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID = "gallery_indexing_channel"
@@ -59,6 +63,23 @@ class GalleryIndexerWorker(
         var isVideoPass = false
 
         /**
+         * Maps the two phase flags to a single [IndexingPhase]. Every surface (foreground
+         * notification, paused notification, in-app progress bar) derives its wording from THIS one
+         * function, so they can never disagree about which pass is running. Takes the flags as
+         * parameters so callers can pass explicit values (e.g. the initial "Preparing…" notification,
+         * before the shared flags are set inside the lock).
+         */
+        fun phaseOf(arabic: Boolean, video: Boolean): IndexingPhase = when {
+            arabic && video -> IndexingPhase.ARABIC_VIDEOS
+            arabic -> IndexingPhase.ARABIC_IMAGES
+            video -> IndexingPhase.VIDEOS
+            else -> IndexingPhase.IMAGES
+        }
+
+        /** [phaseOf] applied to the live flags — used by the paused notification and the in-app bar. */
+        fun currentPhase(): IndexingPhase = phaseOf(isArabicPass, isVideoPass)
+
+        /**
          * Immediately post the "paused" notification, reusing the same
          * NOTIFICATION_ID so it replaces the active one in-place.
          */
@@ -79,7 +100,12 @@ class GalleryIndexerWorker(
             val notification = Notification.Builder(context, CHANNEL_ID)
                 .setContentTitle("Smart Gallery")
                 .setContentText(
-                    if (isArabicPass) "Arabic text scan is paused" else "Image indexing is paused"
+                    when (currentPhase()) {
+                        IndexingPhase.ARABIC_VIDEOS -> "Arabic text scan (videos) is paused"
+                        IndexingPhase.ARABIC_IMAGES -> "Arabic text scan (images) is paused"
+                        IndexingPhase.VIDEOS -> "Video indexing is paused"
+                        IndexingPhase.IMAGES -> "Image indexing is paused"
+                    }
                 )
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setOngoing(true)
@@ -266,12 +292,14 @@ class GalleryIndexerWorker(
             total == 0 && arabic -> "Preparing Arabic text scan…"
             total == 0 && video -> "Preparing video indexing…"
             total == 0 -> "Preparing image indexing…"
-            // Arabic pass runs images first, then videos; `video` marks the video phase so the
-            // user sees Arabic move on to videos instead of it being silent.
-            arabic && video -> "Scanned $processed of $total videos for Arabic text"
-            arabic -> "Scanned $processed of $total images for Arabic text"
-            video -> "Indexed $processed of $total videos"
-            else -> "Indexed $processed of $total images"
+            // Progress wording is derived from the SAME phaseOf() the in-app bar uses, so the two
+            // always agree on the pass. Arabic runs images first, then videos.
+            else -> when (phaseOf(arabic, video)) {
+                IndexingPhase.ARABIC_VIDEOS -> "Scanned $processed of $total videos for Arabic text"
+                IndexingPhase.ARABIC_IMAGES -> "Scanned $processed of $total images for Arabic text"
+                IndexingPhase.VIDEOS -> "Indexed $processed of $total videos"
+                IndexingPhase.IMAGES -> "Indexed $processed of $total images"
+            }
         }
 
         val notification = Notification.Builder(applicationContext, CHANNEL_ID)

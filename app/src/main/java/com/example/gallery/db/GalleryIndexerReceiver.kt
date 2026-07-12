@@ -67,8 +67,11 @@ class GalleryIndexerReceiver : BroadcastReceiver() {
         val notification = Notification.Builder(context, GalleryIndexerWorker.CHANNEL_ID)
             .setContentTitle("Smart Gallery")
             .setContentText(
-                if (GalleryIndexerWorker.isArabicPass) "Resuming Arabic text scan…"
-                else "Resuming image indexing…"
+                when (GalleryIndexerWorker.currentPhase()) {
+                    GalleryIndexerWorker.IndexingPhase.ARABIC_VIDEOS -> "Resuming Arabic text scan (videos)…"
+                    GalleryIndexerWorker.IndexingPhase.ARABIC_IMAGES -> "Resuming Arabic text scan (images)…"
+                    else -> "Resuming image indexing…"
+                }
             )
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
