@@ -73,7 +73,7 @@ class GalleryIndexerReceiver : BroadcastReceiver() {
                     else -> "Resuming image indexing…"
                 }
             )
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.mipmap.ic_launcher_app)
             .setOngoing(true)
             .addAction(pauseAction)
             .setStyle(

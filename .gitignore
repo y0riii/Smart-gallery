@@ -26,3 +26,8 @@ tessdata/
 # Packaged app binaries
 *.apk
 *.aab
+
+# Release signing — NEVER commit the keystore or its passwords.
+keystore.properties
+*.jks
+*.keystore

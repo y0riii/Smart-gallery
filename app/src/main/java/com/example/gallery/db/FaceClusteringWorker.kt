@@ -90,7 +90,7 @@ class FaceClusteringWorker(
         return NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setContentTitle("Smart Gallery")
             .setContentText("Clustering faces…")
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.mipmap.ic_launcher_app)
             .setOngoing(true)
             .setProgress(0, 0, true)
             .build()

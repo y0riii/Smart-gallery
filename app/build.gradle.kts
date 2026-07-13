@@ -1,4 +1,6 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.io.FileInputStream
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -8,18 +10,43 @@ plugins {
     id("com.google.devtools.ksp") version "2.2.21-2.0.4"
 }
 
+// Release-signing credentials are read from keystore.properties at the project root (kept OUT of
+// git — see .gitignore). If that file is absent (e.g. a fresh clone without the keystore), the
+// release build falls back to debug signing so the project still builds — see buildTypes.release.
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val hasReleaseKeystore = keystorePropertiesFile.exists()
+val keystoreProperties = Properties().apply {
+    if (hasReleaseKeystore) FileInputStream(keystorePropertiesFile).use { load(it) }
+}
+
 android {
     namespace = "com.example.gallery"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.gallery"
+        // Permanent installed identity (Play/website). Kept separate from `namespace` (which stays
+        // com.example.gallery), so no source files or imports need to move. Do not change post-release.
+        applicationId = "com.smartgallery.app"
         minSdk = 29
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        // Only define a "release" config when the keystore is present, so the project still builds
+        // without it (falling back to debug signing below). Fill keystore.properties from the
+        // committed keystore.properties.template.
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
@@ -29,7 +56,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            // Use the real release key when keystore.properties is present; otherwise fall back to
+            // the debug key so the build never breaks. Ship public releases only with the real key.
+            signingConfig = if (hasReleaseKeystore)
+                signingConfigs.getByName("release")
+            else
+                signingConfigs.getByName("debug")
         }
     }
     compileOptions {
