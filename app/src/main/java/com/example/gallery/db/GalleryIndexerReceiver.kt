@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
 import android.util.Log
+import androidx.work.WorkManager
 import com.example.gallery.GalleryService
 import com.example.gallery.R
 
@@ -38,6 +39,28 @@ class GalleryIndexerReceiver : BroadcastReceiver() {
                     service.startIndexingWorkManager(force = false)
                 }
             }
+
+            "com.example.gallery.ACTION_STOP_INDEXING" -> {
+                Log.d("GalleryIndexerReceiver", "Stopping all indexing/clustering workers")
+                
+                // 1. Cancel all unique indexing and clustering works
+                val wm = WorkManager.getInstance(context)
+                wm.cancelUniqueWork("GalleryIndexing_OneTime")
+                wm.cancelUniqueWork("GalleryVideoIndexing_OneTime")
+                wm.cancelUniqueWork("GalleryArabicOcr_OneTime")
+                wm.cancelUniqueWork("GalleryClustering_OneTime")
+
+                // 2. Reset running states and progress flow
+                GalleryIndexerWorker.isPaused = false
+                GalleryService.progress.value = null
+                GalleryService.isIndexingRunning = false
+                GalleryService.isClusteringRunning = false
+
+                // 3. Dismiss notifications
+                val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.cancel(GalleryIndexerWorker.NOTIFICATION_ID)
+                nm.cancel(FaceClusteringWorker.NOTIFICATION_ID)
+            }
         }
     }
 
@@ -52,6 +75,16 @@ class GalleryIndexerReceiver : BroadcastReceiver() {
         }
 
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        val closeIntent = Intent(context, GalleryIndexerReceiver::class.java).apply {
+            action = "com.example.gallery.ACTION_STOP_INDEXING"
+        }
+        val closePendingIntent = PendingIntent.getBroadcast(
+            context, 2, closeIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val closeIcon = Icon.createWithResource(context, R.drawable.ic_notif_close)
+        val closeAction = Notification.Action.Builder(closeIcon, "", closePendingIntent).build()
 
         val pauseIntent = Intent(context, GalleryIndexerReceiver::class.java).apply {
             action = "com.example.gallery.ACTION_PAUSE_INDEXING"
@@ -76,9 +109,10 @@ class GalleryIndexerReceiver : BroadcastReceiver() {
             .setSmallIcon(R.drawable.ic_notification_logo)
             .setOngoing(true)
             .addAction(pauseAction)
+            .addAction(closeAction)
             .setStyle(
                 Notification.MediaStyle()
-                    .setShowActionsInCompactView(0)
+                    .setShowActionsInCompactView(0, 1)
             )
             .build()
 

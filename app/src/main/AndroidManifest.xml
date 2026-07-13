@@ -58,6 +58,7 @@
             <intent-filter>
                 <action android:name="com.example.gallery.ACTION_PAUSE_INDEXING" />
                 <action android:name="com.example.gallery.ACTION_START_INDEXING" />
+                <action android:name="com.example.gallery.ACTION_STOP_INDEXING" />
             </intent-filter>
         </receiver>
 

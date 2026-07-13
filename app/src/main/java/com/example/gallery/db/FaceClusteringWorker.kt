@@ -22,7 +22,7 @@ class FaceClusteringWorker(
 
     companion object {
         private const val TAG = "FaceClusteringWorker"
-        private const val NOTIFICATION_ID = 1002
+        const val NOTIFICATION_ID = 1002
         private const val CHANNEL_ID = "face_clustering_channel"
     }
 
