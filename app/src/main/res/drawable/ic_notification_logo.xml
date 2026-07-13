@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Notification small-icon variant of the logo. Uses a LIGHTER inset than the launcher foreground
+  (which needs ~20% to clear the adaptive/splash mask): in the small notification slot 20% looked
+  too small, and 0% looked too large, so this sits in between. Percentage (not dp) so it scales at
+  the tiny notification size. Tune here independently of the launcher icon.
+-->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@mipmap/ic_launcher_logo"
+    android:inset="8%" />

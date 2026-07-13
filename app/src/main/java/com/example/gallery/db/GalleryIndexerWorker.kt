@@ -107,7 +107,7 @@ class GalleryIndexerWorker(
                         IndexingPhase.IMAGES -> "Image indexing is paused"
                     }
                 )
-                .setSmallIcon(R.mipmap.ic_launcher_app)
+                .setSmallIcon(R.drawable.ic_notification_logo)
                 .setOngoing(true)
                 .addAction(playAction)
                 .setStyle(
@@ -305,7 +305,7 @@ class GalleryIndexerWorker(
         val notification = Notification.Builder(applicationContext, CHANNEL_ID)
             .setContentTitle("Smart Gallery")
             .setContentText(contentText)
-            .setSmallIcon(R.mipmap.ic_launcher_app)
+            .setSmallIcon(R.drawable.ic_notification_logo)
             .setOngoing(true)
             .addAction(pauseAction)
             .setStyle(

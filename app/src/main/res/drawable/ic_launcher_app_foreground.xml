@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The logo, padded so it fits inside the safe zone of every surface that clips to a circle/shape
+  (adaptive launcher icon, Android-12 splash, notification small icon). A PERCENTAGE inset is used
+  (not dp) so the padding scales correctly whether it's drawn large (108dp launcher) or tiny
+  (~24dp notification) — a fixed dp inset would swallow the whole logo at notification size.
+
+  Tune here if needed: larger % = smaller logo with more margin; smaller % = bigger logo.
+-->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@mipmap/ic_launcher_logo"
+    android:inset="20%" />
