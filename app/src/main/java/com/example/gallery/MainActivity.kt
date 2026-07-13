@@ -257,10 +257,17 @@ fun GalleryApp(
     galleryService: GalleryService
 ) {
 
-    var hasPermission by remember { mutableStateOf(false) }
+    // Check if we already have any media permission (full or partial) so we don't re-prompt on
+    // every app open. The permission dialog only shows when the user has zero media access.
+    val appContext = LocalContext.current
+    val alreadyGranted = remember {
+        getPermissionsToRequest().any { perm ->
+            ContextCompat.checkSelfPermission(appContext, perm) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+    var hasPermission by remember { mutableStateOf(alreadyGranted) }
     // Android 14+ "selected photos" (partial) access → drives the PartialAccessBanner. Refreshed
     // whenever a permission request completes and when access is (re)granted.
-    val appContext = LocalContext.current
     var partialAccess by remember { mutableStateOf(false) }
     val pagerState = rememberPagerState(pageCount = { 4 })
     val coroutineScope = rememberCoroutineScope()
@@ -295,13 +302,21 @@ fun GalleryApp(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
         hasPermission = result.values.any { it }
-        partialAccess = isPartialMediaAccess(appContext)
+        if (hasPermission) {
+            partialAccess = isPartialMediaAccess(appContext)
+            galleryViewModel.onPermissionGranted()
+            peopleViewModel.onPermissionGranted()
+            categoryViewModel.onPermissionGranted()
+            albumsViewModel.onPermissionGranted()
+        }
     }
 
     val progress by GalleryService.progress.collectAsState()
 
     LaunchedEffect(Unit) {
-        permissionLauncher.launch(permissionsToRequest)
+        if (!alreadyGranted) {
+            permissionLauncher.launch(permissionsToRequest)
+        }
     }
 
     LaunchedEffect(hasPermission) {
