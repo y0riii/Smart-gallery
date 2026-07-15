@@ -21,7 +21,6 @@ local.properties
 
 # Tesseract trained data (e.g. app/src/main/assets/tessdata/ara.traineddata) — matches at any depth.
 *.traineddata
-tessdata/
 
 # Packaged app binaries
 *.apk
