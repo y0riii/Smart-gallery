@@ -13,20 +13,5 @@
 .externalNativeBuild
 .cxx
 local.properties
-# Heavy ML model assets — kept out of the repo (distribute separately).
-# Covers image_model.ort, text_model.ort, MobileFaceNet.ort, and any future models.
-*.ort
-*.onnx
-*.tflite
-
-# Tesseract trained data (e.g. app/src/main/assets/tessdata/ara.traineddata) — matches at any depth.
-*.traineddata
-
-# Packaged app binaries
-*.apk
-*.aab
-
-# Release signing — NEVER commit the keystore or its passwords.
-keystore.properties
-*.jks
-*.keystore
+image_model.ort
+text_model.ort
