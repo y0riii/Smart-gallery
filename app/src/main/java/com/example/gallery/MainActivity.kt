@@ -57,7 +57,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.launch
-import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -192,18 +191,20 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun scheduleBackgroundIndexing() {
-        val constraints = Constraints.Builder()
-            .setRequiresBatteryNotLow(true)
-            .build()
-
+        // No constraints on the periodic trigger itself — it's nearly zero-cost (just enqueues a
+        // one-time worker). Gating it on battery level caused missed triggers (18 h+ gaps) because
+        // low battery + Doze + app standby buckets compounded the deferral. The actual heavy
+        // indexing worker is a foreground service with user-visible pause/stop controls.
         val indexingRequest =
             PeriodicWorkRequestBuilder<GalleryPeriodicTriggerWorker>(6, TimeUnit.HOURS)
-                .setConstraints(constraints)
                 .build()
 
+        // REPLACE so this constraint-free version supersedes any previously-scheduled one that had
+        // the (now-removed) battery constraint. After the first launch post-update the new trigger
+        // is in place and REPLACE just resets the 6-hour timer on every app open (harmless).
         WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
             "GalleryIndexing_Periodic",
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.REPLACE,
             indexingRequest
         )
 
