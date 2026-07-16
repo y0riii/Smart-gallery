@@ -23,7 +23,13 @@ class GalleryPeriodicTriggerWorker(
         // Route through the service so the priority flag (indexingRequested) is raised too — this
         // makes any in-progress Arabic OCR pass yield so the 6-hour indexing runs first, exactly
         // like an app-open trigger. KEEP semantics (force = false) so it won't stomp a running pass.
-        GalleryService.getInstance(applicationContext).startIndexingWorkManager(force = false)
+        try {
+            GalleryService.getInstance(applicationContext).startIndexingWorkManager(force = false)
+        } catch (e: Exception) {
+            // Non-fatal: if this trigger fails, the next 6-hour cycle or the next app open retries.
+            // Returning success (not retry/failure) avoids WorkManager backoff on the periodic work.
+            android.util.Log.e("GalleryPeriodicTrigger", "Failed to enqueue indexing", e)
+        }
         return Result.success()
     }
 

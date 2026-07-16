@@ -177,7 +177,9 @@ class GalleryIndexerWorker(
         val wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK, "SmartGallery:Indexing"
         )
-        wakeLock.acquire()
+        // Safety-net timeout (2 h): if the worker somehow hangs beyond all per-item safeguards, the
+        // OS auto-releases the lock so the CPU isn't held awake indefinitely.
+        wakeLock.acquire(2 * 60 * 60 * 1000L)
 
         return try {
             val service = GalleryService.getInstance(applicationContext)

@@ -52,7 +52,9 @@ class FaceClusteringWorker(
         val wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK, "SmartGallery:Clustering"
         )
-        wakeLock.acquire()
+        // Safety-net timeout (30 min): clustering is CPU-only math, so 30 minutes is generous.
+        // If it somehow hangs, the OS auto-releases the lock instead of draining the battery.
+        wakeLock.acquire(30 * 60 * 1000L)
 
         return try {
             val galleryService = GalleryService.getInstance(applicationContext)

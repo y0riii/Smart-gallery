@@ -118,6 +118,7 @@ class ArabicOcrProcessor(private val context: Context) : AutoCloseable {
     override fun close() {
         try { tess?.recycle() } catch (_: Throwable) { }
         tess = null
+        executor.shutdownNow()
     }
 
     /** Copies `<LANG>.traineddata` from assets to `<baseDir>/tessdata/` once (Tesseract reads a path). */
