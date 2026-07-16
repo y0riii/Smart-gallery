@@ -618,8 +618,8 @@ class GalleryService private constructor(val context: Context) {
                     if (frames.isNotEmpty()) {
                         processed = true
                         arText = withContext(Dispatchers.Default) {
-                            val texts = frames.mapNotNull {
-                                arabic.recognizeText(it)?.takeIf { t -> t.isNotBlank() }
+                            val texts = frames.mapNotNull { frame ->
+                                arabic.recognizeText(frame)?.takeIf { t -> t.isNotBlank() }
                             }
                             frames.forEach { it.recycle() }
                             texts.joinToString("\n").ifBlank { null }

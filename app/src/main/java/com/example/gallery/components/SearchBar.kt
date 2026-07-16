@@ -127,7 +127,7 @@ fun SearchBar(
             )
             Spacer(modifier = Modifier.width(8.dp))
 
-            if (prompt.text.isNotEmpty() || fromDate != null || toDate != null || searchActive) {
+            if (!isSearching && (prompt.text.isNotEmpty() || fromDate != null || toDate != null || searchActive)) {
                 TextButton(onClick = onClear) {
                     Text("Clear")
                 }

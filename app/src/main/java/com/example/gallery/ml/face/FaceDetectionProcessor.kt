@@ -79,19 +79,22 @@ class FaceDetectionProcessor : AutoCloseable {
     // ───────────────────────────── detection ─────────────────────────────
 
     suspend fun detectFaces(bitmap: Bitmap): List<Face> =
-        suspendCoroutine { cont ->
+        kotlinx.coroutines.suspendCancellableCoroutine { cont ->
             try {
                 val image = InputImage.fromBitmap(bitmap, 0)
                 detector.process(image)
-                    .addOnSuccessListener { faces ->
-                        val filtered = faces.filter { face ->
-                            isGoodFace(face)
+                    .addOnCompleteListener { task ->
+                        if (task.isSuccessful) {
+                            val filtered = task.result.filter { face ->
+                                isGoodFace(face)
+                            }
+                            if (cont.isActive) cont.resume(filtered)
+                        } else {
+                            if (cont.isActive) cont.resume(emptyList())
                         }
-                        cont.resume(filtered)
                     }
-                    .addOnFailureListener { cont.resume(emptyList()) }
             } catch (e: Exception) {
-                cont.resume(emptyList())
+                if (cont.isActive) cont.resume(emptyList())
             }
         }
 

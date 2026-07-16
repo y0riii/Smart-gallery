@@ -24,12 +24,17 @@ import java.lang.AutoCloseable
  * Note: Tesseract is best on clean printed/document Arabic and is slower than ML Kit; it runs per
  * image during indexing, so expect indexing to be somewhat slower when this is enabled.
  */
-class ArabicOcrProcessor(context: Context) : AutoCloseable {
+class ArabicOcrProcessor(private val context: Context) : AutoCloseable {
 
     // Null when Arabic OCR is unavailable (missing traineddata / init failure) → acts as disabled.
     private var tess: TessBaseAPI? = null
+    private var executor = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     init {
+        initTesseract()
+    }
+
+    private fun initTesseract() {
         try {
             val baseDir = File(context.filesDir, "tesseract")
             copyTrainedDataIfNeeded(context, baseDir)
@@ -62,16 +67,37 @@ class ArabicOcrProcessor(context: Context) : AutoCloseable {
     fun recognizeText(bitmap: Bitmap): String? {
         val api = tess ?: return null
         val gray = toGrayscale(bitmap)
+        
+        val future = executor.submit(java.util.concurrent.Callable {
+            try {
+                api.setImage(gray)
+                val text = api.getUTF8Text()?.trim()
+                val confidence = api.meanConfidence()
+                if (text.isNullOrEmpty() || confidence < MIN_CONFIDENCE) null else text
+            } catch (e: Throwable) {
+                Log.e(TAG, "Arabic OCR failed for a frame", e)
+                null
+            } finally {
+                try { api.clear() } catch (_: Throwable) { }
+            }
+        })
+
         return try {
-            api.setImage(gray)
-            val text = api.getUTF8Text()?.trim()
-            val confidence = api.meanConfidence()
-            if (text.isNullOrEmpty() || confidence < MIN_CONFIDENCE) null else text
-        } catch (e: Throwable) {
-            Log.e(TAG, "Arabic OCR failed for a frame", e)
+            future.get(5, java.util.concurrent.TimeUnit.MINUTES)
+        } catch (e: java.util.concurrent.TimeoutException) {
+            Log.e(TAG, "Tesseract native deadlock detected! Abandoning thread and instance.")
+            future.cancel(true)
+            executor.shutdownNow()
+            
+            // Re-create the thread pool and a brand new Tesseract instance for future images
+            executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+            tess = null
+            initTesseract()
+            null
+        } catch (e: Exception) {
+            Log.e(TAG, "Arabic OCR execution failed", e)
             null
         } finally {
-            try { api.clear() } catch (_: Throwable) { }
             if (gray !== bitmap) gray.recycle()
         }
     }
